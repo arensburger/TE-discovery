@@ -4,14 +4,15 @@
 use strict;
 use Getopt::Long;
 use File::Temp qw(tempfile);
+use FindBin::libs;  # this sets up that the directory lib will have all modules necessary to run the program 
+use TEdiscovery;    # these are the subcripts necessary to run the pipeline
 
-my $PIPELINE_SCRIPTS = "./TE_discovery_scripts"; # location of all scripts necessary for this pipeline
 my $INPUT_TE_SEQUENCES; # fasta formated file with input TE sequences
 my $INPUT_GENOME; # fasta formated file with genome that input TE sequences came from
 my $ANALYSIS_NAME; # name to give to this analysis, can be any string
-my $OUTPUT_DIR="./output_files"; # directory to store output files of current analysis (no slash at the end), these can be destroyed when analysis is finished
+my $TEMP_OUTPUT_DIR; # directory where analsysis output files of the analysis are stored, these are not destined to be permananet
 
-### VALIDATE INPUTS read and check the inputs
+### CHECK INPUTS read and check that the inputs have been provided
 GetOptions(
 	't:s'   => \$INPUT_TE_SEQUENCES,
 	'g:s'   => \$INPUT_GENOME,
@@ -20,15 +21,14 @@ GetOptions(
 unless (\$INPUT_TE_SEQUENCES and $INPUT_GENOME and $ANALYSIS_NAME) {
 	die "usage perl TEdiscovery.pl <-t fasta file with starting TE sequences REQUIRED> <-g fasta file of genome REQUIRED> <-n name for this analysis>\n";
 }
-
-### VALIDATE INPUTS check that the pipeline script folder exists
-unless (-d $PIPELINE_SCRIPTS) {
-    die "ERROR: Scripts directory below (pointed to in script) cannot be found:\n$PIPELINE_SCRIPTS\n";
+## CHECK INPUTS Create temporary output directory if necessary
+my $TEMP_OUTPUT_DIR="./$ANALYSIS_NAME-outfiles"; # directory to store output files of current analysis (no slash at the end), these can be destroyed when analysis is finished
+if (-d $TEMP_OUTPUT_DIR) {
+    warn "Directory $TEMP_OUTPUT_DIR already exists, using it for this analysis\n";
 }
-
-### VALIDATE INPUTS check that the output folder exists
-unless (-d $OUTPUT_DIR) {
-    die "ERROR: Folder for output files below (pointed to in script) cannot be found:\n$OUTPUT_DIR\n";
+else {
+    warn "Creating directory $TEMP_OUTPUT_DIR for temporary storage\n";
+    mkdir( $TEMP_OUTPUT_DIR ) or die "Couldn't create $TEMP_OUTPUT_DIR directory, $!";
 }
 
 ### PIPELINE STEP reduce redundancy of TE input sequences
