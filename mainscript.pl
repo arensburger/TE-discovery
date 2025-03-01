@@ -32,6 +32,6 @@ else {
 }
 
 ### PIPELINE STEP reduce redundancy of TE input sequences
-my $TE_non_redundant_filename = $OUTPUT_DIR . "/" . $ANALYSIS_NAME . "-TEnonredundant.fa"; # name of the non redundant file
+my $TE_non_redundant_filename = $TEMP_OUTPUT_DIR . "/" . $ANALYSIS_NAME . "-TEnonredundant.fa"; # name of the non redundant file
 `cd-hit-est -i $INPUT_TE_SEQUENCES -o $TE_non_redundant_filename -d 0 -aS 0.8 -c 0.8 -G 0 -g 1 -b 500 -T 0 -M 0`;
 if ($?) { die "Error executing: cd-hit-est, error code $?\n"}
