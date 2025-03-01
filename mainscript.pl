@@ -1,6 +1,6 @@
-# Feb 2025 This is the top level script to run the TE discovery pipeline. The inputs are a list of possible
-# TE sequences (e.g. from RepeatModeler) and a genome. The scripts necessary for running this should contained
-# in the directory $PIPELINE_SCRIPTS 
+# Feb 2025 - Top-level script for TE discovery pipeline
+# Inputs: List of TE sequences (FASTA) and a genome (FASTA)
+
 use strict;
 use Getopt::Long;
 use File::Temp qw(tempfile);
@@ -14,17 +14,20 @@ my $TEMP_OUTPUT_DIR; # directory where analsysis output files of the analysis ar
 my $START_STEP = 0; # analysis step to start at, by default is set to zero
 my $END_STEP = 100000; # analysis step to end at, by deault set to 1000000 (hopefully fewer than those number of steps)
 
-### CHECK INPUTS read and check that the inputs have been provided
+### CHECK INPUTS Read and check that the inputs have been provided
 GetOptions(
 	't:s'   => \$INPUT_TE_SEQUENCES,
 	'g:s'   => \$INPUT_GENOME,
     'n:s'   => \$ANALYSIS_NAME,
-    'a:s'   => \$START_STEP,
-    'b:s'   => \$END_STEP
-);
+    'a:i'   => \$START_STEP,
+    'b:i'   => \$END_STEP
+)
+
+## CHECK INPUTS Validate required input files
 unless (\$INPUT_TE_SEQUENCES and $INPUT_GENOME and $ANALYSIS_NAME) {
 	die "usage perl TEdiscovery.pl <-t fasta file with starting TE sequences REQUIRED> <-g fasta file of genome REQUIRED> <-n name for this analysis REQUIRED> <-a start the analysis at this step OPTIONAL> <-b end the analysis at this step OPTIONAL\n";
 }
+
 ## CHECK INPUTS Create temporary output directory if necessary
 my $TEMP_OUTPUT_DIR="./$ANALYSIS_NAME-outfiles"; # directory to store output files of current analysis (no slash at the end), these can be destroyed when analysis is finished
 if (-d $TEMP_OUTPUT_DIR) {
@@ -38,9 +41,9 @@ else {
 ### PIPELINE STEP 1 reduce redundancy of TE input sequences
 ### main output is a file called <ANALYSIS_NAME>-TEnonredundant.fa that has unique copies of the input file
 my $step_number = 1;
-if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not
-    print "Working on STEP $step_number ...\n";
+print "Working on STEP $step_number ...\n";
+if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
     my $TE_non_redundant_filename = $TEMP_OUTPUT_DIR . "/" . $ANALYSIS_NAME . "-TEnonredundant.fa"; # name of the non redundant file
- #   `cd-hit-est -i $INPUT_TE_SEQUENCES -o $TE_non_redundant_filename -d 0 -aS 0.8 -c 0.8 -G 0 -g 1 -b 500 -T 0 -M 0`;
+    `cd-hit-est -i $INPUT_TE_SEQUENCES -o $TE_non_redundant_filename -d 0 -aS 0.8 -c 0.8 -G 0 -g 1 -b 500 -T 0 -M 0`;
     if ($?) { die "Error executing: cd-hit-est, error code $?\n"}
 }
