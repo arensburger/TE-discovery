@@ -39,7 +39,7 @@ else {
 ### main output is a file called <ANALYSIS_NAME>-TEnonredundant.fa that has unique copies of the input file
 my $step_number = 1;
 if (($START_STEP >= $step_number) and ($END_STEP <= $step_number)) { # check if this step should be performed or not
-    print "Working on STEP $step_number ...\n"
+    print "Working on STEP $step_number ...\n";
     my $TE_non_redundant_filename = $TEMP_OUTPUT_DIR . "/" . $ANALYSIS_NAME . "-TEnonredundant.fa"; # name of the non redundant file
  #   `cd-hit-est -i $INPUT_TE_SEQUENCES -o $TE_non_redundant_filename -d 0 -aS 0.8 -c 0.8 -G 0 -g 1 -b 500 -T 0 -M 0`;
     if ($?) { die "Error executing: cd-hit-est, error code $?\n"}
