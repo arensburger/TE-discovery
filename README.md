@@ -1,2 +1,3 @@
 # TE-discovery
-updated thing2
+updated thing3
+
