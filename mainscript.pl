@@ -7,8 +7,15 @@ use File::Temp qw(tempfile);
 use FindBin::libs;  # this sets up that the directory lib will have all modules necessary to run the program 
 use TEdiscovery;    # these are the subcripts necessary to run the pipeline
 
-### CONSTANTS
+###      CONSTANTS hardware
 my $NUM_THREADS = 8; # number of threads to use
+
+### CONSTANTS filtering which proteins to keep for analysis
+###      using Goubert et al. as insparation and a tblastn keep hits that have the following characteristics 
+my $GENOME_IDENTITY = 80; # per protein, minimum percent identity between protein and genome
+my $COVERAGE_RATIO = 0.5; # per protein, minimum ratio of (blast match length) / (query length)
+my $COPY_NUMBER = 2; # minimum number of copies that hit different parts of the genome 
+my $MIN_DISTANCE = 10000; # if two elements are on the same chromosome, how far they have to be, to be considered different elements
 
 ### INPUTs from command line
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
@@ -42,22 +49,70 @@ else {
     mkdir( $TEMP_OUTPUT_DIR ) or die "Couldn't create $TEMP_OUTPUT_DIR directory, $!";
 }
 
-### PIPELINE STEP 1 identify proteins that match the genome in multiple locations
+### PIPELINE STEP 1 identify proteins that match the genome with high percent identity
+my %protein_ids; # holds the id the input proteins that passed the filtering tests as key and the number of copies that passed the test as values
 my $step_number = 1;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
     print "Working on STEP $step_number ...\n";
 
     ## Excute the tblastn search
-    `tblastn -query $INPUT_PROTEIN_SEQUENCES -db $INPUT_GENOME -outfmt "6 qseqid sseqid sstart send qseqid pident length qlen" -out $TEMP_OUTPUT_DIR/tblastn.o -num_threads $NUM_THREADS`;
+    `tblastn -query $INPUT_PROTEIN_SEQUENCES -db $INPUT_GENOME -outfmt "6 qseqid sseqid sstart send pident length qlen" -out $TEMP_OUTPUT_DIR/tblastn.o -num_threads $NUM_THREADS`;
     if ($?) { die "ERROR executing tblastn, stoping analysis: error code $?\n"}
 
-    ## Inspired by the Goubert et al. protocol, filter elements that 1) have >= 80% identity to genome, 2) have 50% length of the query, 3) occur multiple times
-    my $genome_identity = 80; # per protein, minimum percent identity between protein and genome
-    my $coverage_ratio = 0.5; # per protein, minimum ratio of (blast match length) / (query length)
-    my $copy_number = 2; # minimum number of copies that hit different parts of the genome 
+    ## Inspired by the Goubert et al. protocol, filter elements that 1) have >= 80% identity to genome, 2) have 50% length of the query, 3) are found at multiple locations
+    my %candidate_protein; # hash with protein name as key and string with chromosome and middle location of element on that chromsome
 
-    ### need keep only one copy of overlaping hits
-    
-#    `#awk '{OFS="\t"; if ($3 >= 80 && (($4/$13) > 0.5 )) {print $0,$4/$13}}' $TEMP_OUTPUT_DIR/blast.o > $TEMP_OUTPUT_DIR/good_blast.o`;
-#    if ($?) { die "ERROR executing awk, stoping analysis: error code $?\n"}
+    open (INPUT, "$TEMP_OUTPUT_DIR/tblastn.o") or die "ERROR: Cannot open file $TEMP_OUTPUT_DIR/tblastn.o\n";
+    while (my $line = <INPUT>) {
+        my $gi=0; # boolean, set to zero until the genome identity test is passed
+        my $cr=0; # boolean, set to zero until the coverage ratio test is passed
+        my $md=1; # boolean, set to one unless mininum distance test is failed
+
+        my @data = split "\t", $line;
+        my $middle_position = ($data[3] + $data[2])/2; # position of this element on this chromosome
+
+        if ($data[4] >= $GENOME_IDENTITY) { # test percent id
+            $gi=1;
+        }
+        if ($data[5]/$data[6] >= $COVERAGE_RATIO) { # test for length of the match
+            $cr=1;
+        }
+
+        # check if current element is close to a recorded one
+        if (exists $candidate_protein{$data[0]}) {
+            for my $i ( 0 .. $#{ $candidate_protein{$data[0]} } ) {
+                my @d2 = split "\t", $candidate_protein{$data[0]}[$i]; # @d2 holds the locus of a previous blast match
+                if ($data[1] eq $d2[0])  { # first check that the current and previous locus are on the same chromosome
+                    if ((abs($d2[1] - $middle_position)) <= $MIN_DISTANCE) { # second check if they close to each other
+                        $md = 0; 
+                    }
+                }
+            }
+        }
+
+        if ($gi and $cr and $md) { # if the current protein and locus combination passed all the tests then record it
+            push @{ $candidate_protein{$data[0]}}, "$data[1]\t$middle_position";
+            $protein_ids{$data[0]} = $#{$candidate_protein{$data[0]}} + 1; # update the hash %protein_ids with the current number of loci that passed the tests
+        }      
+    }
+    close INPUT;
+
+    # Write the resutls into the output file
+    my $output_file_name = "$TEMP_OUTPUT_DIR/results_s1.xls";
+    open (OUTPUT, '>', $output_file_name) or die "ERROR: Cannot write to $output_file_name\n";
+    my $i=0; # counts the number of output lines, to check if it's zero
+    foreach my $prot (keys %protein_ids) {
+        if ($protein_ids{$prot} >= $COPY_NUMBER) {
+            print OUTPUT "$prot\t$protein_ids{$prot}\n";
+            $i++;
+        }
+    }
+    close OUTPUT;
+
+    if ($i) {
+        print "Finished STEP $step_number and wrote $i identified candidates into file $output_file_name\n";
+    }
+    else {
+        warn "WARNING: STEP $step_number did not result in any identified candiates, no output produced\n";
+    }
 }
