@@ -7,6 +7,7 @@ use File::Temp qw(tempfile);
 use FindBin::libs;  # this sets up that the directory lib will have all modules necessary to run the program 
 use TEdiscovery;    # these are the subcripts necessary to run the pipeline
 use List::UtilsBy qw(max_by);
+use List::Util qw(max);
 
 ### CONSTANTS hardware
 my $NUM_THREADS = 8; # number of threads to use
@@ -19,6 +20,7 @@ my $COPY_NUMBER = 2; # IDENTIFYING PROTEINS, minimum number of copies that hit d
 my $MIN_DISTANCE = 10000;   # IDENTIFYING PROTEINS, if two elements are on the same chromosome, how far they have to be, to be considered different elements
                             # NOTE: the minimum distance should bigger than the $BLAST_EXTEND variable, to avoid having the same element recorded twice        
 my $BLAST_EXTEND = 2000; # IDENTIFYING PROTEINS, number of bp to extend on each side of the blast hit
+my $MAX_SEQUENCE_NUMBER = 100; # ALIGNING SEQUENCES maximum number of sequences to consider, to save time
 my $GAP_THRESHOLD=0.75; # REMOVING GAPS FROM ALIGNMENT, if an alignment position has this proportion or more of gaps, then remove it from the multiple sequence alignment
 my $CONSLEVEL=0.60; # MAKING CONSENSUS OF SEQUENCES sequence consensus level for consensus
 my $WINDOW_SIZE = 15; # MAKING CONSENSUS OF SEQUENCES size of the window looking for stretches of N's
@@ -26,6 +28,14 @@ my $SCAN_SIZE = 100; # MAKING CONSENSUS OF SEQUENCES number of bp to scan each s
 my $SCAN_PROP = 0.5; # MAKING CONSENSUS OF SEQUENCES mininum proportion of side scan that has to be N's to be a real N full edge
 my $MAX_WIN_N = 2; # MAKING CONSENSUS OF SEQUENCES maximum number of N's in the first window where the transition from N to non-N is
 my $EDGE_TEST_PROPORTION = 0.05; # TESTING CONSENSUS SEQUENCES how far from the edge of the consensus do the non-gap positions have to start
+my $SCAN_SIZE = 10; # IDENTIFYING TIR-TSDS number of bp to scan for TIRs from both ends
+my $MIN_MATCH = 8; # IDENTIFYING TIR-TSDS mininum number of postions that match to call something a TIR
+my $TIR_PROP_CUTOFF = 0.15; # IDENTIFYING TIR-TSDS proportion of elements with TIRs at which positions are reported
+my $MIN_PROPORTION_SEQ_WITH_TIR=0.25; #IDENTIFYING TIRs minumum proportion of total elements for a sequence that must contain proper TIRs to be considered a canditate
+my $MAX_TIR_PROPORTION=0.75; #IDENTIFYING TIRs how close to the maxium number of tirs do you have to be to qualify as a top TIR
+my $MAX_END_PROPORTION=0.75; #IDENTIFYING TIRs how close to maximum proportion of sequences with identical start and stop of tir sequences you can be to a top number
+my $MAX_TSD_PROPORTION=0.5; #IDENTIFYING TIRs how close to maxiumum number of TSDs to qualify as a top TSD sequence
+
 
 ### INPUTs from command line
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
@@ -71,7 +81,7 @@ else {
 }
 
 ## VARIABLES used by more than one step in the pipeline
-my $blast_output_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/tblastn.o";
+my $blast_output_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/tablastn.o"; 
 
 ### PIPELINE STEP 1 identify proteins that match the genome with parameters specified above under "CONSTANTS"
 ###     The output is a list of proteins for further analysis recorded in the file $output_file_name
@@ -166,7 +176,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     ## (for the sake of being modular, redoing this instead of just taking the data from the previous step)
     opendir(my $dh, $ELEMENT_FOLDER) or die "ERROR: Cannot open element folder $ELEMENT_FOLDER, $!";
     while (readdir $dh) {
-        unless ($_ =~ /^\./) { # prevents reading invivisible files or the . and .. files
+        unless ($_ =~ /^\./) { # prevents reading invisible files or the . and .. files
             push @elements, $_;
         }
     }
@@ -188,16 +198,26 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         open (README, ">$ELEMENT_FOLDER/$element_name/README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/README.txt\n";
 
         # STEP 2.2.1
-        # extend the blast hits, the output of this step is a fasta file ending in -extend.fa
+        # extend the blast hits
         my @blastlines = (); # holds all the relevant blast lines for this element
+        my $i; # counter of the number of blast lines for this element
         open (INPUT, $blast_output_file_name) or die "ERROR: cannot open file blast file output $blast_output_file_name\n";
         while (my $line = <INPUT>) {
             my @data = split ' ', $line;
             if ($data[0] eq $element_name) {
-                push @blastlines, $line;
+                if ($i < $MAX_SEQUENCE_NUMBER) { # this will ensure that not too many blast results will be used in the analysis, which would slow down the analysis
+                    push @blastlines, $line;
+                }
+                $i++
             }
         }
         close INPUT;
+        if ($i >= $MAX_SEQUENCE_NUMBER) {
+            my $datestring = localtime();
+            print README "$datestring, The number of BLAST hits, $i, exceeded the maximum for analysis, analyzing only the first $MAX_SEQUENCE_NUMBER sequences\n";
+            print "\tThe number of BLAST hits, $i, exceeded the maximum for analysis, analyzing only the first $MAX_SEQUENCE_NUMBER sequences\n";
+    
+        }
 
         # checking that the genome length file is present
         unless (-f "$INPUT_GENOME.length") {
@@ -205,8 +225,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         }
 
         # create the bed file
-        my $bedfile = File::Temp->new(UNLINK => 1, SUFFIX => '.bed' );
-        open (OUTPUT, '>', $bedfile) or die "$!\n";
+        open (OUTPUT, '>', "$ELEMENT_FOLDER/$element_name/$element_name.bed") or die "$!\n"; # save the bed file of the original elements that started the analysis
         foreach my $line (@blastlines) {
             my @data = split ' ', $line;
             if ($data[2] < $data[3]) {
@@ -223,23 +242,20 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
         # create the files with extended boundaries
         my $slopfile = File::Temp->new(UNLINK => 1, SUFFIX => '.slop' );
-        `bedtools slop -s -i $bedfile -g "$INPUT_GENOME.length" -b $BLAST_EXTEND > $slopfile`;
+        `bedtools slop -s -i "$ELEMENT_FOLDER/$element_name/$element_name.bed" -g "$INPUT_GENOME.length" -b $BLAST_EXTEND > $slopfile`;
         if ($?) { die "ERROR executing bedtools: error code $?\n"}
 
-        `bedtools getfasta -fi $INPUT_GENOME -fo $ELEMENT_FOLDER/$element_name/$element_name-extend.fa -bed $slopfile -s`;
+         my $extended_fasta_name = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); # name fo the file with extended fasta sequences
+        `bedtools getfasta -fi $INPUT_GENOME -fo $extended_fasta_name -bed $slopfile -s`;
         if ($?) { die "ERROR executing bedtools: error code $?\n"}
-
-
-        # # merge the overlaping elements into temporary file
-        # `perl $SCRIPTS_FOLDER/process_folders-merge_overlaps2.pl -f $element-extend.fa -p $ELEMENT_FOLDER > temp-merged.fa`;
-        # if ($?) { die "Error executing script $SCRIPTS_FOLDER/process_folders-merge_overlaps2.pl , error code $?\nNote: Check that the element folder names match the names in the blast file\n"}
 
         # STEP 2.2.2
         # align the sequences
-        my $temp_aligned_sequences = File::Temp->new(UNLINK => 1, SUFFIX => '.maf' );
-        `mafft --quiet --thread -$NUM_THREADS $ELEMENT_FOLDER/$element_name/$element_name-extend.fa > $temp_aligned_sequences`;
+        my $aligned_sequences = File::Temp->new(UNLINK => 1, SUFFIX => '.maf' ); 
+     
+       `mafft --quiet --thread -$NUM_THREADS $extended_fasta_name > $aligned_sequences`;
         if ($?) { die "Error executing mafft, error code $?\n"}
-
+#`cp $aligned_sequences /home/peter/Desktop/test.maf`;
         # STEP 2.2.3
         # remove positions from the genome that have more gaps than the threshold at $GAP_THRESHOLD    
         my %cp; # cp = current position, sequence name as key and current position as value at [0] and orientation at [1]
@@ -251,8 +267,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         my $ali_trimmed_length; # length in bp of the multiple squence alignment after it's been trimmed
 
         # populate the %cp hash with information about the multiple sequence alignment
-#$temp_aligned_sequences = "/home/peter/Desktop/test.maf";
-        my %seq = fastatohash($temp_aligned_sequences); 
+#$aligned_sequences = "/home/peter/Desktop/test.maf";
+        my %seq = fastatohash($aligned_sequences); 
         foreach my $name (keys %seq) { 
             if ($name =~ /^(\S+):(\d+)-(\d+)\((.)\)/) {
                 my $chr = $1;
@@ -409,112 +425,194 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             
         }
 
-
-open (OUTPUT, '>', "/home/peter/Desktop/ali.maf") or die "$!";
-print OUTPUT ">cons\n";
-print OUTPUT "$conseq\n";
-print OUTPUT ">cons-$ltrans-$rtrans\n";
-print OUTPUT "$trimmed_conseq\n";
-foreach my $key (keys %seqrmg) {
-    print OUTPUT ">$key\n";
-    print OUTPUT "$seqrmg{$key}\n";
-}
-close OUTPUT;
-
         # STEP 2.2.6 
         # identify the TIR and TSD locations
         if ($trimmed_conseq and $edge_test) { # only continue if consensus was created and edge test was passed
-            print "identify TIRs for $element_name\n"
+
+            # Variables relevant to identifying TIRs and TSDs
+            my $range = 5; # how many bp to search around for tirs
+            my $max_TIR_number; # highest number of TIRs observed for one pair of start and end positions
+            my $max_proportion_first_last_bases; # highest number of locations that start and end with the same bases
+            my $max_TSD_number; # highest number of intact TSDs
+            my @tsd_tir_combinations; # array of possible locations along with various information
+
+            for (my $i=$ltrans-$range; $i<=$ltrans+$range; $i++) {
+	            for (my $j=$rtrans-$range; $j<=$rtrans+$range; $j++) {
+		            my $number_of_tirs_found; # nubmer of sequences that match the TIR criteria
+                    my %tir_first_and_last_bases; # first and last set of bases of tir as key and abundance as value
+                    my %tsds_found; # keys is TSD type "TA", "2", ... "10" and key is number of TSDs found
+                    foreach my $sequence_name (keys %seqrmg) {
+                        my ($tir_found, $first_base, $last_base) = gettir($seqrmg{$sequence_name}, $i, $j); # figure if this sequences has a tir at these postions and if so, report first and last nucleotide
+                        $number_of_tirs_found += $tir_found;
+                        if ($tir_found) {
+                            my $bases = $first_base . $last_base;
+                            $tir_first_and_last_bases{$bases} += 1;
+                        }
+                        $tsds_found{"TA"} += gettsd($seqrmg{$sequence_name}, $i, $j, "TA");
+                        $tsds_found{2} += gettsd($seqrmg{$sequence_name}, $i, $j, 2);
+                        $tsds_found{3} += gettsd($seqrmg{$sequence_name}, $i, $j, 3);
+                        $tsds_found{4} += gettsd($seqrmg{$sequence_name}, $i, $j, 4);
+                        $tsds_found{5} += gettsd($seqrmg{$sequence_name}, $i, $j, 5);
+                        $tsds_found{6} += gettsd($seqrmg{$sequence_name}, $i, $j, 6);
+                        $tsds_found{7} += gettsd($seqrmg{$sequence_name}, $i, $j, 7);
+                        $tsds_found{8} += gettsd($seqrmg{$sequence_name}, $i, $j, 8);
+                        $tsds_found{9} += gettsd($seqrmg{$sequence_name}, $i, $j, 9);
+                        $tsds_found{10} += gettsd($seqrmg{$sequence_name}, $i, $j,10);
+                    }
+
+                    # figure out the most abundant begining and end of the TIR 
+                    my $most_abundant_tir_seq;
+                    foreach my $name (sort { $tir_first_and_last_bases{$a} <=> $tir_first_and_last_bases{$b} } keys %tir_first_and_last_bases) {
+                        $most_abundant_tir_seq = $tir_first_and_last_bases{$name}/$number_of_tirs_found;
+                    }
+
+                    # record all the data for this compbination of $i and $j and update maximum values
+                    $max_TIR_number = max($max_TIR_number, $number_of_tirs_found);
+                    $max_proportion_first_last_bases = max ($max_proportion_first_last_bases, $most_abundant_tir_seq);
+                    $max_TSD_number = max ($max_TSD_number, $tsds_found{"TA"}, $tsds_found{2}, $tsds_found{3}, $tsds_found{4}, $tsds_found{5}, $tsds_found{6}, $tsds_found{7}, $tsds_found{8}, $tsds_found{9}, $tsds_found{10});
+                    push @tsd_tir_combinations, "$i\t$j\t$number_of_tirs_found\t$most_abundant_tir_seq\t$tsds_found{\"TA\"}\t$tsds_found{2}\t$tsds_found{3}\t$tsds_found{4}\t$tsds_found{5}\t$tsds_found{6}\t$tsds_found{7}\t$tsds_found{8}\t$tsds_found{9}\t$tsds_found{10}";
+                }
+            }
+
+            # go through the element and identify those that pass the tests
+            foreach my $candidate (@tsd_tir_combinations) {
+                my $min_prop_seq_wtir; # boolean set to zero until passes test for $MIN_PROPORTION_SEQ_WITH_TIR;
+                my $top_tir_number; # boolean set to zero until passes test for being one of the top tir numbers for these sequences
+                my $top_end_proportions; # boolean set to zero until passes test for having one of the top proportion of TIR that start and stop with the same sequence
+                my $top_number_tsds; # boolean set to zero until passes test for having a top number of intact tsds
+                
+                my @d = split(" ", $candidate);
+                my $number_of_tirs = $d[2];
+                my $proportion_of_same_start_stop = $d[3];
+                my $number_tsds = max($d[4],$d[5],$d[6],$d[7],$d[8],$d[9],$d[10],$d[11],$d[12],$d[13]);
+
+                # test 1 are the number of sequences with TIR high enough?
+                if (($number_of_tirs/(keys %seqrmg)) >= $MIN_PROPORTION_SEQ_WITH_TIR) {
+                    $min_prop_seq_wtir = 1;
+                }
+
+                # test 2 is this candidate have one of the most abundant TIR numbers?
+                if (($number_of_tirs) >= ($MAX_TIR_PROPORTION * $max_TIR_number)) {
+                    $top_tir_number = 1;
+                }
+
+                # test 3 does this candidate have one of the highest proportion of TIRs with identical start and end sequences?
+                if (($proportion_of_same_start_stop) >= ($MAX_END_PROPORTION * $max_proportion_first_last_bases)) {
+                    $top_end_proportions = 1;
+                }
+
+                # test 4 does this canditate have a high number of TSDs?
+                if ($number_tsds >= ($MAX_TSD_PROPORTION * $max_TSD_number)) {
+                    $top_number_tsds = 1;
+                }
+
+                if ($min_prop_seq_wtir and $top_tir_number and $top_end_proportions and $top_number_tsds) {
+                    print "\tpossible element at $d[0], $d[1]\n";
+                }
+            }
         }
         else {
-            print "edge test: $edge_test\n$trimmed_conseq\n";
+            print "\tDid not have a consensus sequence or did not pass the edge test TIRs\n";
         }
-
-        # # make consensus and record boundaries of consensus sequence
-        # `perl $SCRIPTS_FOLDER/make_consensus2.pl -in temp-aligned.maf2 > temp.cons`;
-        # if ($?) { die "Error executing script $SCRIPTS_FOLDER/make_consensus.pl -in temp-aligned.maf2, error code $?\n"}
-
-        # # test to see if consensus was created and if so load the name and sequence into memory
-        # my $cons_b1; # left boundary position of consensus
-        # my $cons_b2; # right boundary position of consensus
-        # my $cons_sequence; # sequence of the consensus
-        # if (-e "temp.cons") { # consensus exists
-        #     open (INPUT, "temp.cons") or die "Cannot open file temp.cons in current directory\n";
-        #     my $line = <INPUT>;
-        #     if ($line =~ /^>consensus_(\d+)_(\d+)/) {
-        #         $cons_b1 = $1;
-        #         $cons_b2 = $2;
-        #     }
-        #     else {
-        #         die "Error consensus file temp.cons has the title below that cannot be parsed\n$line";
-        #     }
-        #     my $line = <INPUT>;
-        #     chomp $line;
-        #     $cons_sequence = $line;
-        # }
-        # else { # consensus absent
-        #     my $datestring = localtime();
-        #     print OUTPUT "$datestring, ran script process_folders-blast-and-cons2.pl --> consensus sequence was NOT created\n";
-
-        # }
-
-        # # merge the consensus with the alignment
-        # `cat temp.cons temp-aligned.maf2 > temp-aligned.maf3`;
-        # if ($?) { die "Error executing script cat temp.cons temp-aligned.maf2 > temp-aligned.maf3, error code $?\n"}
-
-        # # test if the edge test is passed, if it is then continue the analysis
-        # if (($cons_b1 > ($LEFT_EDGE_PROP * (length $cons_sequence))) and ($cons_b2 < ($RIGHT_EDGE_PROP * (length $cons_sequence)))) {
-        #     # update README with edge test results
-        #     my $datestring = localtime();
-        #     print OUTPUT "$datestring, ran script process_folders-blast-and-cons2.pl --> consensus edge test passed\n";
-
-        #     # find tirs and tsds
-        #     `perl $SCRIPTS_FOLDER/find_tir3.pl -a temp-aligned.maf3 -b $cons_b1 -c $cons_b2 -d 10 > temp.tir`;
-        #     if ($?) { die "Error executing script perl $SCRIPTS_FOLDER/find_tir3.pl -a temp-aligned.maf3, error code $?\n"}
-
-        #     `perl $SCRIPTS_FOLDER/process_folders-sort-tsds2.pl -f $element_name -t temp.tir -p $ELEMENT_FOLDER >> $EDGETESTPASS_FILE`;
-        #     if ($?) { die "Error executing script perl $SCRIPTS_FOLDER/process_folders-sort-tsds2.pl -f $element_name -t temp.tir -p $ELEMENT_FOLDER, error code $?\n"}
-
-        #     `mv temp.tir $ELEMENT_FOLDER/$element_name/$element_name.tir`;
-        #     if ($?) { warn "Error code when moving file: mv $ELEMENT_FOLDER/$element_name/$element_name.tir $ELEMENT_FOLDER/$element_name, $?\n" }
-
-        #     print OUTPUT "\tfile $element_name.tir: result of looking for tirs and tsds\n";
-        # }
-        # else { # if gets here then failed the consensus edge test
-        #     push @no_pass, $element_name;
-
-        #     # update README with edge test results
-        #     my $datestring = localtime();
-        #     print OUTPUT "$datestring, ran script process_folders-blast-and-cons2.pl  --> consensus edge test failed\n";
-        # }
-
-        # # print the rest of the README file
-        # print OUTPUT "\tfile $element_name-extend.fa: result of blast file $blastfile extended by $BLAST_EXTEND bp\n";
-        # print OUTPUT "\tfile $element_name.alipos: file with information to reconstitute aligment after removing 80% gaps\n";
-        # print OUTPUT "\tfile $element_name.maf: blast alignment file with 80% gaps removed and consensus file added\n";
+       
         close README;
-
-        # # clean up
-        # `mv temp-aligned.maf3 $ELEMENT_FOLDER/$element_name/$element_name.maf`;
-        # if ($?) { warn "Error code when moving file:mv temp-aligned.maf3 $ELEMENT_FOLDER/$element_name/$element_name.maf, $?\n" }
-
-        # `mv $element_name-extend.fa $ELEMENT_FOLDER/$element_name`;
-        # if ($?) { warn "Error code when moving file: mv $element_name-extend.fa $ELEMENT_FOLDER/$element_name, $?\n" }
-
-        # `rm temp-merged.fa`;
-        # if ($?) { warn "Error code when removing file: rm temp-merged.fa, $?\n" }
-
-        # `rm temp-aligned.maf`;
-        # if ($?) { warn "Error code when removing file: rm temp-aligned.maf, $?\n" }
-
-        # `rm temp.cons`;
-        # if ($?) { warn "Error code when removing file: rm temp.cons, $?\n" }
-
-        # `rm temp-aligned.maf2`;
-        # if ($?) { warn "Error code when removing file: rm temp-aligned.maf2, $?\n" }
-
-        # `mv temp-aligned.alipos $ELEMENT_FOLDER/$element_name/$element_name.alipos`;
-        # if ($?) { warn "Error code when moving file: mv temp-aligned.alipos $ELEMENT_FOLDER/$element_name/$element_name.alipos, $?\n" }
-
     }    
+}
+
+sub gettir {
+	my ($seq, $loc1, $loc2) = @_;
+
+	### load the sequence into memory
+	my $sequence = substr($seq,$loc1-1,$loc2-$loc1+1); # DNA sequence of the consensus
+	### get the ends into string Variables
+	my $s1 = substr ($sequence, 0, $SCAN_SIZE);
+	my $s2 = substr ($sequence, -$SCAN_SIZE, $SCAN_SIZE);
+	# reverse complement seq2
+	my $s2rc = rc($s2);
+	### count the matches
+	my $matches;
+	for (my $i=0; $i < length $s1; $i++){
+		my $char_s1 = substr ($s1, $i, 1);
+		my $char_s2 = substr ($s2rc, $i, 1);
+
+		my $countN_char1 = () = $char_s1 =~ /N|n|-/; # count forbiden characters
+		my $countN_char2 = () = $char_s2 =~ /N|n|-/;
+		if (($i==0) and ($countN_char1 or $countN_char2)) { # check if the TIR starts with forbidden character
+			return (0);
+		}
+
+		unless ($countN_char1 or $countN_char2) {
+			if ($char_s1 eq $char_s2) {
+				$matches++;
+			}
+		}
+	}
+	### evaluate the results
+	if ($matches >= $MIN_MATCH) {
+        my $c1 = substr($s1, 0, 3);
+        my $c2 = substr($s2, -3, 3);
+		return (1, $c1, $c2); # tir found, report that it was found and bases
+	}
+	else {
+		return (0, "", ""); # tir not found
+	}
+}
+
+sub gettsd {
+	my ($seq, $loc1, $loc2, $type) = @_;
+	### load the whole side sequences (to deal with gaps)
+	my $seq_left_side = substr($seq, 0,  $loc1-1);
+	my $seq_right_side = substr($seq, $loc2, -1);
+	$seq_left_side =~ s/-//g; # remove gaps
+	$seq_right_side =~ s/-//g;
+
+    my $TSD_length;
+    if ($type eq "TA") {
+        $TSD_length = 2;
+    }
+    else {
+        $TSD_length = $type;
+    }
+
+    my $c1 = cleanup(substr($seq_left_side, -$TSD_length, $TSD_length));
+	my $c2 = cleanup(substr($seq_right_side, 0, $TSD_length));
+    
+    if (($type eq "TA") and ($c1 eq "ta") and ($c2 eq "ta")) {
+        return (1); # found a TA TSD
+    }
+    elsif (($type eq "2") and ($c1 and $c2) and ($c1 eq $c2)) { # check that both are equal and not 0, 0 means the sequence contained an "n" charcater
+        if ($c1 eq "ta") { # this is to avoid duplication with the TA TSDs
+            return (0); # this is a TA tsd, not approriate for this category
+        }
+        else {
+            return (1); # found a 2 bp TSD that is not TA
+        }
+    }
+    elsif (($c1 and $c2) and ($c1 eq $c2)) { # check that both are equal and not 0, 0 means the sequence contained an "n" charcater
+            return (1); # found a TSD
+    }
+    else {
+        return (0); # no TSD
+    }
+}
+
+#reverse complement
+sub rc {
+    my ($sequence) = @_;
+    $sequence = reverse $sequence;
+    $sequence =~ tr/ACGTRYMKSWacgtrymksw/TGCAYRKMWStgcayrkmws/;
+    return ($sequence);
+}
+
+
+#takes a string, converts it to lower case and checks if it contain an "n"
+sub cleanup {
+	my ($s) = @_;
+    $s = lc($s);
+    if ($s =~ /n/) {
+        return (0); # this sequence contain at least one n character
+    }
+    else {
+        return ($s);
+    }
 }
