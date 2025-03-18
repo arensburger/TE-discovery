@@ -9,32 +9,8 @@ use TEdiscovery;    # these are the subcripts necessary to run the pipeline
 use List::UtilsBy qw(max_by);
 use List::Util qw(max);
 
-### CONSTANTS hardware
+### CONSTANTS for all steps
 my $NUM_THREADS = 8; # number of threads to use
-
-### CONSTANTS filtering which proteins to keep for analysis
-###      using Goubert et al. as insparation and a tblastn keep hits that have the following characteristics 
-my $GENOME_IDENTITY = 80; # IDENTIFYING PROTEINS, per protein, minimum percent identity between protein and genome
-my $COVERAGE_RATIO = 0.5; # IDENTIFYING PROTEINS, per protein, minimum ratio of (blast match length) / (query length)
-my $COPY_NUMBER = 2; # IDENTIFYING PROTEINS, minimum number of copies that hit different parts of the genome 
-my $MIN_DISTANCE = 10000;   # IDENTIFYING PROTEINS, if two elements are on the same chromosome, how far they have to be, to be considered different elements
-                            # NOTE: the minimum distance should bigger than the $BLAST_EXTEND variable, to avoid having the same element recorded twice        
-my $BLAST_EXTEND = 2000; # IDENTIFYING PROTEINS, number of bp to extend on each side of the blast hit
-my $MAX_SEQUENCE_NUMBER = 100; # ALIGNING SEQUENCES maximum number of sequences to consider, to save time
-my $GAP_THRESHOLD=0.75; # REMOVING GAPS FROM ALIGNMENT, if an alignment position has this proportion or more of gaps, then remove it from the multiple sequence alignment
-my $CONSLEVEL=0.60; # MAKING CONSENSUS OF SEQUENCES sequence consensus level for consensus
-my $WINDOW_SIZE = 15; # MAKING CONSENSUS OF SEQUENCES size of the window looking for stretches of N's
-my $SCAN_PROP = 0.5; # MAKING CONSENSUS OF SEQUENCES minimum proportion of side scan that has to be N's to be a real N full edge
-my $MAX_WIN_N = 2; # MAKING CONSENSUS OF SEQUENCES maximum number of N's in the first window where the transition from N to non-N is
-my $EDGE_TEST_PROPORTION = 0.05; # TESTING CONSENSUS SEQUENCES how far from the edge of the consensus do the non-gap positions have to start
-my $SCAN_SIZE = 10; # IDENTIFYING TIR-TSDS number of bp to scan for TIRs from both ends
-my $MIN_MATCH = 8; # IDENTIFYING TIR-TSDS minimum number of positions that match to call something a TIR
-my $TIR_PROP_CUTOFF = 0.15; # IDENTIFYING TIR-TSDS proportion of elements with TIRs at which positions are reported
-my $MIN_PROPORTION_SEQ_WITH_TIR=0.25; #IDENTIFYING TIRs minimum proportion of total elements for a sequence that must contain proper TIRs to be considered a candidate
-my $MAX_TIR_PROPORTION=0.75; #IDENTIFYING TIRs how close to the maximum number of tirs do you have to be to qualify as a top TIR
-my $MAX_END_PROPORTION=0.75; #IDENTIFYING TIRs how close to maximum proportion of sequences with identical start and stop of tir sequences you can be to a top number
-my $MAX_TSD_PROPORTION=0.5; #IDENTIFYING TIRs how close to maximum number of TSDs to qualify as a top TSD sequence
-
 
 ### INPUTs from command line
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
@@ -63,7 +39,7 @@ unless (\$INPUT_PROTEIN_SEQUENCES and $INPUT_GENOME and $ANALYSIS_NAME) {
 print "Preliminary steps...\n";
 my $ANALYSIS_FILES_OUTPUT_DIR="./$ANALYSIS_NAME-analysis-files"; # directory to store output files of current analysis (no slash at the end), these can be destroyed when analysis is finished
 if (-d $ANALYSIS_FILES_OUTPUT_DIR) {
-    print "\tWARNING: Directory $ANALYSIS_FILES_OUTPUT_DIR already exists, using it to store files generated during this analysis (existing files with the same name will be overwriten, but folders will not that will crash the script)\n";
+    print "\tWARNING: Directory $ANALYSIS_FILES_OUTPUT_DIR already exists, using it to store files generated during this analysis (existing files with the same name will be overwriten, but will not overwrite folders, that will crash the script)\n";
 }
 else {
     print "\tCreating directory $ANALYSIS_FILES_OUTPUT_DIR for storing files generated during the analysis\n";
@@ -83,7 +59,7 @@ else {
 ## VARIABLES used by more than one step in the pipeline
 my $blast_output_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/tblastn.o"; 
 
-## record analysis parameters
+## Create and record start parameters in file
 my $datestring = localtime();
 my $analysis_parameters_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/Analysis_parameters.txt";
 if (-f $analysis_parameters_file_name) {
@@ -98,34 +74,6 @@ print ANALYSIS "Date and time: $datestring\n";
 print ANALYSIS "Input file: $INPUT_PROTEIN_SEQUENCES\n";
 print ANALYSIS "Genome: $INPUT_GENOME\n\n";
 print ANALYSIS "Parameters, set in the script:\n";
-print ANALYSIS "GENOME_IDENTITY = 80; # IDENTIFYING PROTEINS, per protein, minimum percent identity between protein and genome
-COVERAGE_RATIO = 0.5; # IDENTIFYING PROTEINS, per protein, minimum ratio of (blast match length) / (query length)
-COPY_NUMBER = 2; # IDENTIFYING PROTEINS, minimum number of copies that hit different parts of the genome
-MIN_DISTANCE = 10000;   # IDENTIFYING PROTEINS, if two elements are on the same chromosome, how far they have to be, to be considered different elements
-                            # NOTE: the minimum distance should bigger than the BLAST_EXTEND variable, to avoid having the same element recorded twice        
-BLAST_EXTEND = 2000; # IDENTIFYING PROTEINS, number of bp to extend on each side of the blast hit
-MAX_SEQUENCE_NUMBER = 100; # ALIGNING SEQUENCES maximum number of sequences to consider, to save time
-GAP_THRESHOLD=0.75; # REMOVING GAPS FROM ALIGNMENT, if an alignment position has this proportion or more of gaps, then remove it from the multiple sequence alignment
-CONSLEVEL=0.60; # MAKING CONSENSUS OF SEQUENCES sequence consensus level for consensus
-WINDOW_SIZE = 15; # MAKING CONSENSUS OF SEQUENCES size of the window looking for stretches of N's
-SCAN_PROP = 0.5; # MAKING CONSENSUS OF SEQUENCES minimum proportion of side scan that has to be N's to be a real N full edge
-MAX_WIN_N = 2; # MAKING CONSENSUS OF SEQUENCES maximum number of N's in the first window where the transition from N to non-N is
-EDGE_TEST_PROPORTION = 0.05; # TESTING CONSENSUS SEQUENCES how far from the edge of the consensus do the non-gap positions have to start
-SCAN_SIZE = 10; # IDENTIFYING TIR-TSDS number of bp to scan for TIRs from both ends
-MIN_MATCH = 8; # IDENTIFYING TIR-TSDS minimum number of positions that match to call something a TIR
-TIR_PROP_CUTOFF = 0.15; # IDENTIFYING TIR-TSDS proportion of elements with TIRs at which positions are reported
-MIN_PROPORTION_SEQ_WITH_TIR=0.25; #IDENTIFYING TIRs minimum proportion of total elements for a sequence that must contain proper TIRs to be considered a candidate
-MAX_TIR_PROPORTION=0.75; #IDENTIFYING TIRs how close to the maximum number of tirs do you have to be to qualify as a top TIR
-MAX_END_PROPORTION=0.75; #IDENTIFYING TIRs how close to maximum proportion of sequences with identical start and stop of tir sequences you can be to a top number
-MAX_TSD_PROPORTION=0.5; #IDENTIFYING TIRs how close to maximum number of TSDs to qualify as a top TSD sequence\n";
-print ANALYSIS "---\n";
-print ANALYSIS "In STEP 2: TIR-TSD test for a specific TIR location:\n";
-print ANALYSIS "These tests are coded by 0 and 1's in the file ending in .tirtsd (if TIRs are found for this element)\n";
-print ANALYSIS "Test1: Do sequences with this TIRs make up at least $MIN_PROPORTION_SEQ_WITH_TIR of all the sequences for this element?\n";
-print ANALYSIS "Test2: Is this one of the most abundant TIRs (i.e. it's at least $MAX_TIR_PROPORTION times the maximum number of TIRs seen for this element)?\n";
-print ANALYSIS "Test3: TIR copies should generally start with the same nucleotide, and end with the same nucleotide. Is number of sequences for this TIR at least $MAX_END_PROPORTION of the highest observed TIRs that start and end with the same nucleotides?\n";
-print ANALYSIS "Test4: TIRs should have many TSDs associated with it, does this TIR have at least $MAX_TSD_PROPORTION of the maximum of number of TSDs seen for this element?\n";
-print ANALYSIS "---------------------------\n";
 
 ## Create file to record rejected sequences
 my $rejection_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/Rejected_sequences.txt";
@@ -137,9 +85,19 @@ else {
     open (REJECT, '>', $rejection_file_name) or die "ERROR, cannot create output file $rejection_file_name\n";
 }
 
-
-### PIPELINE STEP 1 identify proteins that match the genome with parameters specified above under "CONSTANTS"
+### PIPELINE STEP 1 identify proteins that match the genome with parameters specified above under
 ###     The output is a list of proteins for further analysis recorded in the file $output_file_name
+### CONSTANTS applicable to this step only (also record these in the file)
+my $GENOME_IDENTITY = 80; # IDENTIFYING PROTEINS, per protein, minimum percent identity between protein and genome
+print ANALYSIS "STEP1: GENOME_IDENTITY = $GENOME_IDENTITY\n";
+my $COVERAGE_RATIO = 0.5; # IDENTIFYING PROTEINS, per protein, minimum ratio of (blast match length) / (query length)
+print ANALYSIS "STEP1: COVERAGE_RATIO = $COVERAGE_RATIO\n";
+my $COPY_NUMBER = 2; # IDENTIFYING PROTEINS, minimum number of copies that hit different parts of the genome 
+print ANALYSIS "STEP1: COPY_NUMBER = $COPY_NUMBER\n";
+my $MIN_DISTANCE = 10000;   # IDENTIFYING PROTEINS, if two elements are on the same chromosome, how far they have to be, to be considered different elements
+                            # NOTE: the minimum distance should bigger than the $BLAST_EXTEND variable, to avoid having the same element recorded twice        
+print ANALYSIS "STEP1: MIN_DISTANCE = $MIN_DISTANCE\n";
+
 my $step_number = 1;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
     print "Working on STEP $step_number ...\n";
@@ -237,6 +195,42 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
 ### PIPELINE STEP 2 
 ### For each element that had enough approved blast hits, look for TSD-TIR <---> TIR-TSD combinations 
+### CONSTANTS applicable only for STEP 2
+my $BLAST_EXTEND = 2000; # IDENTIFYING PROTEINS, number of bp to extend on each side of the blast hit
+print ANALYSIS "STEP2: BLAST_EXTEND = $BLAST_EXTEND\n";
+my $MAX_SEQUENCE_NUMBER = 100; # ALIGNING SEQUENCES maximum number of sequences to consider, to save time
+print ANALYSIS "STEP2: MAX_SEQUENCE_NUMBER = $MAX_SEQUENCE_NUMBER\n";
+my $GAP_THRESHOLD=0.75; # REMOVING GAPS FROM ALIGNMENT, if an alignment position has this proportion or more of gaps, then remove it from the multiple sequence alignment
+print ANALYSIS "STEP2: GAP_THRESHOLD = $GAP_THRESHOLD\n";
+my $CONSLEVEL=0.60; # MAKING CONSENSUS OF SEQUENCES sequence consensus level for consensus
+print ANALYSIS "STEP2: CONSLEVEL = $CONSLEVEL\n";
+my $WINDOW_SIZE = 15; # MAKING CONSENSUS OF SEQUENCES size of the window looking for stretches of N's
+print ANALYSIS "STEP2: WINDOW_SIZE = $WINDOW_SIZE\n";
+my $SCAN_PROP = 0.5; # MAKING CONSENSUS OF SEQUENCES minimum proportion of side scan that has to be N's to be a real N full edge
+print ANALYSIS "STEP2: SCAN_PROP = $SCAN_PROP\n";
+my $MAX_WIN_N = 2; # MAKING CONSENSUS OF SEQUENCES maximum number of N's in the first window where the transition from N to non-N is
+print ANALYSIS "STEP2: MAX_WIN_N = $MAX_WIN_N\n";
+my $EDGE_TEST_PROPORTION = 0.05; # TESTING CONSENSUS SEQUENCES how far from the edge of the consensus do the non-gap positions have to start
+print ANALYSIS "STEP2: EDGE_TEST_PROPORTION = $EDGE_TEST_PROPORTION\n";
+my $SCAN_SIZE = 10; # IDENTIFYING TIR-TSDS number of bp to scan for TIRs from both ends
+print ANALYSIS "STEP2: SCAN_SIZE = $SCAN_SIZE\n";
+my $MIN_MATCH = 8; # IDENTIFYING TIR-TSDS minimum number of positions that match to call something a TIR
+print ANALYSIS "STEP2: MIN_MATCH = $MIN_MATCH\n";
+my $TIR_PROP_CUTOFF = 0.15; # IDENTIFYING TIR-TSDS proportion of elements with TIRs at which positions are reported
+print ANALYSIS "STEP2: TIR_PROP_CUTOFF = $TIR_PROP_CUTOFF\n";
+my $MIN_PROPORTION_SEQ_WITH_TIR=0.25; #IDENTIFYING TIRs minimum proportion of total elements for a sequence that must contain proper TIRs to be considered a candidate
+print ANALYSIS "STEP2: MIN_PROPORTION_SEQ_WITH_TIR = $MIN_PROPORTION_SEQ_WITH_TIR\n";
+my $MAX_TIR_PROPORTION=0.75; #IDENTIFYING TIRs how close to the maximum number of tirs do you have to be to qualify as a top TIR
+print ANALYSIS "STEP2: MAX_TIR_PROPORTION = $MAX_TIR_PROPORTION\n";
+my $MAX_END_PROPORTION=0.75; #IDENTIFYING TIRs how close to maximum proportion of sequences with identical start and stop of tir sequences you can be to a top number
+print ANALYSIS "STEP2: MAX_END_PROPORTION = $MAX_END_PROPORTION\n";
+my $MAX_TSD_PROPORTION=0.5; #IDENTIFYING TIRs how close to maximum number of TSDs to qualify as a top TSD sequence
+print ANALYSIS "STEP2: MAX_TSD_PROPORTION = $MAX_TSD_PROPORTION\n";
+print ANALYSIS "STEP2: Success code, first number: Is the proportion of sequences with TIRs higher than MIN_PROPORTION_SEQ_WITH_TIR?\n";
+print ANALYSIS "STEP2: Success code, second number: Does this candidate have one of the highest number of TIRs?\n";
+print ANALYSIS "STEP2: Success code, third number: Do the TIRs tend to start and end with the same bases?\n";
+print ANALYSIS "STEP2: Success code, first number: Does this candidate have one of the highest number of TSDs?\n";
+
 my $step_number = 2;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
     print "Working on STEP $step_number ...\n";
@@ -686,6 +680,142 @@ sub gettir {
 		return (0, "", ""); # tir not found
 	}
 }
+
+### PIPELINE STEP 3 
+### Present the elements to the user for manual review
+### CONSTANTS applicable only for STEP 23
+my %EXAMINE_CODES=("1111" => 1, "1101" => 2); # success codes to examine as key and priority as value
+
+my $step_number = 3;
+if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
+    print "Working on STEP $step_number ...\n";
+
+    my $pkey; # pressed key, used for input from user
+    ## read and check the inputs
+    my $ELEMENT_FOLDER="./$ANALYSIS_NAME-elements"; # don't need this when merge
+    unless ($ANALYSIS_NAME) {
+        die "ERROR: STEP $step_number requires an analysis name\n.";
+    }
+
+    ## make a list of files to analyze, put them into @files
+    my @files;
+    opendir(my $dh, $ELEMENT_FOLDER) or die "ERROR: Cannot open element folder $ELEMENT_FOLDER, $!";
+    while (readdir $dh) {
+        unless ($_ =~ /^\./) { # prevents reading invisible files or the . and .. files
+            my $tirtsd_file = $ELEMENT_FOLDER . "/" . $_ . "/" . $_ . ".tirtsd";
+            if (-e $tirtsd_file) {
+                ## need to check the README file here to make sure this element has not already been reviewed manually
+                push @files, $tirtsd_file;
+            }
+            else {
+                die "ERROR: Folder $ELEMENT_FOLDER/$_ does not have a .tirtsd file, this should not happen.\n";
+            }
+        }
+    }
+    unless (scalar @files) {
+        die "ERROR: No files that need manual review were found\n";
+    }
+
+    ## Read the .tirtsd files and process each relevant line (based on %EXAMINE_CODES)
+    foreach my $element_tirtsd_file (@files) {
+
+        # record all the relevant lines from the current .tirtsd file
+        my %locs; # holds the line from from the .tirtsd file as key and priority as value
+        open (INPUT, $element_tirtsd_file) or die "ERROR: Cannot open file $element_tirtsd_file, $!";
+        while (my $line = <INPUT>) { # reading the individual .tirtsd file
+            my @d = split " ", $line;
+            if (exists $EXAMINE_CODES{$d[0]}) {
+                $locs{$line} = $EXAMINE_CODES{$d[0]}; # store the line along with priority
+            }
+        }
+
+        my $process_element = 1; # boolean, set to one until this element has been processed
+        while ($process_element) {
+
+            # Count the number of lines to display
+            my $number_of_lines = keys %locs;
+            
+            if ($number_of_lines == 0) { # leave if there's nothing to do
+                print "No TIR-TSD combination lines were found in file $element_tirtsd_file\n";
+                $process_element = 1;
+            } 
+            else { # there are elements to process, get the information out of the user
+
+                my $tir_b1; # left bound of TIR accepted by user
+                my $tir_b2; # right bound of TIR accpted by user
+                my $TSD_size; # size of TSD accepted by user
+
+                # Display the lines so the use can see what's available
+                print "Lines from $element_tirtsd_file\n";
+                print "code, TIR-boundaries, TSD numbers\n";
+                foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) { # sort so high priority ones are first
+                    my @d = split " ", $line;
+                    print "$d[0], $d[1]-$d[2], $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13]\n";
+                }
+                print "\n";
+
+                # Ask the user to pick a combination of TIR boundaries and TSD
+                print "Select TIRs and TSDs below, or manally enter a location\n";
+                my $i=1;
+                my @selections; # holds the information on the lines presented to the user
+                foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) {
+                    my @d = split " ", $line;
+                    my $TSD; # identity of the TSD with maximum abundance
+                    my $max_tsd; # highest number of TSDs on the line
+                
+                    #determine the TSD with the highest number
+                    if ($d[4] > $max_tsd) { $TSD="TA"; $max_tsd =$d[4]; }
+                    if ($d[5] > $max_tsd) { $TSD=2; $max_tsd =$d[5];  }
+                    if ($d[6] > $max_tsd) { $TSD=3; $max_tsd =$d[6];  }
+                    if ($d[7] > $max_tsd) { $TSD=4; $max_tsd =$d[7];  }
+                    if ($d[8] > $max_tsd) { $TSD=5; $max_tsd =$d[8];  }
+                    if ($d[9] > $max_tsd) { $TSD=6; $max_tsd =$d[9];  }
+                    if ($d[10] > $max_tsd) { $TSD=7; $max_tsd =$d[10];  }
+                    if ($d[11] > $max_tsd) { $TSD=8; $max_tsd =$d[11];  }
+                    if ($d[12] > $max_tsd) { $TSD=9; $max_tsd =$d[12];  }
+                    if ($d[13] > $max_tsd) { $TSD=10; $max_tsd =$d[13];  }
+
+                    print "$i) $d[0], $d[1]-$d[2], $TSD\n"; 
+                    push @selections, "$d[1]\t$d[2]\t$TSD\n";   
+                    $i++;          
+                }
+                print "$i) manually enter TIRs and TSD\n";
+                
+                # read the user input
+                while (($pkey == 0) or ($pkey > $i)) {
+                    print "Line selection [1]: ";
+                    $pkey = <STDIN>;
+                }
+
+                if ($pkey == $i) { # This means the manual selection was entered
+                    my $entry_rejected = 1; # set to one until the manual entry has been accepted
+                    while ($entry_rejected) {
+                        print "Enter the coordinates manually in the form \"TIR1 TIR2 TSD_size\"\n";
+                        $pkey = <STDIN>;
+                        if ($pkey =~ /(\d+)\s(\d+)\s(\d+)/) {
+                            $tir_b1 = $1;
+                            $tir_b2 = $2;
+                            $TSD_size = $3;
+                            $entry_rejected = 0;
+                        }
+                        else {
+                            print "ERROR: Did not recognize this manual entry\n";
+                        }
+                    }
+                }
+                else {
+                    my @e = split " ", $selections[$pkey-1];
+                    $tir_b1 = $e[0];
+                    $tir_b2 = $e[1];
+                    $TSD_size = $e[2];
+                }
+                print "$tir_b1, $tir_b2, TSD_size\n";  
+            }                  
+        }
+    }
+}
+
+
 
 close ANALYSIS;
 close REJECT;
