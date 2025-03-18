@@ -63,7 +63,7 @@ unless (\$INPUT_PROTEIN_SEQUENCES and $INPUT_GENOME and $ANALYSIS_NAME) {
 print "Preliminary steps...\n";
 my $ANALYSIS_FILES_OUTPUT_DIR="./$ANALYSIS_NAME-analysis-files"; # directory to store output files of current analysis (no slash at the end), these can be destroyed when analysis is finished
 if (-d $ANALYSIS_FILES_OUTPUT_DIR) {
-    print "\tWARNING: Directory $ANALYSIS_FILES_OUTPUT_DIR already exists, using it to store files generated during this analysis (existing files with the same name will be overwriten)\n";
+    print "\tWARNING: Directory $ANALYSIS_FILES_OUTPUT_DIR already exists, using it to store files generated during this analysis (existing files with the same name will be overwriten, but folders will not that will crash the script)\n";
 }
 else {
     print "\tCreating directory $ANALYSIS_FILES_OUTPUT_DIR for storing files generated during the analysis\n";
@@ -76,22 +76,29 @@ if (-d $ELEMENT_FOLDER) {
     print "\tWARNING: Directory $ELEMENT_FOLDER already exists, using it to put folders for individual elements (any current subfolders will not be overwritten and will be used for subsequent analysis)\n";
 }
 else {
-    print "\t Creating directory $ELEMENT_FOLDER that will have subdirectories for individual elements\n";
+    print "\tCreating directory $ELEMENT_FOLDER that will have subdirectories for individual elements\n";
     mkdir( $ELEMENT_FOLDER ) or die "Couldn't create $ELEMENT_FOLDER directory, $!";
 }
 
 ## VARIABLES used by more than one step in the pipeline
-my $blast_output_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/tablastn.o"; 
+my $blast_output_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/tblastn.o"; 
 
 ## record analysis parameters
 my $datestring = localtime();
-open (OUTPUT,'>', "$ANALYSIS_FILES_OUTPUT_DIR/Analysis_parameters.txt") or die "ERROR: cannot create file $ANALYSIS_FILES_OUTPUT_DIR/Analysis_parameters.txt\n";
-print OUTPUT "Analysis name: $ANALYSIS_NAME\n";
-print OUTPUT "Date and time: $datestring\n";
-print OUTPUT "Input file: $INPUT_PROTEIN_SEQUENCES\n";
-print OUTPUT "Genome: $INPUT_GENOME\n\n";
-print OUTPUT "Parameters, set in the script:\n";
-print OUTPUT "GENOME_IDENTITY = 80; # IDENTIFYING PROTEINS, per protein, minimum percent identity between protein and genome
+my $analysis_parameters_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/Analysis_parameters.txt";
+if (-f $analysis_parameters_file_name) {
+    print "\tWARNING: Analysis parameters file $analysis_parameters_file_name already exists, appending a new set of parameters to that file\n";
+    open (ANALYSIS,'>>', $analysis_parameters_file_name) or die "ERROR: cannot open file $analysis_parameters_file_name\n";
+}
+else {
+    open (ANALYSIS,'>', $analysis_parameters_file_name) or die "ERROR: cannot open file $analysis_parameters_file_name\n";
+}
+print ANALYSIS "Analysis name: $ANALYSIS_NAME\n";
+print ANALYSIS "Date and time: $datestring\n";
+print ANALYSIS "Input file: $INPUT_PROTEIN_SEQUENCES\n";
+print ANALYSIS "Genome: $INPUT_GENOME\n\n";
+print ANALYSIS "Parameters, set in the script:\n";
+print ANALYSIS "GENOME_IDENTITY = 80; # IDENTIFYING PROTEINS, per protein, minimum percent identity between protein and genome
 COVERAGE_RATIO = 0.5; # IDENTIFYING PROTEINS, per protein, minimum ratio of (blast match length) / (query length)
 COPY_NUMBER = 2; # IDENTIFYING PROTEINS, minimum number of copies that hit different parts of the genome
 MIN_DISTANCE = 10000;   # IDENTIFYING PROTEINS, if two elements are on the same chromosome, how far they have to be, to be considered different elements
@@ -110,14 +117,26 @@ TIR_PROP_CUTOFF = 0.15; # IDENTIFYING TIR-TSDS proportion of elements with TIRs 
 MIN_PROPORTION_SEQ_WITH_TIR=0.25; #IDENTIFYING TIRs minimum proportion of total elements for a sequence that must contain proper TIRs to be considered a candidate
 MAX_TIR_PROPORTION=0.75; #IDENTIFYING TIRs how close to the maximum number of tirs do you have to be to qualify as a top TIR
 MAX_END_PROPORTION=0.75; #IDENTIFYING TIRs how close to maximum proportion of sequences with identical start and stop of tir sequences you can be to a top number
-MAX_TSD_PROPORTION=0.5; #IDENTIFYING TIRs how close to maximum number of TSDs to qualify as a top TSD sequence\n\n";
-print OUTPUT "TIR-TSD test for a specific TIR location:\n";
-print OUTPUT "These tests are coded by 0 and 1's in the file ending in .tirtsd (if TIRs are found for this element)\n";
-print OUTPUT "Test1: Do sequences with this TIRs make up at least $MIN_PROPORTION_SEQ_WITH_TIR of all the sequences for this element?\n";
-print OUTPUT "Test2: Is this one of the most abundant TIRs (i.e. it's at least $MAX_TIR_PROPORTION times the maximum number of TIRs seen for this element)?\n";
-print OUTPUT "Test3: TIR copies should generally start with the same nucleotide, and end with the same nucleotide. Is number of sequences for this TIR at least $MAX_END_PROPORTION of the highest observed TIRs that start and end with the same nucleotides?\n";
-print OUTPUT "Test4: TIRs should have many TSDs associated with it, does this TIR have at least $MAX_TSD_PROPORTION of the maximum of number of TSDs seen for this element?\n";
-close OUTPUT;
+MAX_TSD_PROPORTION=0.5; #IDENTIFYING TIRs how close to maximum number of TSDs to qualify as a top TSD sequence\n";
+print ANALYSIS "---\n";
+print ANALYSIS "In STEP 2: TIR-TSD test for a specific TIR location:\n";
+print ANALYSIS "These tests are coded by 0 and 1's in the file ending in .tirtsd (if TIRs are found for this element)\n";
+print ANALYSIS "Test1: Do sequences with this TIRs make up at least $MIN_PROPORTION_SEQ_WITH_TIR of all the sequences for this element?\n";
+print ANALYSIS "Test2: Is this one of the most abundant TIRs (i.e. it's at least $MAX_TIR_PROPORTION times the maximum number of TIRs seen for this element)?\n";
+print ANALYSIS "Test3: TIR copies should generally start with the same nucleotide, and end with the same nucleotide. Is number of sequences for this TIR at least $MAX_END_PROPORTION of the highest observed TIRs that start and end with the same nucleotides?\n";
+print ANALYSIS "Test4: TIRs should have many TSDs associated with it, does this TIR have at least $MAX_TSD_PROPORTION of the maximum of number of TSDs seen for this element?\n";
+print ANALYSIS "---------------------------\n";
+
+## Create file to record rejected sequences
+my $rejection_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/Rejected_sequences.txt";
+if (-f $rejection_file_name) {
+    print "\tWARNING: Rejected sequences text already exists, adding new entries to this file\n";
+    open (REJECT, '>>', $rejection_file_name) or die "ERROR, cannot open output file $rejection_file_name\n";
+}
+else {
+    open (REJECT, '>', $rejection_file_name) or die "ERROR, cannot create output file $rejection_file_name\n";
+}
+
 
 ### PIPELINE STEP 1 identify proteins that match the genome with parameters specified above under "CONSTANTS"
 ###     The output is a list of proteins for further analysis recorded in the file $output_file_name
@@ -127,6 +146,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
     ## VARIABLES, variable for this step
     my %protein_ids; # holds the id the input proteins that passed the filtering tests as key and the number of copies that passed the test as values
+    my %rejected_ids; # id's that did not make the cut
 
     ## Excute the tblastn search
    `tblastn -query $INPUT_PROTEIN_SEQUENCES -db $INPUT_GENOME -outfmt "6 qseqid sseqid sstart send pident length qlen" -out $blast_output_file_name -num_threads $NUM_THREADS`;
@@ -142,6 +162,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         my $md=1; # boolean, set to one unless minimum distance test is failed
 
         my @data = split "\t", $line;
+        $data[0] =~ s/\s//g;
         my $middle_position = ($data[3] + $data[2])/2; # position of this element on this chromosome
 
         if ($data[4] >= $GENOME_IDENTITY) { # test percent id
@@ -163,22 +184,31 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             }
         }
 
-        if ($gi and $cr and $md) { # if the current protein and locus combination passed all the tests then record it
+        if ($gi and $cr and $md) { # if the current protein and locus combination passed all the tests then record it in %protein_ids, if not record as rejected
             push @{ $candidate_protein{$data[0]}}, "$data[1]\t$middle_position";
             $protein_ids{$data[0]} = $#{$candidate_protein{$data[0]}} + 1; # update the hash %protein_ids with the current number of loci that passed the tests
-        }      
+        }   
+        else {
+            $rejected_ids{$data[0]} = "STEP $step_number\tError code (genome identity/coverage/minimum distance): $gi $cr $md"
+        }   
     }
     close INPUT;
 
+    # updated the rejected file
+    foreach my $r (keys %rejected_ids) {
+        unless (exists $protein_ids{$r}) { # an id can have multiple blast lines, some acccepted some rejected
+            my $datestring = localtime();
+            print REJECT "$datestring\t$r\t$rejected_ids{$r}\n";
+        }
+    }
+
     # Filter out elements that have too few copy numbers
     # (making this a separate step so the code is more modular, rather then incoroporating it into the next step)
-    # record any elements that were discarded at this point
-    open (OUTPUT, '>', "$ANALYSIS_FILES_OUTPUT_DIR/Input_sequences_too_few_blast_hits.txt") or die "ERROR, cannot create output file $ANALYSIS_FILES_OUTPUT_DIR/Input_sequences_too_few_blast_hits.txt\n";
-    print OUTPUT "These input sequences were not analyzed because the BLAST analysis returned too few hits to the genome\n";
-    print OUTPUT "Input_name\tMinimum_BLAST_hits\tObserved_BLAST_hits\n";
-    foreach my $prot_name (keys %protein_ids) {
+    # also record any elements that were discarded at this point
+     foreach my $prot_name (keys %protein_ids) {
         unless ($protein_ids{$prot_name} >= $COPY_NUMBER) {
-            print OUTPUT "$prot_name\t$COPY_NUMBER\t$protein_ids{$prot_name}\n";
+            my $datestring = localtime();
+            print REJECT "$datestring\t$prot_name\tSTEP $step_number\tError code (BLAST minimum copy number/observed copy number) $COPY_NUMBER $protein_ids{$prot_name}\n";
             delete $protein_ids{$prot_name};
         }
     }
@@ -269,6 +299,9 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
         # create the bed file
         open (OUTPUT, '>', "$ELEMENT_FOLDER/$element_name/$element_name.bed") or die "$!\n"; # save the bed file of the original elements that started the analysis
+        my $datestring = localtime();
+        print README "$datestring, File $element_name.bed contains the positions of all the sequences for element from the BLAST file, this is prior to extension\n";    
+ 
         foreach my $line (@blastlines) {
             my @data = split ' ', $line;
             if ($data[2] < $data[3]) {
@@ -360,18 +393,11 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     $seqrmg{$name} .= substr($seq{$name},$i,1);
                     push @{ $pos{$name} },$cp{$name}[0];
                 }
+                $ali_trimmed_length++;
             }
         }
 
-        # output the alignment file with positions removed, called .maf
-        open (OUTPUT, '>', "$ELEMENT_FOLDER/$element_name/$element_name.maf") or die "ERROR: Cannot create file $element_name.maf, $!\n";
-        foreach my $name (keys %seqrmg) {
-            print OUTPUT ">$name\n$seqrmg{$name}\n";
-            $ali_trimmed_length = length $seqrmg{$name}; # legnth of the alignment after trimming
-        }
-        my $datestring = localtime(); # update the README file of new file created
-        print README "$datestring, File $element_name.maf is the alignment of sequences with positions containing $GAP_THRESHOLD proportion of gaps removed\n";
-        close OUTPUT;
+        # printing the .maf later, after the consensus has been created
 
         # output the file that will allow restoring the deleted positions, called .alipos
         open (OUTPUT, '>', "$ELEMENT_FOLDER/$element_name/$element_name.alipos") or die "Error: cannot create file $element_name.alipos, $!\n";
@@ -453,7 +479,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             $i--;
 	    }
 
-        # if both a left and right transition are found, then create the trimmed consensus sequence
+        # if both a left and right transition are found, then create the trimmed consensus sequence and add it to the alignment file
         if (($ltrans > 0) and ($rtrans < (length $conseq))) { 
             for (my $i=0; $i<$ltrans-1; $i++) {
                 $trimmed_conseq .= "-";
@@ -466,10 +492,24 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             } 
         }
 
+        # output the alignment file with positions removed, called .maf add the consensus if there is one
+        open (OUTPUT, '>', "$ELEMENT_FOLDER/$element_name/$element_name.maf") or die "ERROR: Cannot create file $element_name.maf, $!\n";
+        if (length($trimmed_conseq)) {
+            print OUTPUT ">consensus-$ltrans-$rtrans\n";
+            print OUTPUT "$trimmed_conseq\n"
+        }
+        foreach my $name (keys %seqrmg) {
+            print OUTPUT ">$name\n$seqrmg{$name}\n";
+            $ali_trimmed_length = length $seqrmg{$name}; # length of the alignment after trimming
+        }
+        my $datestring = localtime(); # update the README file of new file created
+        print README "$datestring, File $element_name.maf is the alignment of sequences with positions containing $GAP_THRESHOLD proportion of gaps removed\n";
+        close OUTPUT;
+
         # Test to see if this consensus sequence passes the "edge test". The trimmed consensus should not be too close 
         # to the edge of the alignment (this would suggest that the whole region, not just an element inside it, is conserved)
         my $edge_test; # boolean, will be set to 1 if the consensus is not too close to the edge
-        if (($ltrans > ($EDGE_TEST_PROPORTION * (length $trimmed_conseq))) and ($rtrans > ((1 - $EDGE_TEST_PROPORTION) * (length $trimmed_conseq)))) {
+        if (($ltrans > ($EDGE_TEST_PROPORTION * (length $trimmed_conseq))) and ($rtrans < ((1 - $EDGE_TEST_PROPORTION) * (length $trimmed_conseq)))) {
             $edge_test = 1;
         }
 
@@ -480,9 +520,15 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         }
         elsif ($trimmed_conseq) { # get here if a consenus was found but it failed the edge test
             print README "$datestring, a trimmed consensus sequence was created but it failed the \"edge test\", stopping the analysis here\n";
+            print REJECT "$datestring\t$element_name\tSTEP 2\tfailed the EDGE TEST\n";
+            `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
+            if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
         }
         else { # get here if a no abrupt changes in the consensus sequences was detected
             print README "$datestring, the consensus sequence showed no transitions into an element, stopping the analysis here\n";
+            print REJECT "$datestring\t$element_name\tSTEP 2\tNo transitions to element observed in alignment file\n";
+            `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
+            if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
         }
 
         # STEP 2.2.6 
@@ -498,7 +544,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
             for (my $i=$ltrans-$range; $i<=$ltrans+$range; $i++) {
 	            for (my $j=$rtrans-$range; $j<=$rtrans+$range; $j++) {
-		            my $number_of_tirs_found; # nubmer of sequences that match the TIR criteria
+		            my $number_of_tirs_found=0; # nubmer of sequences that match the TIR criteria
                     my %tir_first_and_last_bases; # first and last set of bases of tir as key and abundance as value
                     my %tsds_found; # keys is TSD type "TA", "2", ... "10" and key is number of TSDs found
                     foreach my $sequence_name (keys %seqrmg) {
@@ -521,7 +567,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     }
 
                     # figure out the most abundant begining and end of the TIR 
-                    my $most_abundant_tir_seq;
+                    my $most_abundant_tir_seq=0;
                     foreach my $name (sort { $tir_first_and_last_bases{$a} <=> $tir_first_and_last_bases{$b} } keys %tir_first_and_last_bases) {
                         $most_abundant_tir_seq = $tir_first_and_last_bases{$name}/$number_of_tirs_found;
                     }
@@ -538,11 +584,14 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             unless (scalar @tsd_tir_combinations) {
                 my $datestring = localtime(); 
                 print README "$datestring, no acceptable TIR-TSD combinations have been found, stopping the analysis here.\n";
+                print REJECT "$datestring\t$element_name\tSTEP 2\tno TIR-TSD found\n";
+                `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
+                if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
             }
 
             # go through the element and identify those candidate locations that pass the tests for TIR-TSD combinatations
             my @candidates_tsdtir; # locations and tsd numbers of candidate locations the tests along with success code 
-            my $i; # counter of the number of locations that passed all the tests
+            my $i=0; # counter of the number of locations that passed all the tests
             foreach my $candidate (@tsd_tir_combinations) {
                 my $min_prop_seq_wtir=0; # boolean set to zero until passes test for $MIN_PROPORTION_SEQ_WITH_TIR;
                 my $top_tir_number=0; # boolean set to zero until passes test for being one of the top tir numbers for these sequences
@@ -576,6 +625,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
                 # record the results for this candidate location
                 my $success_code = $min_prop_seq_wtir . $top_tir_number . $top_end_proportions . $top_number_tsds;
+                #print "4 is $d[4], 5 is $d[5], 6 is $d[6], 7 is $d[7], 8 is $d[8], 9 is $d[9], 10 is $d[10], 11 is $d[11], 12 is $d[12], 13 is $d[13]\n";
                 push @candidates_tsdtir, "$success_code\t$d[0]\t$d[1]\t$d[2]\t$d[4]\t$d[5]\t$d[6]\t$d[7]\t$d[8]\t$d[9]\t$d[10]\t$d[11]\t$d[12]\t$d[13]";
                 if ($success_code eq "1111") {
                     $i++;
@@ -585,12 +635,14 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             # Record the candidate locations and positions
             my $number_of_candidates = scalar @candidates_tsdtir;
             my $datestring = localtime(); 
-            print README "$datestring, Examined $number_of_candidates candidate locations for TSD-TIR combinations, found $i locations that passed all the tests (see Analysis_paramters.txt file for details of the tests)\n";
+            print README "$datestring, Examined $number_of_candidates candidate locations for TSD-TIR combinations, found $i locations that passed all the tests\n";
             open (OUTPUT,'>', "$ELEMENT_FOLDER/$element_name/$element_name.tirtsd") or die "Error: cannot create file $ELEMENT_FOLDER/$element_name/$element_name.tirtsd, $!\n";
             print OUTPUT "# success_code\tloc1\tloc2\tnumber_of_tirs\tnumber_tsds_TA_through_10\n";
             foreach my $c (@candidates_tsdtir) {
                 print OUTPUT "$c\n";
             }
+            my $datestring = localtime(); 
+            print README "$datestring, File $element_name.tirtsd has the location of all TSD-TIR combinations along with number of TSDs and codes for tests\n";
         }     
         close README;
     }    
@@ -634,6 +686,9 @@ sub gettir {
 		return (0, "", ""); # tir not found
 	}
 }
+
+close ANALYSIS;
+close REJECT;
 
 sub gettsd {
 	my ($seq, $loc1, $loc2, $type) = @_;
