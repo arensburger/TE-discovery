@@ -697,31 +697,47 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         die "ERROR: STEP $step_number requires an analysis name\n.";
     }
 
-    ## make a list of files to analyze, put them into @files
-    my @files;
+    ## make a list of files to analyze, put them into %files
+    my %files; # holds the element folder path as key and path to the .tirtsd and the .maf files as array of values
     opendir(my $dh, $ELEMENT_FOLDER) or die "ERROR: Cannot open element folder $ELEMENT_FOLDER, $!";
     while (readdir $dh) {
+
+         ## need to check the README file here to make sure this element has not already been reviewed manually
+
         unless ($_ =~ /^\./) { # prevents reading invisible files or the . and .. files
             my $tirtsd_file = $ELEMENT_FOLDER . "/" . $_ . "/" . $_ . ".tirtsd";
             if (-e $tirtsd_file) {
-                ## need to check the README file here to make sure this element has not already been reviewed manually
-                push @files, $tirtsd_file;
+                $files{$ELEMENT_FOLDER}[0]=$tirtsd_file;
             }
             else {
                 die "ERROR: Folder $ELEMENT_FOLDER/$_ does not have a .tirtsd file, this should not happen.\n";
             }
+
+            my $alignement_file = $ELEMENT_FOLDER . "/" . $_ . "/" . $_ . ".maf";
+            if (-e $alignement_file) {
+                $files{$ELEMENT_FOLDER}[1]=$alignement_file;
+            }
+            else {
+                die "ERROR: Folder $ELEMENT_FOLDER/$_ does not have a .maf file, this should not happen.\n";
+            }
         }
     }
-    unless (scalar @files) {
+    unless (keys %files) {
         die "ERROR: No files that need manual review were found\n";
     }
 
     ## Read the .tirtsd files and process each relevant line (based on %EXAMINE_CODES)
-    foreach my $element_tirtsd_file (@files) {
+    foreach my $element_path (keys %files) {
+
+        # Variables specific to this section
+        my $TIR_b1; # left bound of TIR accepted by user
+        my $TIR_b2; # right bound of TIR accpted by user
+        my $TSD_size; # size of TSD accepted by user
 
         # record all the relevant lines from the current .tirtsd file
         my %locs; # holds the line from from the .tirtsd file as key and priority as value
-        open (INPUT, $element_tirtsd_file) or die "ERROR: Cannot open file $element_tirtsd_file, $!";
+        my $filename_tirtsd = $files{$element_path}[0];
+        open (INPUT, $filename_tirtsd) or die "ERROR: Cannot open file $filename_tirtsd, $!";
         while (my $line = <INPUT>) { # reading the individual .tirtsd file
             my @d = split " ", $line;
             if (exists $EXAMINE_CODES{$d[0]}) {
@@ -736,17 +752,13 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             my $number_of_lines = keys %locs;
             
             if ($number_of_lines == 0) { # leave if there's nothing to do
-                print "No TIR-TSD combination lines were found in file $element_tirtsd_file\n";
+                print "No TIR-TSD combination lines were found in file $filename_tirtsd\n";
                 $process_element = 1;
             } 
             else { # there are elements to process, get the information out of the user
 
-                my $tir_b1; # left bound of TIR accepted by user
-                my $tir_b2; # right bound of TIR accpted by user
-                my $TSD_size; # size of TSD accepted by user
-
-                # Display the lines so the use can see what's available
-                print "Lines from $element_tirtsd_file\n";
+                # Display the lines so the user can see what's available
+                print "Lines from $filename_tirtsd\n";
                 print "code, TIR-boundaries, TSD numbers\n";
                 foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) { # sort so high priority ones are first
                     my @d = split " ", $line;
@@ -780,9 +792,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     $i++;          
                 }
                 print "$i) manually enter TIRs and TSD\n";
-                
-                # read the user input
-                while (($pkey == 0) or ($pkey > $i)) {
+                               
+                while (($pkey == 0) or ($pkey > $i)) { # read the user input
                     print "Line selection [1]: ";
                     $pkey = <STDIN>;
                 }
@@ -793,8 +804,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         print "Enter the coordinates manually in the form \"TIR1 TIR2 TSD_size\"\n";
                         $pkey = <STDIN>;
                         if ($pkey =~ /(\d+)\s(\d+)\s(\d+)/) {
-                            $tir_b1 = $1;
-                            $tir_b2 = $2;
+                            $TIR_b1 = $1;
+                            $TIR_b2 = $2;
                             $TSD_size = $3;
                             $entry_rejected = 0;
                         }
@@ -805,76 +816,54 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 }
                 else {
                     my @e = split " ", $selections[$pkey-1];
-                    $tir_b1 = $e[0];
-                    $tir_b2 = $e[1];
+                    $TIR_b1 = $e[0];
+                    $TIR_b2 = $e[1];
                     $TSD_size = $e[2];
                 }
-                print "$tir_b1, $tir_b2, TSD_size\n";  
-            }                  
+                $pkey = ""; # reset the pressed key 
+            } 
+
+            # # The TIRs and TSDs locations have been selected, now display these to the user   
+            # my %alignment_sequences = fastatohash("$ELEMENT_FOLDER/$element_name/$element_name.maf"); # load the existing alignment
+            # my $display_alignment_file = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); # file with alignment that will be diplayed to the user
+            # foreach my $seq_name (keys %alignment_sequences) {
+            #     print $display_alignment_file ">$seq_name\n";
+
+            #     ## left side sequences
+            #     my $left_whole_seq = substr($alignment_sequences{$seq_name}, 0, $TIR_b1);
+            #     $left_whole_seq =~ s/-//g; #remove gaps
+            #     # if there are no or few sequences, replace left TSD with space symbols
+            #     if ((length $left_whole_seq) < $TSD_bp) {
+            #         $left_whole_seq = "";
+            #         for (my $i=0; $i<$TSD_bp; $i++) {
+            #             $left_whole_seq .= "s";
+            #         }
+            #     }
+            #     my $left_tir_seq1 = substr($left_whole_seq, -$TSD_bp-1, $TSD_bp);
+            #     my $left_tir_seq2 = substr($alignment_sequences{$seq_name}, $TIR_b1-1, $TIR_bp);
+            #     $TSD_seqs{$seq_name}[0] = $left_tir_seq1; # used later to for display
+
+            #     ## right side sequences
+            #     my $right_whole_seq = substr($alignment_sequences{$seq_name}, $TIR_b2, -1);
+            #     $right_whole_seq =~ s/-//g; #remove gaps
+            #     # if there are no or few sequences, replace right TSD with space symbols
+            #     if ((length $right_whole_seq) < $TSD_bp) {
+            #         $right_whole_seq = "";
+            #         for (my $i=0; $i<$TSD_bp; $i++) {
+            #             $right_whole_seq .= "s";
+            #         }
+            #     }
+            #     my $right_tir_seq1 = substr($right_whole_seq, 0, $TSD_bp);
+            #     my $right_tir_seq2 = substr($alignment_sequences{$seq_name}, $TIR_b2-$TIR_bp, $TIR_bp);
+            #     $TSD_seqs{$seq_name}[1] = $right_tir_seq1 ; # used later to for display
+
+            #     print "$left_tir_seq1,$left_tir_seq2,$right_tir_seq1,$right_tir_seq2\n";
+            # }
+exit;
+
         }
     }
 }
-
-
 
 close ANALYSIS;
 close REJECT;
-
-sub gettsd {
-	my ($seq, $loc1, $loc2, $type) = @_;
-	### load the whole side sequences (to deal with gaps)
-	my $seq_left_side = substr($seq, 0,  $loc1-1);
-	my $seq_right_side = substr($seq, $loc2, -1);
-	$seq_left_side =~ s/-//g; # remove gaps
-	$seq_right_side =~ s/-//g;
-
-    my $TSD_length;
-    if ($type eq "TA") {
-        $TSD_length = 2;
-    }
-    else {
-        $TSD_length = $type;
-    }
-
-    my $c1 = cleanup(substr($seq_left_side, -$TSD_length, $TSD_length));
-	my $c2 = cleanup(substr($seq_right_side, 0, $TSD_length));
-    
-    if (($type eq "TA") and ($c1 eq "ta") and ($c2 eq "ta")) {
-        return (1); # found a TA TSD
-    }
-    elsif (($type eq "2") and ($c1 and $c2) and ($c1 eq $c2)) { # check that both are equal and not 0, 0 means the sequence contained an "n" charcater
-        if ($c1 eq "ta") { # this is to avoid duplication with the TA TSDs
-            return (0); # this is a TA tsd, not approriate for this category
-        }
-        else {
-            return (1); # found a 2 bp TSD that is not TA
-        }
-    }
-    elsif (($c1 and $c2) and ($c1 eq $c2)) { # check that both are equal and not 0, 0 means the sequence contained an "n" charcater
-            return (1); # found a TSD
-    }
-    else {
-        return (0); # no TSD
-    }
-}
-
-#reverse complement
-sub rc {
-    my ($sequence) = @_;
-    $sequence = reverse $sequence;
-    $sequence =~ tr/ACGTRYMKSWacgtrymksw/TGCAYRKMWStgcayrkmws/;
-    return ($sequence);
-}
-
-
-#takes a string, converts it to lower case and checks if it contain an "n"
-sub cleanup {
-	my ($s) = @_;
-    $s = lc($s);
-    if ($s =~ /n/) {
-        return (0); # this sequence contain at least one n character
-    }
-    else {
-        return ($s);
-    }
-}
