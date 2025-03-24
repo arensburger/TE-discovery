@@ -646,6 +646,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 ### Present the elements to the user for manual review
 ### CONSTANTS applicable only for STEP 23
 my %EXAMINE_CODES=("1111" => 1, "1101" => 2); # success codes to examine as key and priority as value
+print ANALYSIS "STEP3: %EXAMINE_CODES=(\"1111\" => 1, \"1101\" => 2) # success codes to examine as key and priority as value\n";
 my $TIR_bp = 30; # how many bp to display on the TIR side
 
 my $step_number = 3;
@@ -660,16 +661,17 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     }
 
     ## make a list of files to analyze, put them into %files
-    my %files; # holds the element folder path as key and path to the .tirtsd and the .maf files as array of values
+    my %files; # holds the element name as key and path to the .tirtsd and the .maf files as array of values
     opendir(my $dh, $ELEMENT_FOLDER) or die "ERROR: Cannot open element folder $ELEMENT_FOLDER, $!";
     while (readdir $dh) {
 
          ## need to check the README file here to make sure this element has not already been reviewed manually
 
         unless ($_ =~ /^\./) { # prevents reading invisible files or the . and .. files
+            my $specific_element_folder = $ELEMENT_FOLDER . "/" . $_ ; # folder with specific element of interest            
             my $tirtsd_file = $ELEMENT_FOLDER . "/" . $_ . "/" . $_ . ".tirtsd";
             if (-e $tirtsd_file) {
-                $files{$ELEMENT_FOLDER}[0]=$tirtsd_file;
+                $files{$_}[0]=$tirtsd_file;
             }
             else {
                 die "ERROR: Folder $ELEMENT_FOLDER/$_ does not have a .tirtsd file, this should not happen.\n";
@@ -677,7 +679,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
             my $alignement_file = $ELEMENT_FOLDER . "/" . $_ . "/" . $_ . ".maf";
             if (-e $alignement_file) {
-                $files{$ELEMENT_FOLDER}[1]=$alignement_file;
+                $files{$_}[1]=$alignement_file;
             }
             else {
                 die "ERROR: Folder $ELEMENT_FOLDER/$_ does not have a .maf file, this should not happen.\n";
@@ -689,7 +691,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     }
 
     ## Read the .tirtsd files and process each relevant line (based on %EXAMINE_CODES)
-    foreach my $element_path (keys %files) {
+    foreach my $element_name (keys %files) {
 
         # Variables specific to this section
         my $TIR_b1; # left bound of TIR accepted by user
@@ -698,7 +700,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
         # record all the relevant lines from the current .tirtsd file
         my %locs; # holds the line from from the .tirtsd file as key and priority as value
-        my $filename_tirtsd = $files{$element_path}[0];
+        my $filename_tirtsd = $files{$element_name}[0];
         open (INPUT, $filename_tirtsd) or die "ERROR: Cannot open file $filename_tirtsd, $!";
         while (my $line = <INPUT>) { # reading the individual .tirtsd file
             my @d = split " ", $line;
@@ -710,13 +712,18 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         my $process_element = 1; # boolean, set to one until this element has been processed
         while ($process_element) {
 
-            my %alignment_sequences = fastatohash($files{$ELEMENT_FOLDER}[1]); # load the existing alignment
+            my %alignment_sequences = fastatohash($files{$element_name}[1]); # load the existing alignment
 
             # Count the number of lines to display
             my $number_of_lines = keys %locs;
             
             if ($number_of_lines == 0) { # leave if there's nothing to do
-                print "No TIR-TSD combination lines were found in file $filename_tirtsd\n";
+                print "No lines with acceptable codes were found in file $filename_tirtsd\n";
+                my $datestring = localtime();
+                print README "$datestring, No lines with acceptable codes were found in file $filename_tirtsd; stopping the analysis here\n";    
+                print REJECT "$datestring\t$element_name\tSTEP 3\tNo lines with acceptable TIR and TSD codes were found in the .tirtsd file\n";
+                `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
+                if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
                 $process_element = 1;
             } 
             else { # there are elements to process, get the information out of the user
@@ -841,9 +848,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     print $display_alignment_file $left_tir_seq1, "sss", $left_tir_seq2, "ssssssssssssssssssss", $right_tir_seq2, "sss", $right_tir_seq1, "\n";
                 }
             }
-`cp $display_alignment_file /home/peter/Desktop/ali.fa`;            
-exit;
-
         }
     }
 }
