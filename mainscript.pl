@@ -542,7 +542,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     my %tir_first_and_last_bases; # first and last set of bases of tir as key and abundance as value
                     my %tsds_found; # keys is TSD type "TA", "2", ... "10" and key is number of TSDs found
                     foreach my $sequence_name (keys %seqrmg) {
-                        my ($tir1_sequence, $tir2_sequence) = gettir2($seqrmg{$sequence_name}, $i, $j, $MIN_TIR_SIZE, $TIR_MISMATCHES); # figure if this sequences has a tir at these positions and if so, report first and last nucleotide
+                        my ($tir1_sequence, $tir2_sequence) = gettir($seqrmg{$sequence_name}, $i, $j, $MIN_TIR_SIZE, $TIR_MISMATCHES); # figure if this sequences has a tir at these positions and if so, report first and last nucleotide
                         if ($tir1_sequence) {
                             $number_of_tirs_found += 1;
                             my $bases = substr($tir1_sequence, 0, 3) . substr($tir2_sequence, -3, 3); # recording the first and last 3 bases 
@@ -710,6 +710,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         my $process_element = 1; # boolean, set to one until this element has been processed
         while ($process_element) {
 
+            my %alignment_sequences = fastatohash($files{$ELEMENT_FOLDER}[1]); # load the existing alignment
+
             # Count the number of lines to display
             my $number_of_lines = keys %locs;
             
@@ -730,6 +732,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
                 # Ask the user to pick a combination of TIR boundaries and TSD
                 print "Select TIRs and TSDs below, or manually enter a location\n";
+                print "Selection) code, TIR-boundaries, TSD type, Number of TIRS, Average TIR length\n";
                 my $i=1;
                 my @selections; # holds the information on the lines presented to the user
                 foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) {
@@ -737,7 +740,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     my $TSD; # identity of the TSD with maximum abundance
                     my $max_tsd; # highest number of TSDs on the line
                 
-                    #determine the TSD with the highest number
+                    # determine the TSD with the highest number
                     if ($d[4] > $max_tsd) { $TSD="TA"; $max_tsd =$d[4]; }
                     if ($d[5] > $max_tsd) { $TSD=2; $max_tsd =$d[5];  }
                     if ($d[6] > $max_tsd) { $TSD=3; $max_tsd =$d[6];  }
@@ -749,7 +752,25 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     if ($d[12] > $max_tsd) { $TSD=9; $max_tsd =$d[12];  }
                     if ($d[13] > $max_tsd) { $TSD=10; $max_tsd =$d[13];  }
 
-                    print "$i) $d[0], $d[1]-$d[2], $TSD\n"; 
+                    # determine the average TIR length for the current combination of sequences and locations";
+                    my $number_of_sequences; # total sequences in this alignment
+                    my $total_TIR_length; # sum of all the TIR length, used to calculate the average
+                    my $TIR_number; # number of sequences with TIRs
+                    my $average_TIR_length;
+                    foreach my $key (keys %alignment_sequences) {
+                        my ($tir1, $tir2) = gettir($alignment_sequences{$key}, $d[1], $d[2], $MIN_TIR_SIZE, $TIR_MISMATCHES);
+                        if ($tir1) {
+                            $total_TIR_length += length ($tir1);
+                            $TIR_number += 1;
+                        }
+                    }
+                    if ($TIR_number) { # if TIRs have been found
+                        $average_TIR_length = int($total_TIR_length / $TIR_number);
+                        print "$i) $d[0], $d[1]-$d[2], $TSD, $TIR_number, $average_TIR_length\n";  
+                    }
+                    else {
+                        print "$i) $d[0], $d[1]-$d[2], $TSD, no TIRs found\n";
+                    }
                     push @selections, "$d[1]\t$d[2]\t$TSD\n";   
                     $i++;          
                 }
@@ -786,7 +807,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             } 
 
             # The TIRs and TSDs locations have been selected, next create an alignment to display these to the user  
-            my %alignment_sequences = fastatohash($files{$ELEMENT_FOLDER}[1]); # load the existing alignment
+ #           my %alignment_sequences = fastatohash($files{$ELEMENT_FOLDER}[1]); # load the existing alignment
             my $display_alignment_file = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); # file with alignment that will be diplayed to the user
             foreach my $seq_name (keys %alignment_sequences) {
                 unless ($seq_name =~ />consensus/) { # avoid the line with the consensus sequence
