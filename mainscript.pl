@@ -212,10 +212,10 @@ my $MAX_WIN_N = 2; # MAKING CONSENSUS OF SEQUENCES maximum number of N's in the 
 print ANALYSIS "STEP2: MAX_WIN_N = $MAX_WIN_N\n";
 my $EDGE_TEST_PROPORTION = 0.05; # TESTING CONSENSUS SEQUENCES how far from the edge of the consensus do the non-gap positions have to start
 print ANALYSIS "STEP2: EDGE_TEST_PROPORTION = $EDGE_TEST_PROPORTION\n";
-my $SCAN_SIZE = 10; # IDENTIFYING TIR-TSDS number of bp to scan for TIRs from both ends
-print ANALYSIS "STEP2: SCAN_SIZE = $SCAN_SIZE\n";
-my $MIN_MATCH = 8; # IDENTIFYING TIR-TSDS minimum number of positions that match to call something a TIR
-print ANALYSIS "STEP2: MIN_MATCH = $MIN_MATCH\n";
+my $MIN_TIR_SIZE = 10; # IDENTIFYING TIR-TSDS smallest allowable size for the TIR
+print ANALYSIS "STEP2: MIN_TIR_SIZE = $MIN_TIR_SIZE\n";
+my $TIR_MISMATCHES = 2; # IDENTIFYING TIR-TSDS maximum number of mismatches allowed between two TIRs
+print ANALYSIS "STEP2: TIR_MISMATCHES = $TIR_MISMATCHES\n";
 my $TIR_PROP_CUTOFF = 0.15; # IDENTIFYING TIR-TSDS proportion of elements with TIRs at which positions are reported
 print ANALYSIS "STEP2: TIR_PROP_CUTOFF = $TIR_PROP_CUTOFF\n";
 my $MIN_PROPORTION_SEQ_WITH_TIR=0.25; #IDENTIFYING TIRs minimum proportion of total elements for a sequence that must contain proper TIRs to be considered a candidate
@@ -542,10 +542,10 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     my %tir_first_and_last_bases; # first and last set of bases of tir as key and abundance as value
                     my %tsds_found; # keys is TSD type "TA", "2", ... "10" and key is number of TSDs found
                     foreach my $sequence_name (keys %seqrmg) {
-                        my ($tir_found, $first_base, $last_base) = gettir($seqrmg{$sequence_name}, $i, $j); # figure if this sequences has a tir at these positions and if so, report first and last nucleotide
-                        $number_of_tirs_found += $tir_found;
-                        if ($tir_found) {
-                            my $bases = $first_base . $last_base;
+                        my ($tir1_sequence, $tir2_sequence) = gettir2($seqrmg{$sequence_name}, $i, $j, $MIN_TIR_SIZE, $TIR_MISMATCHES); # figure if this sequences has a tir at these positions and if so, report first and last nucleotide
+                        if ($tir1_sequence) {
+                            $number_of_tirs_found += 1;
+                            my $bases = substr($tir1_sequence, 0, 3) . substr($tir2_sequence, -3, 3); # recording the first and last 3 bases 
                             $tir_first_and_last_bases{$bases} += 1;
                         }
                         $tsds_found{"TA"} += gettsd($seqrmg{$sequence_name}, $i, $j, "TA");
@@ -574,14 +574,14 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 }
             }
 
-            # report if no TIR-TSD combnations have been found
-            unless (scalar @tsd_tir_combinations) {
-                my $datestring = localtime(); 
-                print README "$datestring, no acceptable TIR-TSD combinations have been found, stopping the analysis here.\n";
-                print REJECT "$datestring\t$element_name\tSTEP 2\tno TIR-TSD found\n";
-                `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
-                if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
-            }
+            # # report if no TIR-TSD combnations have been found
+            # unless (scalar @tsd_tir_combinations) {
+            #     my $datestring = localtime(); 
+            #     print README "$datestring, no acceptable TIR-TSD combinations have been found, stopping the analysis here.\n";
+            #     print REJECT "$datestring\t$element_name\tSTEP 2\tno TIR-TSD found\n";
+            #     `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
+            #     if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
+            # }
 
             # go through the element and identify those candidate locations that pass the tests for TIR-TSD combinatations
             my @candidates_tsdtir; # locations and tsd numbers of candidate locations the tests along with success code 
@@ -629,62 +629,24 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             # Record the candidate locations and positions
             my $number_of_candidates = scalar @candidates_tsdtir;
             my $datestring = localtime(); 
-            print README "$datestring, Examined $number_of_candidates candidate locations for TSD-TIR combinations, found $i locations that passed all the tests\n";
+            print README "$datestring, Examined $number_of_candidates candidate locations for TSDs and TIRs, found $i locations that passed all the tests\n";
             open (OUTPUT,'>', "$ELEMENT_FOLDER/$element_name/$element_name.tirtsd") or die "Error: cannot create file $ELEMENT_FOLDER/$element_name/$element_name.tirtsd, $!\n";
             print OUTPUT "# success_code\tloc1\tloc2\tnumber_of_tirs\tnumber_tsds_TA_through_10\n";
             foreach my $c (@candidates_tsdtir) {
                 print OUTPUT "$c\n";
             }
             my $datestring = localtime(); 
-            print README "$datestring, File $element_name.tirtsd has the location of all TSD-TIR combinations along with number of TSDs and codes for tests\n";
+            print README "$datestring, File $element_name.tirtsd has the number of all TSDs and TIRs along with number of TSDs and codes for tests\n";
         }     
         close README;
     }    
-}
-
-sub gettir {
-	my ($seq, $loc1, $loc2) = @_;
-
-	### load the sequence into memory
-	my $sequence = substr($seq,$loc1-1,$loc2-$loc1+1); # DNA sequence of the consensus
-	### get the ends into string Variables
-	my $s1 = substr ($sequence, 0, $SCAN_SIZE);
-	my $s2 = substr ($sequence, -$SCAN_SIZE, $SCAN_SIZE);
-	# reverse complement seq2
-	my $s2rc = rc($s2);
-	### count the matches
-	my $matches;
-	for (my $i=0; $i < length $s1; $i++){
-		my $char_s1 = substr ($s1, $i, 1);
-		my $char_s2 = substr ($s2rc, $i, 1);
-
-		my $countN_char1 = () = $char_s1 =~ /N|n|-/; # count forbiden characters
-		my $countN_char2 = () = $char_s2 =~ /N|n|-/;
-		if (($i==0) and ($countN_char1 or $countN_char2)) { # check if the TIR starts with forbidden character
-			return (0);
-		}
-
-		unless ($countN_char1 or $countN_char2) {
-			if ($char_s1 eq $char_s2) {
-				$matches++;
-			}
-		}
-	}
-	### evaluate the results
-	if ($matches >= $MIN_MATCH) {
-        my $c1 = substr($s1, 0, 3);
-        my $c2 = substr($s2, -3, 3);
-		return (1, $c1, $c2); # tir found, report that it was found and bases
-	}
-	else {
-		return (0, "", ""); # tir not found
-	}
 }
 
 ### PIPELINE STEP 3 
 ### Present the elements to the user for manual review
 ### CONSTANTS applicable only for STEP 23
 my %EXAMINE_CODES=("1111" => 1, "1101" => 2); # success codes to examine as key and priority as value
+my $TIR_bp = 30; # how many bp to display on the TIR side
 
 my $step_number = 3;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
@@ -767,7 +729,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 print "\n";
 
                 # Ask the user to pick a combination of TIR boundaries and TSD
-                print "Select TIRs and TSDs below, or manally enter a location\n";
+                print "Select TIRs and TSDs below, or manually enter a location\n";
                 my $i=1;
                 my @selections; # holds the information on the lines presented to the user
                 foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) {
@@ -814,7 +776,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         }
                     }
                 }
-                else {
+                else { # This means that the user selected a preset number
                     my @e = split " ", $selections[$pkey-1];
                     $TIR_b1 = $e[0];
                     $TIR_b2 = $e[1];
@@ -823,42 +785,42 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 $pkey = ""; # reset the pressed key 
             } 
 
-            # # The TIRs and TSDs locations have been selected, now display these to the user   
-            # my %alignment_sequences = fastatohash("$ELEMENT_FOLDER/$element_name/$element_name.maf"); # load the existing alignment
-            # my $display_alignment_file = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); # file with alignment that will be diplayed to the user
-            # foreach my $seq_name (keys %alignment_sequences) {
-            #     print $display_alignment_file ">$seq_name\n";
+            # The TIRs and TSDs locations have been selected, next create an alignment to display these to the user  
+            my %alignment_sequences = fastatohash($files{$ELEMENT_FOLDER}[1]); # load the existing alignment
+            my $display_alignment_file = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); # file with alignment that will be diplayed to the user
+            foreach my $seq_name (keys %alignment_sequences) {
+                unless ($seq_name =~ />consensus/) { # avoid the line with the consensus sequence
+                    print $display_alignment_file ">$seq_name\n";
+                    ## left side sequences
+                    my $left_whole_seq = substr($alignment_sequences{$seq_name}, 0, $TIR_b1);
+                    $left_whole_seq =~ s/-//g; #remove gaps
+                    # if there are no or few sequences, replace left TSD with space symbols
+                    if ((length $left_whole_seq) < $TSD_size) {
+                        $left_whole_seq = "";
+                        for (my $i=0; $i<$TSD_size; $i++) {
+                            $left_whole_seq .= "s";
+                        }
+                    }
+                    my $left_tir_seq1 = substr($left_whole_seq, -$TSD_size-1, $TSD_size);
+                    my $left_tir_seq2 = substr($alignment_sequences{$seq_name}, $TIR_b1-1, $TIR_bp);
 
-            #     ## left side sequences
-            #     my $left_whole_seq = substr($alignment_sequences{$seq_name}, 0, $TIR_b1);
-            #     $left_whole_seq =~ s/-//g; #remove gaps
-            #     # if there are no or few sequences, replace left TSD with space symbols
-            #     if ((length $left_whole_seq) < $TSD_bp) {
-            #         $left_whole_seq = "";
-            #         for (my $i=0; $i<$TSD_bp; $i++) {
-            #             $left_whole_seq .= "s";
-            #         }
-            #     }
-            #     my $left_tir_seq1 = substr($left_whole_seq, -$TSD_bp-1, $TSD_bp);
-            #     my $left_tir_seq2 = substr($alignment_sequences{$seq_name}, $TIR_b1-1, $TIR_bp);
-            #     $TSD_seqs{$seq_name}[0] = $left_tir_seq1; # used later to for display
+                    ## right side sequences
+                    my $right_whole_seq = substr($alignment_sequences{$seq_name}, $TIR_b2, -1);
+                    $right_whole_seq =~ s/-//g; #remove gaps
+                    # if there are no or few sequences, replace right TSD with space symbols
+                    if ((length $right_whole_seq) < $TSD_size) {
+                        $right_whole_seq = "";
+                        for (my $i=0; $i<$TSD_size; $i++) {
+                            $right_whole_seq .= "s";
+                        }
+                    }
+                    my $right_tir_seq1 = substr($right_whole_seq, 0, $TSD_size);
+                    my $right_tir_seq2 = substr($alignment_sequences{$seq_name}, $TIR_b2-$TIR_bp, $TIR_bp);
 
-            #     ## right side sequences
-            #     my $right_whole_seq = substr($alignment_sequences{$seq_name}, $TIR_b2, -1);
-            #     $right_whole_seq =~ s/-//g; #remove gaps
-            #     # if there are no or few sequences, replace right TSD with space symbols
-            #     if ((length $right_whole_seq) < $TSD_bp) {
-            #         $right_whole_seq = "";
-            #         for (my $i=0; $i<$TSD_bp; $i++) {
-            #             $right_whole_seq .= "s";
-            #         }
-            #     }
-            #     my $right_tir_seq1 = substr($right_whole_seq, 0, $TSD_bp);
-            #     my $right_tir_seq2 = substr($alignment_sequences{$seq_name}, $TIR_b2-$TIR_bp, $TIR_bp);
-            #     $TSD_seqs{$seq_name}[1] = $right_tir_seq1 ; # used later to for display
-
-            #     print "$left_tir_seq1,$left_tir_seq2,$right_tir_seq1,$right_tir_seq2\n";
-            # }
+                    print $display_alignment_file $left_tir_seq1, "sss", $left_tir_seq2, "ssssssssssssssssssss", $right_tir_seq2, "sss", $right_tir_seq1, "\n";
+                }
+            }
+`cp $display_alignment_file /home/peter/Desktop/ali.fa`;            
 exit;
 
         }
