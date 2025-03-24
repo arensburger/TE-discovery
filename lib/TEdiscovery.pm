@@ -70,6 +70,130 @@ sub gettsd {
     }
 }
 
+sub gettir {
+	my ($seq, $loc1, $loc2, $SCAN_SIZE, $MIN_MATCH) = @_;
+
+	### load the sequence into memory
+	my $sequence = substr($seq,$loc1-1,$loc2-$loc1+1); # DNA sequence of the consensus
+	### get the ends into string Variables
+	my $s1 = substr ($sequence, 0, $SCAN_SIZE);
+	my $s2 = substr ($sequence, -$SCAN_SIZE, $SCAN_SIZE);
+	# reverse complement seq2
+	my $s2rc = rc($s2);
+	### count the matches
+	my $matches;
+	for (my $i=0; $i < length $s1; $i++){
+		my $char_s1 = substr ($s1, $i, 1);
+		my $char_s2 = substr ($s2rc, $i, 1);
+
+		my $countN_char1 = () = $char_s1 =~ /N|n|-/; # count forbiden characters
+		my $countN_char2 = () = $char_s2 =~ /N|n|-/;
+		if (($i==0) and ($countN_char1 or $countN_char2)) { # check if the TIR starts with forbidden character
+			return (0, "", "");
+		}
+
+		unless ($countN_char1 or $countN_char2) {
+			if ($char_s1 eq $char_s2) {
+				$matches++;
+			}
+		}
+	}
+	### evaluate the results
+	if ($matches >= $MIN_MATCH) {
+        my $c1 = substr($s1, 0, 3);
+        my $c2 = substr($s2, -3, 3);
+		return (1, $c1, $c2); # tir found, report that it was found and bases
+	}
+	else {
+		return (0, "", ""); # tir not found
+	}
+}
+
+# given a sequence, locations of tirs, and maximum allowed mismatches between TIRs, returns the sequence of the tir if they are found, returns blanks otherwise
+sub gettir2 {
+	my ($seq, $loc1, $loc2, $min_tir_size, $max_number_mismatches) = @_;
+
+    my $min_tir_size = 10; # anything smaller than this will not be reported as a TIR
+
+    my $endfound = 0; #boolean 0 until the end of the TIR is found
+	my $pos = 0; #current position in the sequence
+	my $lastgoodbase = 0; #position of the last match of bases
+	my $miss = 0; #number of non-matching sequences
+
+	### load the sequence into memory and remove gaps
+	my $sequence = substr($seq,$loc1-1,$loc2-$loc1+1); # DNA sequence of the whole element
+    $sequence =~ s/-//g;
+
+    ### get the ends into string Variables
+    my $number_of_bp_to_scan = int((length $sequence)/2);
+	my $s1 = substr ($sequence, 0, $number_of_bp_to_scan);
+	my $s2 = substr ($sequence, -$number_of_bp_to_scan, $number_of_bp_to_scan);
+
+    while (($pos <= (length $s1)) && ($endfound == 0)) {
+        my $leftbase = substr($s1, $pos, 1); #base on the left end
+        my $rightbase = substr($s2, -$pos -1, 1);
+
+        # figure out if the bases match and are regular bases (not N)
+        if (($leftbase eq (rc($rightbase))) and (("acgt" =~ /$leftbase/i) and ("acgt" =~ /$rightbase/i))) {
+                $lastgoodbase = $pos;
+        }
+        else {
+            $miss++;
+        }
+
+        #take stock if we need to stop
+        if ($miss > $max_number_mismatches) {
+            $endfound = 1;
+        }
+        else {
+            $pos++;
+        }
+	}
+
+    ### get the TIR sequences if a long enough tir has been found
+    if ($min_tir_size <= ($pos -1)) {
+        my $tir1_sequence = substr($s1, 0, ($pos - 1));
+        my $tir2_sequence = substr($s2, -($pos - 1), ($pos - 1));
+        return ($tir1_sequence, $tir2_sequence);
+    }
+    else {
+        return ("","");
+    }
+
+	# ### get the ends into string Variables
+	# my $s1 = substr ($sequence, 0, $SCAN_SIZE);
+	# my $s2 = substr ($sequence, -$SCAN_SIZE, $SCAN_SIZE);
+	# # reverse complement seq2
+	# my $s2rc = rc($s2);
+	# ### count the matches
+	# my $matches;
+	# for (my $i=0; $i < length $s1; $i++){
+	# 	my $char_s1 = substr ($s1, $i, 1);
+	# 	my $char_s2 = substr ($s2rc, $i, 1);
+
+	# 	my $countN_char1 = () = $char_s1 =~ /N|n|-/; # count forbiden characters
+	# 	my $countN_char2 = () = $char_s2 =~ /N|n|-/;
+	# 	if (($i==0) and ($countN_char1 or $countN_char2)) { # check if the TIR starts with forbidden character
+	# 		return (0, "", "");
+	# 	}
+
+	# 	unless ($countN_char1 or $countN_char2) {
+	# 		if ($char_s1 eq $char_s2) {
+	# 			$matches++;
+	# 		}
+	# 	}
+	# }
+	# ### evaluate the results
+	# if ($matches >= $MIN_MATCH) {
+    #     my $c1 = substr($s1, 0, 3);
+    #     my $c2 = substr($s2, -3, 3);
+	# 	return (1, $c1, $c2); # tir found, report that it was found and bases
+	# }
+	# else {
+	# 	return (0, "", ""); # tir not found
+	# }
+}
+
 #reverse complement
 sub rc {
     my ($sequence) = @_;
