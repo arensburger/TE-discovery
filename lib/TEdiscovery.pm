@@ -70,47 +70,8 @@ sub gettsd {
     }
 }
 
-sub gettir {
-	my ($seq, $loc1, $loc2, $SCAN_SIZE, $MIN_MATCH) = @_;
-
-	### load the sequence into memory
-	my $sequence = substr($seq,$loc1-1,$loc2-$loc1+1); # DNA sequence of the consensus
-	### get the ends into string Variables
-	my $s1 = substr ($sequence, 0, $SCAN_SIZE);
-	my $s2 = substr ($sequence, -$SCAN_SIZE, $SCAN_SIZE);
-	# reverse complement seq2
-	my $s2rc = rc($s2);
-	### count the matches
-	my $matches;
-	for (my $i=0; $i < length $s1; $i++){
-		my $char_s1 = substr ($s1, $i, 1);
-		my $char_s2 = substr ($s2rc, $i, 1);
-
-		my $countN_char1 = () = $char_s1 =~ /N|n|-/; # count forbiden characters
-		my $countN_char2 = () = $char_s2 =~ /N|n|-/;
-		if (($i==0) and ($countN_char1 or $countN_char2)) { # check if the TIR starts with forbidden character
-			return (0, "", "");
-		}
-
-		unless ($countN_char1 or $countN_char2) {
-			if ($char_s1 eq $char_s2) {
-				$matches++;
-			}
-		}
-	}
-	### evaluate the results
-	if ($matches >= $MIN_MATCH) {
-        my $c1 = substr($s1, 0, 3);
-        my $c2 = substr($s2, -3, 3);
-		return (1, $c1, $c2); # tir found, report that it was found and bases
-	}
-	else {
-		return (0, "", ""); # tir not found
-	}
-}
-
 # given a sequence, locations of tirs, and maximum allowed mismatches between TIRs, returns the sequence of the tir if they are found, returns blanks otherwise
-sub gettir2 {
+sub gettir {
 	my ($seq, $loc1, $loc2, $min_tir_size, $max_number_mismatches) = @_;
 
     my $min_tir_size = 10; # anything smaller than this will not be reported as a TIR
@@ -151,9 +112,13 @@ sub gettir2 {
 	}
 
     ### get the TIR sequences if a long enough tir has been found
-    if ($min_tir_size <= ($pos -1)) {
-        my $tir1_sequence = substr($s1, 0, ($pos - 1));
-        my $tir2_sequence = substr($s2, -($pos - 1), ($pos - 1));
+    # if ($min_tir_size <= ($pos -1)) {
+    #     my $tir1_sequence = substr($s1, 0, ($pos - 1));
+    #     my $tir2_sequence = substr($s2, -($pos - 1), ($pos - 1));
+    #     return ($tir1_sequence, $tir2_sequence);
+    if ($min_tir_size <= $lastgoodbase) {
+        my $tir1_sequence = substr($s1, 0, ($lastgoodbase+1));
+        my $tir2_sequence = substr($s2, -($lastgoodbase+1), ($lastgoodbase+1));
         return ($tir1_sequence, $tir2_sequence);
     }
     else {
