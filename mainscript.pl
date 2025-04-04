@@ -8,6 +8,7 @@ use FindBin::libs;  # this sets up that the directory lib will have all modules 
 use TEdiscovery;    # these are the subcripts necessary to run the pipeline
 use List::UtilsBy qw(max_by);
 use List::Util qw(max);
+use Scalar::Util qw(looks_like_number);
 
 ### CONSTANTS for all steps
 my $NUM_THREADS = 8; # number of threads to use
@@ -225,11 +226,13 @@ print ANALYSIS "STEP2: MAX_TIR_PROPORTION = $MAX_TIR_PROPORTION\n";
 my $MAX_END_PROPORTION=0.75; #IDENTIFYING TIRs how close to maximum proportion of sequences with identical start and stop of tir sequences you can be to a top number
 print ANALYSIS "STEP2: MAX_END_PROPORTION = $MAX_END_PROPORTION\n";
 my $MAX_TSD_PROPORTION=0.5; #IDENTIFYING TIRs how close to maximum number of TSDs to qualify as a top TSD sequence
+my %EXAMINE_CODES=("1111" => 1, "1101" => 2); # success codes to examine as key and priority as value
+print ANALYSIS "STEP2: %EXAMINE_CODES=(\"1111\" => 1, \"1101\" => 2) # TIR-TSD success codes that will allow an element to be examine further as key and priority as value\n";
 print ANALYSIS "STEP2: MAX_TSD_PROPORTION = $MAX_TSD_PROPORTION\n";
-print ANALYSIS "STEP2: Success code, first number: Is the proportion of sequences with TIRs higher than MIN_PROPORTION_SEQ_WITH_TIR?\n";
-print ANALYSIS "STEP2: Success code, second number: Does this candidate have one of the highest number of TIRs?\n";
-print ANALYSIS "STEP2: Success code, third number: Do the TIRs tend to start and end with the same bases?\n";
-print ANALYSIS "STEP2: Success code, first number: Does this candidate have one of the highest number of TSDs?\n";
+print ANALYSIS "STEP2: TIR-TSD success code, first number: Is the proportion of sequences with TIRs higher than MIN_PROPORTION_SEQ_WITH_TIR?\n";
+print ANALYSIS "STEP2: TIR-TSD sode, second number: Does this candidate have one of the highest number of TIRs?\n";
+print ANALYSIS "STEP2: TIR-TSD sode, third number: Do the TIRs tend to start and end with the same bases?\n";
+print ANALYSIS "STEP2: TIR-TSD sode, first number: Does this candidate have one of the highest number of TSDs?\n";
 
 my $step_number = 2;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
@@ -584,8 +587,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             # }
 
             # go through the element and identify those candidate locations that pass the tests for TIR-TSD combinatations
-            my @candidates_tsdtir; # locations and tsd numbers of candidate locations the tests along with success code 
-            my $i=0; # counter of the number of locations that passed all the tests
+            my @successful_candidates; # locations and tsd numbers of candidate locations that the analysis will continue with
+            my %failed_candidates; # success codes of the failed candidate and number of candidates as value, used to report failure to the user 
             foreach my $candidate (@tsd_tir_combinations) {
                 my $min_prop_seq_wtir=0; # boolean set to zero until passes test for $MIN_PROPORTION_SEQ_WITH_TIR;
                 my $top_tir_number=0; # boolean set to zero until passes test for being one of the top tir numbers for these sequences
@@ -617,26 +620,45 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     $top_number_tsds = 1;
                 }
 
-                # record the results for this candidate location
-                my $success_code = $min_prop_seq_wtir . $top_tir_number . $top_end_proportions . $top_number_tsds;
-                #print "4 is $d[4], 5 is $d[5], 6 is $d[6], 7 is $d[7], 8 is $d[8], 9 is $d[9], 10 is $d[10], 11 is $d[11], 12 is $d[12], 13 is $d[13]\n";
-                push @candidates_tsdtir, "$success_code\t$d[0]\t$d[1]\t$d[2]\t$d[4]\t$d[5]\t$d[6]\t$d[7]\t$d[8]\t$d[9]\t$d[10]\t$d[11]\t$d[12]\t$d[13]";
-                if ($success_code eq "1111") {
-                    $i++;
+                # record the results for this candidate location if the code is one of the acceptables ones for further research
+                my $current_success_code = $min_prop_seq_wtir . $top_tir_number . $top_end_proportions . $top_number_tsds;
+                if (exists $EXAMINE_CODES{$current_success_code}) {
+                   push @successful_candidates, "$current_success_code\t$d[0]\t$d[1]\t$d[2]\t$d[4]\t$d[5]\t$d[6]\t$d[7]\t$d[8]\t$d[9]\t$d[10]\t$d[11]\t$d[12]\t$d[13]";
+                }
+                else  {
+                   $failed_candidates{$current_success_code} += 1; 
                 }
             }
 
-            # Record the candidate locations and positions
-            my $number_of_candidates = scalar @candidates_tsdtir;
-            my $datestring = localtime(); 
-            print README "$datestring, Examined $number_of_candidates candidate locations for TSDs and TIRs, found $i locations that passed all the tests\n";
-            open (OUTPUT,'>', "$ELEMENT_FOLDER/$element_name/$element_name.tirtsd") or die "Error: cannot create file $ELEMENT_FOLDER/$element_name/$element_name.tirtsd, $!\n";
-            print OUTPUT "# success_code\tloc1\tloc2\tnumber_of_tirs\tnumber_tsds_TA_through_10\n";
-            foreach my $c (@candidates_tsdtir) {
-                print OUTPUT "$c\n";
+            # create the .tirtsd file if successful candidates were found, if not update the user and remove element
+            if (scalar @successful_candidates) { # candidates were found
+                open (OUTPUT,'>', "$ELEMENT_FOLDER/$element_name/$element_name.tirtsd") or die "Error: cannot create file $ELEMENT_FOLDER/$element_name/$element_name.tirtsd, $!\n";
+                print OUTPUT "# success_code\tloc1\tloc2\tnumber_of_tirs\tnumber_tsds_TA_through_10\n";
+                foreach my $candidate_line (@successful_candidates) {
+                    print OUTPUT "$candidate_line\n";
+                }          
+                close OUTPUT;
+
+                # update README
+                my $datestring = localtime();
+                print README "$datestring, File $element_name.tirtsd contains the location information of elements that passed the TIR and TSD codes. The number of failed codes is ";
+                foreach my $code (keys %failed_candidates) {
+                    print README "$code $failed_candidates{$code}| ";
+                }
+                print README "\n";
             }
-            my $datestring = localtime(); 
-            print README "$datestring, File $element_name.tirtsd has the number of all TSDs and TIRs along with number of TSDs and codes for tests\n";
+            else { # candidates were not found
+                my $datestring = localtime(); 
+                print README "$datestring, No locations were found that passed the TIR and TSD codes, stopping analysis here.  The number of failed codes is ";
+                foreach my $code (keys %failed_candidates) {
+                    print README "$code $failed_candidates{$code}| ";
+                }
+                print README "\n";
+
+                print REJECT "$datestring\t$element_name\tSTEP 2\tNo lines with acceptable TIR and TSD codes were found\n";
+                `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
+                if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
+            }
         }     
         close README;
     }    
@@ -644,50 +666,49 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
 ### PIPELINE STEP 3 
 ### Present the elements to the user for manual review
-### CONSTANTS applicable only for STEP 23
-my %EXAMINE_CODES=("1111" => 1, "1101" => 2); # success codes to examine as key and priority as value
-print ANALYSIS "STEP3: %EXAMINE_CODES=(\"1111\" => 1, \"1101\" => 2) # success codes to examine as key and priority as value\n";
+### CONSTANTS applicable only for STEP 3
 my $TIR_bp = 30; # how many bp to display on the TIR side
+my $temp_alignment_file = "/tmp/ali.fa"; # tried using perl temporary file system, but aliview will not open those
 
 my $step_number = 3;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
     print "Working on STEP $step_number ...\n";
 
     my $pkey; # pressed key, used for input from user
-    ## read and check the inputs
-    my $ELEMENT_FOLDER="./$ANALYSIS_NAME-elements"; # don't need this when merge
-    unless ($ANALYSIS_NAME) {
-        die "ERROR: STEP $step_number requires an analysis name\n.";
-    }
 
-    ## make a list of files to analyze, put them into %files
+    ## make a list of elements to analyze, put those element into %files along with relevant file names
     my %files; # holds the element name as key and path to the .tirtsd and the .maf files as array of values
     opendir(my $dh, $ELEMENT_FOLDER) or die "ERROR: Cannot open element folder $ELEMENT_FOLDER, $!";
     while (readdir $dh) {
-
-         ## need to check the README file here to make sure this element has not already been reviewed manually
-
         unless ($_ =~ /^\./) { # prevents reading invisible files or the . and .. files
             my $specific_element_folder = $ELEMENT_FOLDER . "/" . $_ ; # folder with specific element of interest            
             my $tirtsd_file = $ELEMENT_FOLDER . "/" . $_ . "/" . $_ . ".tirtsd";
-            if (-e $tirtsd_file) {
-                $files{$_}[0]=$tirtsd_file;
-            }
-            else {
-                die "ERROR: Folder $ELEMENT_FOLDER/$_ does not have a .tirtsd file, this should not happen.\n";
-            }
 
-            my $alignement_file = $ELEMENT_FOLDER . "/" . $_ . "/" . $_ . ".maf";
-            if (-e $alignement_file) {
-                $files{$_}[1]=$alignement_file;
+            # check if a manual review is already present in the README file for this element
+            my $grep_res = `grep "Manual Review 1 result" $specific_element_folder/README.txt`;
+            if ($grep_res) {
+                warn "WARNING: A prior manual review result was found for element $_, ignoring this elment\n";
             }
             else {
-                die "ERROR: Folder $ELEMENT_FOLDER/$_ does not have a .maf file, this should not happen.\n";
+                if (-e $tirtsd_file) {
+                    $files{$_}[0]=$tirtsd_file;
+                }
+                else {
+                    die "ERROR: Folder $ELEMENT_FOLDER/$_ does not have a .tirtsd file, cannot continue without this file.\n";
+                }
+
+                my $alignement_file = $ELEMENT_FOLDER . "/" . $_ . "/" . $_ . ".maf";
+                if (-e $alignement_file) {
+                    $files{$_}[1]=$alignement_file;
+                }
+                else {
+                    die "ERROR: Folder $ELEMENT_FOLDER/$_ does not have a .maf file, cannot continue without this file.\n";
+                }
             }
         }
     }
     unless (keys %files) {
-        die "ERROR: No files that need manual review were found\n";
+        warn "WARNING: No files that need manual review were found\n";
     }
 
     ## Read the .tirtsd files and process each relevant line (based on %EXAMINE_CODES)
@@ -697,160 +718,254 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         my $TIR_b1; # left bound of TIR accepted by user
         my $TIR_b2; # right bound of TIR accpted by user
         my $TSD_size; # size of TSD accepted by user
+        my $TSD_type; # if empty then it's a number othwise it's TA
+        my $TIR_size; # size of TIR 
+
+        # open the README file
+        open (README, ">>$ELEMENT_FOLDER/$element_name/README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/README.txt\n";
+
 
         # record all the relevant lines from the current .tirtsd file
         my %locs; # holds the line from from the .tirtsd file as key and priority as value
         my $filename_tirtsd = $files{$element_name}[0];
         open (INPUT, $filename_tirtsd) or die "ERROR: Cannot open file $filename_tirtsd, $!";
+        <INPUT>; # skip the header
+        my $i=0;
         while (my $line = <INPUT>) { # reading the individual .tirtsd file
             my @d = split " ", $line;
-            if (exists $EXAMINE_CODES{$d[0]}) {
-                $locs{$line} = $EXAMINE_CODES{$d[0]}; # store the line along with priority
-            }
+            $locs{$line} = $EXAMINE_CODES{$d[0]}; # store the line along with priority
+            $i++;
+        }
+        unless ($i) { # check that at least one line was added
+            die "ERROR: file $filename_tirtsd is empty, cannot continue the analysis\n";
         }
 
-        my $process_element = 1; # boolean, set to one until this element has been processed
-        while ($process_element) {
+        my $menu1 = 1; # boolean, set to one until the user is done with menu 1
+        while ($menu1) {
 
             my %alignment_sequences = fastatohash($files{$element_name}[1]); # load the existing alignment
 
-            # Count the number of lines to display
-            my $number_of_lines = keys %locs;
+            # Display the lines so the user can see what's available
+            print "\nMENU 1: Lines from $filename_tirtsd\n";
+            print "code, TIR-boundaries, TSD numbers\n";
+            foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) { # sort so high priority ones are first
+                   my @d = split " ", $line;
+                print "$d[0], $d[1]-$d[2], $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13]\n";1
+            }
+            print "\n";
+
+            # MENU 1: Ask the user to pick a combination of TIR boundaries and TSD
+            print "Select TIRs and TSDs below, or manually enter a location\n";
+            print "Selection) code, TIR-boundaries, TSD type, Number of TIRS, Average TIR length\n";
+            print "0) Quit\n";
+            my $i=1;
+            my @selections; # holds the information on the lines presented to the user
+
+            foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) {
+                my @d = split " ", $line;
+                my $TSD; # identity of the TSD with maximum abundance
+                my $max_tsd; # highest number of TSDs on the line
             
-            if ($number_of_lines == 0) { # leave if there's nothing to do
-                print "No lines with acceptable codes were found in file $filename_tirtsd\n";
-                my $datestring = localtime();
-                print README "$datestring, No lines with acceptable codes were found in file $filename_tirtsd; stopping the analysis here\n";    
-                print REJECT "$datestring\t$element_name\tSTEP 3\tNo lines with acceptable TIR and TSD codes were found in the .tirtsd file\n";
-                `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
-                if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
-                $process_element = 1;
-            } 
-            else { # there are elements to process, get the information out of the user
+                # determine the TSD with the highest number
+                if ($d[4] > $max_tsd) { $TSD="TA"; $max_tsd =$d[4]; }
+                if ($d[5] > $max_tsd) { $TSD=2; $max_tsd =$d[5];  }
+                if ($d[6] > $max_tsd) { $TSD=3; $max_tsd =$d[6];  }
+                if ($d[7] > $max_tsd) { $TSD=4; $max_tsd =$d[7];  }
+                if ($d[8] > $max_tsd) { $TSD=5; $max_tsd =$d[8];  }
+                if ($d[9] > $max_tsd) { $TSD=6; $max_tsd =$d[9];  }
+                if ($d[10] > $max_tsd) { $TSD=7; $max_tsd =$d[10];  }
+                if ($d[11] > $max_tsd) { $TSD=8; $max_tsd =$d[11];  }
+                if ($d[12] > $max_tsd) { $TSD=9; $max_tsd =$d[12];  }
+                if ($d[13] > $max_tsd) { $TSD=10; $max_tsd =$d[13];  }
 
-                # Display the lines so the user can see what's available
-                print "Lines from $filename_tirtsd\n";
-                print "code, TIR-boundaries, TSD numbers\n";
-                foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) { # sort so high priority ones are first
-                    my @d = split " ", $line;
-                    print "$d[0], $d[1]-$d[2], $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13]\n";
-                }
-                print "\n";
+                # determine the average TIR length for the current combination of sequences and locations";
+                my $number_of_sequences; # total sequences in this alignment
+                my $total_TIR_length; # sum of all the TIR length, used to calculate the average
+                my $TIR_number; # number of sequences with TIRs
+                my $average_TIR_length;
 
-                # Ask the user to pick a combination of TIR boundaries and TSD
-                print "Select TIRs and TSDs below, or manually enter a location\n";
-                print "Selection) code, TIR-boundaries, TSD type, Number of TIRS, Average TIR length\n";
-                my $i=1;
-                my @selections; # holds the information on the lines presented to the user
-                foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) {
-                    my @d = split " ", $line;
-                    my $TSD; # identity of the TSD with maximum abundance
-                    my $max_tsd; # highest number of TSDs on the line
-                
-                    # determine the TSD with the highest number
-                    if ($d[4] > $max_tsd) { $TSD="TA"; $max_tsd =$d[4]; }
-                    if ($d[5] > $max_tsd) { $TSD=2; $max_tsd =$d[5];  }
-                    if ($d[6] > $max_tsd) { $TSD=3; $max_tsd =$d[6];  }
-                    if ($d[7] > $max_tsd) { $TSD=4; $max_tsd =$d[7];  }
-                    if ($d[8] > $max_tsd) { $TSD=5; $max_tsd =$d[8];  }
-                    if ($d[9] > $max_tsd) { $TSD=6; $max_tsd =$d[9];  }
-                    if ($d[10] > $max_tsd) { $TSD=7; $max_tsd =$d[10];  }
-                    if ($d[11] > $max_tsd) { $TSD=8; $max_tsd =$d[11];  }
-                    if ($d[12] > $max_tsd) { $TSD=9; $max_tsd =$d[12];  }
-                    if ($d[13] > $max_tsd) { $TSD=10; $max_tsd =$d[13];  }
-
-                    # determine the average TIR length for the current combination of sequences and locations";
-                    my $number_of_sequences; # total sequences in this alignment
-                    my $total_TIR_length; # sum of all the TIR length, used to calculate the average
-                    my $TIR_number; # number of sequences with TIRs
-                    my $average_TIR_length;
-                    foreach my $key (keys %alignment_sequences) {
-                        my ($tir1, $tir2) = gettir($alignment_sequences{$key}, $d[1], $d[2], $MIN_TIR_SIZE, $TIR_MISMATCHES);
-                        if ($tir1) {
-                            $total_TIR_length += length ($tir1);
-                            $TIR_number += 1;
-                        }
+                foreach my $key (keys %alignment_sequences) {
+                    my ($tir1, $tir2) = gettir($alignment_sequences{$key}, $d[1], $d[2], $MIN_TIR_SIZE, $TIR_MISMATCHES);
+                    if ($tir1) {
+                        $total_TIR_length += length ($tir1);
+                        $TIR_number += 1;
                     }
-                    if ($TIR_number) { # if TIRs have been found
-                        $average_TIR_length = int($total_TIR_length / $TIR_number);
-                        print "$i) $d[0], $d[1]-$d[2], $TSD, $TIR_number, $average_TIR_length\n";  
+                }
+                if ($TIR_number) { # if TIRs have been found
+                    $average_TIR_length = int($total_TIR_length / $TIR_number);
+                    print "$i) $d[0], $d[1]-$d[2], $TSD, $TIR_number, $average_TIR_length\n";  
+                }
+                else {
+                    print "$i) $d[0], $d[1]-$d[2], $TSD, no TIRs found\n";
+                }
+                push @selections, "$d[1]\t$d[2]\t$TSD\t$average_TIR_length\n";   
+                $i++;          
+            }
+            print "$i) manually enter TIRs and TSD\n"; # display menu item to enter manual coordinates
+                            
+            do { # read the user input until it's a number within range
+                 print "Line selection: ";
+                 $pkey = <STDIN>;
+            } until ((looks_like_number($pkey)) and ($pkey <= $i));
+
+            if ($pkey == $i) { # This means the manual selection was entered
+                my $entry_accepted = 1; # set to one until the manual entry has been accepted
+                while ($entry_accepted) {
+                    print "Enter the coordinates manually in the form \"TIR1-left-bound TIR2-right-bound TSD-size TIR-length\" (can put \"TA\" for size, TIR-length optional)\n";
+                    $pkey = <STDIN>;
+                    my @d = split " ", $pkey;
+                    if (looks_like_number($d[0])) { $TIR_b1 = $d[0] } else { $entry_accepted = 0}
+                    if (looks_like_number($d[1])) { $TIR_b2 = $d[1] } else { $entry_accepted = 0}
+                    if (($d[2] eq "TA") or ($d[2] eq "ta")) {
+                        $TSD_size = 2;
+                        $TSD_type = "TA";
+                    }
+                    elsif (looks_like_number($d[2])) {
+                        $TSD_size = $d[2];
                     }
                     else {
-                        print "$i) $d[0], $d[1]-$d[2], $TSD, no TIRs found\n";
+                        $entry_accepted = 0
                     }
-                    push @selections, "$d[1]\t$d[2]\t$TSD\n";   
-                    $i++;          
-                }
-                print "$i) manually enter TIRs and TSD\n";
-                               
-                while (($pkey == 0) or ($pkey > $i)) { # read the user input
-                    print "Line selection [1]: ";
-                    $pkey = <STDIN>;
-                }
-
-                if ($pkey == $i) { # This means the manual selection was entered
-                    my $entry_rejected = 1; # set to one until the manual entry has been accepted
-                    while ($entry_rejected) {
-                        print "Enter the coordinates manually in the form \"TIR1 TIR2 TSD_size\"\n";
-                        $pkey = <STDIN>;
-                        if ($pkey =~ /(\d+)\s(\d+)\s(\d+)/) {
-                            $TIR_b1 = $1;
-                            $TIR_b2 = $2;
-                            $TSD_size = $3;
-                            $entry_rejected = 0;
-                        }
-                        else {
-                            print "ERROR: Did not recognize this manual entry\n";
-                        }
-                    }
-                }
-                else { # This means that the user selected a preset number
-                    my @e = split " ", $selections[$pkey-1];
-                    $TIR_b1 = $e[0];
-                    $TIR_b2 = $e[1];
-                    $TSD_size = $e[2];
-                }
-                $pkey = ""; # reset the pressed key 
-            } 
-
-            # The TIRs and TSDs locations have been selected, next create an alignment to display these to the user  
- #           my %alignment_sequences = fastatohash($files{$ELEMENT_FOLDER}[1]); # load the existing alignment
-            my $display_alignment_file = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); # file with alignment that will be diplayed to the user
-            foreach my $seq_name (keys %alignment_sequences) {
-                unless ($seq_name =~ />consensus/) { # avoid the line with the consensus sequence
-                    print $display_alignment_file ">$seq_name\n";
-                    ## left side sequences
-                    my $left_whole_seq = substr($alignment_sequences{$seq_name}, 0, $TIR_b1);
-                    $left_whole_seq =~ s/-//g; #remove gaps
-                    # if there are no or few sequences, replace left TSD with space symbols
-                    if ((length $left_whole_seq) < $TSD_size) {
-                        $left_whole_seq = "";
-                        for (my $i=0; $i<$TSD_size; $i++) {
-                            $left_whole_seq .= "s";
-                        }
-                    }
-                    my $left_tir_seq1 = substr($left_whole_seq, -$TSD_size-1, $TSD_size);
-                    my $left_tir_seq2 = substr($alignment_sequences{$seq_name}, $TIR_b1-1, $TIR_bp);
-
-                    ## right side sequences
-                    my $right_whole_seq = substr($alignment_sequences{$seq_name}, $TIR_b2, -1);
-                    $right_whole_seq =~ s/-//g; #remove gaps
-                    # if there are no or few sequences, replace right TSD with space symbols
-                    if ((length $right_whole_seq) < $TSD_size) {
-                        $right_whole_seq = "";
-                        for (my $i=0; $i<$TSD_size; $i++) {
-                            $right_whole_seq .= "s";
-                        }
-                    }
-                    my $right_tir_seq1 = substr($right_whole_seq, 0, $TSD_size);
-                    my $right_tir_seq2 = substr($alignment_sequences{$seq_name}, $TIR_b2-$TIR_bp, $TIR_bp);
-
-                    print $display_alignment_file $left_tir_seq1, "sss", $left_tir_seq2, "ssssssssssssssssssss", $right_tir_seq2, "sss", $right_tir_seq1, "\n";
+                    if (looks_like_number($d[3])) { $TIR_size = $d[3]}           
                 }
             }
+            elsif ($pkey == 0) { # the user has decided to quit
+                $menu1 = 0;
+            }
+            else { # This means that the user selected a preset number
+                my @e = split " ", $selections[$pkey-1];
+                if ($e[2] eq "TA") { # adjust in case the TSD is "TA" rather than a number
+                    $e[2] = 2;
+                    $TSD_type = "TA";
+                }
+                $TIR_b1 = $e[0];
+                $TIR_b2 = $e[1];
+                $TSD_size = $e[2];
+                $TIR_size = $e[3];
+            }
+            $pkey = ""; # reset the pressed key 
+
+            if ($menu1) { # only continue if the user has not elected to quit menu 1
+                # The TIRs and TSDs location have now been selected, next create an alignment to display these to the user  
+                open (OUTPUT, ">", $temp_alignment_file) or die "Cannot create temporary alignment file $temp_alignment_file\n";
+
+                foreach my $seq_name (keys %alignment_sequences) {
+                    unless ($seq_name =~ /consensus/) { # avoid the line with the consensus sequence
+                        print OUTPUT ">$seq_name\n";
+                        ## left side sequences
+                        my $left_whole_seq = substr($alignment_sequences{$seq_name}, 0, $TIR_b1);
+                        $left_whole_seq =~ s/-//g; #remove gaps
+                        # if there are no or few sequences, replace left TSD with space symbols
+                        if ((length $left_whole_seq) < $TSD_size) {
+                            $left_whole_seq = "";
+                            for (my $i=0; $i<=$TSD_size; $i++) {
+                                $left_whole_seq .= "s";
+                            }
+                        }
+                        my $left_tir_seq1 = substr($left_whole_seq, -$TSD_size-1, $TSD_size);
+                        my $left_tir_seq2 = substr($alignment_sequences{$seq_name}, $TIR_b1-1, $TIR_bp);
+
+                        ## right side sequences
+                        my $right_whole_seq = substr($alignment_sequences{$seq_name}, $TIR_b2, -1);
+                        $right_whole_seq =~ s/-//g; #remove gaps
+                        # if there are no or few sequences, replace right TSD with space symbols
+                        if ((length $right_whole_seq) < $TSD_size) {
+                            $right_whole_seq = "";
+                            for (my $i=0; $i<=$TSD_size; $i++) {
+                                $right_whole_seq .= "s";
+                            }
+                        }
+                        my $right_tir_seq1 = substr($right_whole_seq, 0, $TSD_size);
+                        my $right_tir_seq2 = substr($alignment_sequences{$seq_name}, $TIR_b2-$TIR_bp, $TIR_bp);
+
+                        print OUTPUT $left_tir_seq1, "sss", $left_tir_seq2, "ssssssssssssssssssss", $right_tir_seq2, "sss", $right_tir_seq1, "\n";
+                    }
+                }
+
+                # MENU 2 display the alignement to the user and ask for evaluation
+                `aliview $temp_alignment_file`;
+                if ($?) { die "Error executing: aliview $temp_alignment_file, error code $?\n"}
+
+                my $menu2 = 1; # boolean, set to 1 until the user is done with menu 2
+
+                while ($menu2) { #keep displaying until the user ready to leave
+                    print "\nMENU 2: Select what to do with this element:\n";
+                    print "0) Go back to the previous menu\n";
+                    if ($TSD_type eq "TA") {
+                        print "1) Update the README to say this is an element with TSDs of type TA and TIRs of size $TIR_size\n";
+                    }
+                    else {
+                        print "1) Update the README to say this as an element with TSDs of size $TSD_size and TIRs of size $TIR_size\n";
+                    }
+                    print "2) Update the README to say this is not an element\n";
+                    print "3) Change the TSD size and/or TIR size\n";
+                    print "4) Make a note in the README file\n";
+                    print "5) Done reviewing this element\n";
+
+                    do { # read the user input until it's a number within range
+                        print "Line selection: ";
+                        $pkey = <STDIN>;
+                    } until ((looks_like_number($pkey)) and ($pkey <= 5));
+
+                    # process the user's choice
+                    if ($pkey == 0) {
+                        $menu2 = 0;
+                    } 
+                    elsif ($pkey == 1) {
+                        my $datestring = localtime(); 
+                        if ($TSD_type eq "TA") {
+                            print README "$datestring, Manual Review 1 result: This is an element, TSD TA, TIR size $TIR_size\n";
+                        }
+                        else {
+                            print README "$datestring, Manual Review 1 result: This is an element, TSD $TSD_size, TIR size $TIR_size\n";
+                        }
+                    }
+                    elsif ($pkey == 2) {
+                        my $datestring = localtime(); 
+                        print README "$datestring, Manual Review 1 result: This is not an element\n";
+                        print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
+                        `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
+                        if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
+
+                    }
+                    elsif ($pkey == 3) {
+                        my $pkey2;
+                        do { # read the user input until it's a number
+                            print "Enter TSD size or type \"TA\": ";
+                            $pkey2 = <STDIN>;
+                            chomp $pkey2;
+                            if (($pkey2 eq "TA") or ($pkey2 eq "ta")) {
+                                $TSD_type = "TA";
+                                $pkey2 = 2;
+                            }
+                        } until (looks_like_number($pkey2));
+                        $TSD_size = $pkey2;
+
+                        do { # read the user input until it's a number
+                            print "Enter TIR size, enter zero if size is unknown: ";
+                            $pkey2 = <STDIN>;
+                            chomp $pkey2;
+                        } until (looks_like_number($pkey2));
+                        $TIR_size = $pkey2;
+                    }
+                    elsif ($pkey == 4) {
+                        my $datestring = localtime(); 
+                        print "Edit the file $ELEMENT_FOLDER/$element_name/README.txt starting with\n";
+                        print "$datestring, Manual Review 1 user note: \n";
+                        print "Press enter when done: ";
+                        <STDIN>;
+                    }
+                    elsif ($pkey == 5) {
+                        $menu2 = 0;
+                        $menu1 = 0;
+                    }
+                }
+            }
+
+            
         }
+        close README;
     }
 }
-
 close ANALYSIS;
 close REJECT;
