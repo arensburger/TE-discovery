@@ -1,5 +1,7 @@
-# Feb 2025 - Top-level script for TE discovery pipeline
-# Inputs: List of TE sequences (FASTA) and a genome (FASTA)
+# TE Discovery Pipeline - Main Script
+# Author: Peter Arensburger
+# Date: March 2025
+# Description: This script runs the full TE discovery pipeline using input protein sequences and genome data.
 
 use strict;
 use Getopt::Long;
@@ -11,10 +13,13 @@ use List::Util qw(max);
 use Scalar::Util qw(looks_like_number);
 
 ### CONSTANTS for all steps
-my $NUM_THREADS = 8; # number of threads to use
+my $NUM_THREADS = `nproc --all`;
+if ($?) { warn "WARNING could not determine the number of cores automatically, defaulting to 8\n"; $NUM_THREADS=8}
+chomp $NUM_THREADS;
 
-### INPUTs from command line
+### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
+my $TBLASTN_FILE; # name of the file containing the out put of the tblastn
 my $INPUT_GENOME; # fasta formated file with genome that input proteins
 my $ANALYSIS_NAME; # name to give to this analysis, can be any string
 my $ANALYSIS_FILES_OUTPUT_DIR; # directory where analsysis output files of the analysis are stored
@@ -24,21 +29,37 @@ my $END_STEP = 100000; # analysis step to end at, by deault set to 1000000 (hope
 
 ### CHECK INPUTS Read and check that the inputs have been provided
 GetOptions(
-	't:s'   => \$INPUT_PROTEIN_SEQUENCES,
+	'p:s'   => \$INPUT_PROTEIN_SEQUENCES,
+	't:s'   => \$TBLASTN_FILE,
 	'g:s'   => \$INPUT_GENOME,
     'n:s'   => \$ANALYSIS_NAME,
     'a:i'   => \$START_STEP,
-    'b:i'   => \$END_STEP
+    'b:i'   => \$END_STEP,
 );
 
 ## CHECK INPUTS Validate required input files
-unless (\$INPUT_PROTEIN_SEQUENCES and $INPUT_GENOME and $ANALYSIS_NAME) {
-	die "usage perl TEdiscovery.pl <-t fasta file with starting TE sequences REQUIRED> <-g fasta file of genome processed with makeblastdb under the same name REQUIRED> <-n name for this analysis REQUIRED> <-a start the analysis at this step OPTIONAL> <-b end the analysis at this step OPTIONAL\n";
+## There are two possible combinations of inputs
+unless (($INPUT_PROTEIN_SEQUENCES and $INPUT_GENOME and $ANALYSIS_NAME) or ($TBLASTN_FILE and $INPUT_GENOME and $ANALYSIS_NAME)) {
+	die "Usage, two options:
+    Option 1: perl TEdiscovery.pl <-p protein fasta file REQUIRED> <-g fasta file of genome processed with makeblastdb as shown below REQUIRED> <-n name for this analysis REQUIRED> <-a starting analysis step OPTIONAL> <-b end analysis step OPTIONAL>\n
+    Option 2: perl TEdiscovery.pl <-t output of tblastn REQUIRED> <-g fasta file of genome processed with makeblastdb as shown below REQUIRED> <-n name for this analysis REQUIRED> <-a starting analysis step OPTIONAL> <-b end analysis step OPTIONAL>
+    
+    Commands to generate required files for both options:
+    1) makeblastdb -in <genome fasta file name> -dbtype nucl
+    2) samtools faidx <genome fasta file name>
+       awk \'{OFS=\"\\t\"; print \$1,\$2}\' < <genome fasta file name>.fai > <genome fasta file name>.length
+
+    Command to generate required file for option 2
+    tblastn -query <protein fasta file> -db <genome fasta file name> -outfmt \"6 qseqid sseqid sstart send pident length qlen\" -out tblastn.o -num_threads <number of threads>
+    (the output file of this command should be provided as the -t parameter)\n";
 }
+
+## VARIABLES used by more than one step in the pipeline
+my $ANALYSIS_FILES_OUTPUT_DIR="./$ANALYSIS_NAME-analysis-files"; # directory to store output files of current analysis (no slash at the end), these can be destroyed when analysis is finished
+my $BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FILES_OUTPUT_DIR/tblastn.o"; # default name and location unless a file is provided
 
 ## CHECK INPUTS Create output directory for analysis files if necessary
 print "Preliminary steps...\n";
-my $ANALYSIS_FILES_OUTPUT_DIR="./$ANALYSIS_NAME-analysis-files"; # directory to store output files of current analysis (no slash at the end), these can be destroyed when analysis is finished
 if (-d $ANALYSIS_FILES_OUTPUT_DIR) {
     print "\tWARNING: Directory $ANALYSIS_FILES_OUTPUT_DIR already exists, using it to store files generated during this analysis (existing files with the same name will be overwriten, but will not overwrite folders, that will crash the script)\n";
 }
@@ -56,9 +77,6 @@ else {
     print "\tCreating directory $ELEMENT_FOLDER that will have subdirectories for individual elements\n";
     mkdir( $ELEMENT_FOLDER ) or die "Couldn't create $ELEMENT_FOLDER directory, $!";
 }
-
-## VARIABLES used by more than one step in the pipeline
-my $blast_output_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/tblastn.o"; 
 
 ## Create and record start parameters in file
 my $datestring = localtime();
@@ -107,14 +125,30 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     my %protein_ids; # holds the id the input proteins that passed the filtering tests as key and the number of copies that passed the test as values
     my %rejected_ids; # id's that did not make the cut
 
-    ## Excute the tblastn search
-   `tblastn -query $INPUT_PROTEIN_SEQUENCES -db $INPUT_GENOME -outfmt "6 qseqid sseqid sstart send pident length qlen" -out $blast_output_file_name -num_threads $NUM_THREADS`;
-   if ($?) { die "ERROR executing tblastn, stopping analysis (hint: was the genome formated with makeblastdb?): error code $?\n"}
+    ## Either excute the tblastn search or load the output of a previous run
+    if ($TBLASTN_FILE) { # tblastn file was provided
+        # sanity check that the file looks ok
+        open (INPUT, $TBLASTN_FILE) or die "Cannot open tblastn file $TBLASTN_FILE\n";
+        while (my $line = <INPUT>) {
+            unless ($line =~ /^\S+\s\S+\s\d+\s\d+\s\S+\s\d+\s\d+\s$/) {
+                die "ERROR: tblastn file $TBLASTN_FILE is not formatted as expected at line\n$line";
+            }
+        }
+        close INPUT;
+
+        $BLAST_OUTPUT_FILE_NAME = $TBLASTN_FILE;
+        print ANALYSIS "STEP1: tblastn output was provided in file $TBLASTN_FILE\n";
+    }
+    else {
+        `tblastn -query $INPUT_PROTEIN_SEQUENCES -db $INPUT_GENOME -outfmt "6 qseqid sseqid sstart send pident length qlen" -out $BLAST_OUTPUT_FILE_NAME -num_threads $NUM_THREADS`;
+        if ($?) { die "ERROR executing tblastn, stopping analysis (hint: was the genome formated with makeblastdb?): error code $?\n"}
+        print ANALYSIS "STEP1: tblastn was run by the scritpt the output is in file $BLAST_OUTPUT_FILE_NAME\n";
+    }
 
     ## Inspired by the Goubert et al. protocol, filter elements that 1) have >= 80% identity to genome, 2) have 50% length of the query, 3) are found at multiple locations
     my %candidate_protein; # hash with protein name as key and string with chromosome and middle location of element on that chromsome
 
-    open (INPUT, "$blast_output_file_name") or die "ERROR: Cannot open file $blast_output_file_name\n";
+    open (INPUT, "$BLAST_OUTPUT_FILE_NAME") or die "ERROR: Cannot open file $BLAST_OUTPUT_FILE_NAME\n";
     while (my $line = <INPUT>) {
         my $gi=0; # boolean, set to zero until the genome identity test is passed
         my $cr=0; # boolean, set to zero until the coverage ratio test is passed
@@ -273,7 +307,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         # for each sequence of this element extend it by $BLAST_EXTEND bps on both sides of the sequence
         my @blastlines = (); # holds all the relevant blast lines for this element
         my $j; # counter of the number of blast lines for this element
-        open (INPUT, $blast_output_file_name) or die "ERROR: cannot open file blast file output $blast_output_file_name\n";
+        open (INPUT, $BLAST_OUTPUT_FILE_NAME) or die "ERROR: cannot open file blast file output $BLAST_OUTPUT_FILE_NAME\n";
         while (my $line = <INPUT>) {
             my @data = split ' ', $line;
             if ($data[0] eq $element_name) {
@@ -326,7 +360,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         # align the sequences
         my $aligned_sequences = File::Temp->new(UNLINK => 1, SUFFIX => '.maf' ); 
      
-       `mafft --quiet --thread -$NUM_THREADS $extended_fasta_name > $aligned_sequences`;
+       `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences`;
         if ($?) { die "Error executing mafft, error code $?\n"}
 
         # STEP 2.2.3
@@ -577,15 +611,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 }
             }
 
-            # # report if no TIR-TSD combnations have been found
-            # unless (scalar @tsd_tir_combinations) {
-            #     my $datestring = localtime(); 
-            #     print README "$datestring, no acceptable TIR-TSD combinations have been found, stopping the analysis here.\n";
-            #     print REJECT "$datestring\t$element_name\tSTEP 2\tno TIR-TSD found\n";
-            #     `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
-            #     if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
-            # }
-
             # go through the element and identify those candidate locations that pass the tests for TIR-TSD combinatations
             my @successful_candidates; # locations and tsd numbers of candidate locations that the analysis will continue with
             my %failed_candidates; # success codes of the failed candidate and number of candidates as value, used to report failure to the user 
@@ -711,8 +736,13 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         warn "WARNING: No files that need manual review were found\n";
     }
 
+    my $count = 0; # used to report to the user how many elements need to be reviewed
     ## Read the .tirtsd files and process each relevant line (based on %EXAMINE_CODES)
     foreach my $element_name (keys %files) {
+
+        $count++;
+        my $review_elements = keys %files; # total number of elements to review
+        print "\tElement $element_name $count of $review_elements\n";
 
         # Variables specific to this section
         my $TIR_b1; # left bound of TIR accepted by user
@@ -723,7 +753,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
         # open the README file
         open (README, ">>$ELEMENT_FOLDER/$element_name/README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/README.txt\n";
-
 
         # record all the relevant lines from the current .tirtsd file
         my %locs; # holds the line from from the .tirtsd file as key and priority as value
@@ -746,18 +775,9 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             my %alignment_sequences = fastatohash($files{$element_name}[1]); # load the existing alignment
 
             # Display the lines so the user can see what's available
-            print "\nMENU 1: Lines from $filename_tirtsd\n";
-            print "code, TIR-boundaries, TSD numbers\n";
-            foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) { # sort so high priority ones are first
-                   my @d = split " ", $line;
-                print "$d[0], $d[1]-$d[2], $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13]\n";1
-            }
-            print "\n";
-
-            # MENU 1: Ask the user to pick a combination of TIR boundaries and TSD
-            print "Select TIRs and TSDs below, or manually enter a location\n";
-            print "Selection) code, TIR-boundaries, TSD type, Number of TIRS, Average TIR length\n";
-            print "0) Quit\n";
+            print "\nMENU 1\n";
+            print "0) Quit this element\n\n";
+            print "#) code | TIR-boundaries, # sequences with TIRs, Mean TIR length | Number of TSDs, Selected TSD\n";
             my $i=1;
             my @selections; # holds the information on the lines presented to the user
 
@@ -791,28 +811,34 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         $TIR_number += 1;
                     }
                 }
+
+               
                 if ($TIR_number) { # if TIRs have been found
                     $average_TIR_length = int($total_TIR_length / $TIR_number);
-                    print "$i) $d[0], $d[1]-$d[2], $TSD, $TIR_number, $average_TIR_length\n";  
                 }
                 else {
-                    print "$i) $d[0], $d[1]-$d[2], $TSD, no TIRs found\n";
+                    $TIR_number = "No TIRs found";
+                    $average_TIR_length = "N/A";
                 }
+
+                print "$i) $d[0] | $d[1]-$d[2], $TIR_number, $average_TIR_length | $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13], $TSD\n";
                 push @selections, "$d[1]\t$d[2]\t$TSD\t$average_TIR_length\n";   
                 $i++;          
             }
-            print "$i) manually enter TIRs and TSD\n"; # display menu item to enter manual coordinates
+            print "\n$i) manually enter TIRs and TSD\n"; # display menu item to enter manual coordinates
                             
             do { # read the user input until it's a number within range
                  print "Line selection: ";
                  $pkey = <STDIN>;
             } until ((looks_like_number($pkey)) and ($pkey <= $i));
-
-            if ($pkey == $i) { # This means the manual selection was entered
-                my $entry_accepted = 1; # set to one until the manual entry has been accepted
-                while ($entry_accepted) {
+            
+            if ($pkey == $i) { # This means the manual selection was entered  
+                my $entry_accepted; # used to know if user has finished selecting             
+                do {
+                    $entry_accepted = 1; # assume user will put in a correct entry, set to zero if not
                     print "Enter the coordinates manually in the form \"TIR1-left-bound TIR2-right-bound TSD-size TIR-length\" (can put \"TA\" for size, TIR-length optional)\n";
                     $pkey = <STDIN>;
+                    chomp $pkey;
                     my @d = split " ", $pkey;
                     if (looks_like_number($d[0])) { $TIR_b1 = $d[0] } else { $entry_accepted = 0}
                     if (looks_like_number($d[1])) { $TIR_b2 = $d[1] } else { $entry_accepted = 0}
@@ -826,8 +852,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     else {
                         $entry_accepted = 0
                     }
-                    if (looks_like_number($d[3])) { $TIR_size = $d[3]}           
-                }
+                    if (looks_like_number($d[3])) { $TIR_size = $d[3]} else { $TIR_size = "N/A"}    
+                } until ($entry_accepted);
             }
             elsif ($pkey == 0) { # the user has decided to quit
                 $menu1 = 0;
@@ -887,6 +913,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 if ($?) { die "Error executing: aliview $temp_alignment_file, error code $?\n"}
 
                 my $menu2 = 1; # boolean, set to 1 until the user is done with menu 2
+                my $element_rejected = 0; # boolean, set to 0 unless option "this is not an element selected", used to know which README to edit
 
                 while ($menu2) { #keep displaying until the user ready to leave
                     print "\nMENU 2: Select what to do with this element:\n";
@@ -926,7 +953,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
                         `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
                         if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
-
+                        $element_rejected = 1;
                     }
                     elsif ($pkey == 3) {
                         my $pkey2;
@@ -950,7 +977,12 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     }
                     elsif ($pkey == 4) {
                         my $datestring = localtime(); 
-                        print "Edit the file $ELEMENT_FOLDER/$element_name/README.txt starting with\n";
+                        if ($element_rejected) {
+                            print "Edit the file $ANALYSIS_FILES_OUTPUT_DIR/$element_name/README.txt starting with\n";
+                        }
+                        else {
+                            print "Edit the file $ELEMENT_FOLDER/$element_name/README.txt starting with\n";
+                        }
                         print "$datestring, Manual Review 1 user note: \n";
                         print "Press enter when done: ";
                         <STDIN>;
@@ -960,9 +992,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         $menu1 = 0;
                     }
                 }
-            }
-
-            
+            }            
         }
         close README;
     }
