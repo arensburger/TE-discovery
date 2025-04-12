@@ -56,12 +56,11 @@ unless (($INPUT_PROTEIN_SEQUENCES and $INPUT_GENOME and $ANALYSIS_NAME) or ($TBL
 
 ## VARIABLES used by more than one step in the pipeline
 my $ANALYSIS_FILES_OUTPUT_DIR="./$ANALYSIS_NAME-analysis-files"; # directory to store output files of current analysis (no slash at the end), these can be destroyed when analysis is finished
-my $BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FILES_OUTPUT_DIR/tblastn.o"; # default name and location unless a file is provided
 
 ## CHECK INPUTS Create output directory for analysis files if necessary
 print "Preliminary steps...\n";
 if (-d $ANALYSIS_FILES_OUTPUT_DIR) {
-    print "\tWARNING: Directory $ANALYSIS_FILES_OUTPUT_DIR already exists, using it to store files generated during this analysis (existing files with the same name will be overwriten, but will not overwrite folders, that will crash the script)\n";
+    die "Directory $ANALYSIS_FILES_OUTPUT_DIR already exists, the script needs to create a new empty directory\n";
 }
 else {
     print "\tCreating directory $ANALYSIS_FILES_OUTPUT_DIR for storing files generated during the analysis\n";
@@ -71,38 +70,33 @@ else {
 ## CHECK INPUTS Create output directory for individual elements if necessary
 my $ELEMENT_FOLDER="./$ANALYSIS_NAME-elements"; # directory where the analysis of individual element will be stored
 if (-d $ELEMENT_FOLDER) {
-    print "\tWARNING: Directory $ELEMENT_FOLDER already exists, using it to put folders for individual elements (any current subfolders will not be overwritten and will be used for subsequent analysis)\n";
+    die "Directory $ELEMENT_FOLDER already exists, the script needs to create a new empty directory\n";
 }
 else {
     print "\tCreating directory $ELEMENT_FOLDER that will have subdirectories for individual elements\n";
     mkdir( $ELEMENT_FOLDER ) or die "Couldn't create $ELEMENT_FOLDER directory, $!";
 }
 
-## Create and record start parameters in file
-my $datestring = localtime();
-my $analysis_parameters_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/Analysis_parameters.txt";
-if (-f $analysis_parameters_file_name) {
-    print "\tWARNING: Analysis parameters file $analysis_parameters_file_name already exists, appending a new set of parameters to that file\n";
-    open (ANALYSIS,'>>', $analysis_parameters_file_name) or die "ERROR: cannot open file $analysis_parameters_file_name\n";
+## Create files to store analysis parameters, and to store rejected sequences. 
+## Search for a unique names, with the same index for both files
+my $analysis_parameters_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/Analysis_parameters.txt"; # file to record parameters
+my $rejection_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/Rejected_sequences.txt"; # file to store rejected sequences, and why
+if ((-f $analysis_parameters_file_name) or (-f $rejection_file_name)){
+   die "ERROR: Either or both files $analysis_parameters_file_name and/or $rejection_file_name already exists, this should not happen"
 }
 else {
     open (ANALYSIS,'>', $analysis_parameters_file_name) or die "ERROR: cannot open file $analysis_parameters_file_name\n";
+    open (REJECT, '>', $rejection_file_name) or die "ERROR, cannot create output file $rejection_file_name\n";
 }
 print ANALYSIS "Analysis name: $ANALYSIS_NAME\n";
+my $datestring = localtime();
 print ANALYSIS "Date and time: $datestring\n";
 print ANALYSIS "Input file: $INPUT_PROTEIN_SEQUENCES\n";
 print ANALYSIS "Genome: $INPUT_GENOME\n\n";
 print ANALYSIS "Parameters, set in the script:\n";
 
-## Create file to record rejected sequences
-my $rejection_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/Rejected_sequences.txt";
-if (-f $rejection_file_name) {
-    print "\tWARNING: Rejected sequences text already exists, adding new entries to this file\n";
-    open (REJECT, '>>', $rejection_file_name) or die "ERROR, cannot open output file $rejection_file_name\n";
-}
-else {
-    open (REJECT, '>', $rejection_file_name) or die "ERROR, cannot create output file $rejection_file_name\n";
-}
+my $BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FILES_OUTPUT_DIR/tblastn.o"; # default name and location unless a file is provided, default file name has index added
+                                                                                # also, could not define this earlier because it depends on the ultimate analysis name
 
 ### PIPELINE STEP 1 identify proteins that match the genome with parameters specified above under
 ###     The output is a list of proteins for further analysis recorded in the file $output_file_name
@@ -147,7 +141,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
     ## Inspired by the Goubert et al. protocol, filter elements that 1) have >= 80% identity to genome, 2) have 50% length of the query, 3) are found at multiple locations
     my %candidate_protein; # hash with protein name as key and string with chromosome and middle location of element on that chromsome
-
     open (INPUT, "$BLAST_OUTPUT_FILE_NAME") or die "ERROR: Cannot open file $BLAST_OUTPUT_FILE_NAME\n";
     while (my $line = <INPUT>) {
         my $gi=0; # boolean, set to zero until the genome identity test is passed
@@ -210,12 +203,11 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     # Create individual directories for each element
     my $i=0; # counts the number of output lines, to check if it's zero
     foreach my $prot_name (keys %protein_ids) {
-        my $folder_name = "$ELEMENT_FOLDER/$prot_name";
-        if (-d $folder_name) {
-            print "\tElement folder $folder_name already exists, using it without modification to existing files\n";
+        if (-d "$ELEMENT_FOLDER/$prot_name") {
+            print "\tWARNING: Element folder $ELEMENT_FOLDER/$prot_name already exists (this should not normally happen), writing files to this folder\n";
         }
         else {
-            mkdir( $folder_name ) or die "Couldn't create $folder_name directory, $!";
+            mkdir( "$ELEMENT_FOLDER/$prot_name" ) or die "Couldn't create $ELEMENT_FOLDER/$prot_name directory, $!";
         }
         $i++;
     }
