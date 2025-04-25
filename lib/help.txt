@@ -1,0 +1,15 @@
+CALL FOR HELP
+You can run this script with different parameters. To call up this help page use: 
+perl mainscript.pl -h
+
+REQUIRED OF ALL ANALYSES
+All other analyses but help will requires at that at least these parameters are set:
+    -n folder name (full path) to store analysis files
+    -e folder name (full path) to store elements
+
+SPECIFY STEPS TO EXECUTE
+Unless you specify otherwise all the analysis steps will be executed. To specify that just one or a range
+of consecutive steps be executed set the parameter(s):
+    -a number of first (or only) step to execute
+    -b number of last step to execute, if not specified then only the first step will be excuted
+    
