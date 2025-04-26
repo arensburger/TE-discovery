@@ -180,4 +180,30 @@ sub cleanup {
     }
 }
 
+sub fixdirname {
+	my ($string) = @_;
+	chomp $string;
+
+	# if the name starts with ./ replace the period with the current directory
+	if(substr($string, 0, 2) eq "./") {
+		my $currdir = `pwd`;
+		chomp $currdir;
+		$currdir =~ s/ /\\ /g;
+		$string = $currdir . "/" . substr($string, 2);
+	}
+
+	# replace spaces with '\ ' if they don't already have one
+	$string =~ s/\\ /backslachandspace/g; # replace all existing backslash and spaces with long, unique, word
+	$string =~ s/ /\\ /g; #replace all remaing spaces with backslash and space symbols
+	$string =~ s/backslachandspace/\\ /g; #put the backslash and space symbols back
+	$string =~ s/\(/\\(/g; #replace all open parentheses
+	$string =~ s/\)/\\)/g; #replace all close parentheses
+
+	#make sure the name does not end with a /
+	if ((substr $string, -1) eq "/") {
+		$string = substr($string, 0, -1);
+	}
+	return ($string);
+}
+
 1;
