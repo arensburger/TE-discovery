@@ -12,108 +12,120 @@ use List::UtilsBy qw(max_by);
 use List::Util qw(max);
 use Scalar::Util qw(looks_like_number);
 
-### CONSTANTS for all steps
-my $NUM_THREADS = `nproc --all`;
-if ($?) { warn "WARNING could not determine the number of cores automatically, defaulting to 8\n"; $NUM_THREADS=8}
-chomp $NUM_THREADS;
-
 ### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
 my $TBLASTN_FILE; # name of the file containing the out put of the tblastn
 my $INPUT_GENOME; # fasta formated file with genome that input proteins
-my $ANALYSIS_NAME; # name to give to this analysis, can be any string
-my $ANALYSIS_FILES_OUTPUT_DIR; # directory where analsysis output files of the analysis are stored
+my $ANALYSIS_FOLDER; # name of folder to store analysis files into
 my $ELEMENT_FOLDER; # directory where individual folders for each element are stored
-my $START_STEP = 0; # analysis step to start at, by default is set to zero
-my $END_STEP = 100000; # analysis step to end at, by deault set to 1000000 (hopefully fewer than those number of steps)
+my $REJECTED_ELEMENTS_FOLDER = "Rejected_elements"; # name of folder that contains files for elements have been reviewed and rejected
+my $START_STEP; # analysis step to start at
+my $END_STEP; # analysis step to end at,
+my $SHOW_HELP; # call for help 
 
 ### CHECK INPUTS Read and check that the inputs have been provided
 GetOptions(
 	'p:s'   => \$INPUT_PROTEIN_SEQUENCES,
 	't:s'   => \$TBLASTN_FILE,
 	'g:s'   => \$INPUT_GENOME,
-    'n:s'   => \$ANALYSIS_NAME,
+    'n:s'   => \$ANALYSIS_FOLDER,
+    'e:s'   => \$ELEMENT_FOLDER,
     'a:i'   => \$START_STEP,
     'b:i'   => \$END_STEP,
+    'h'     => \$SHOW_HELP,
 );
 
-## CHECK INPUTS Validate required input files
-## There are two possible combinations of inputs
-unless (($INPUT_PROTEIN_SEQUENCES and $INPUT_GENOME and $ANALYSIS_NAME) or ($TBLASTN_FILE and $INPUT_GENOME and $ANALYSIS_NAME)) {
-	die "Usage, two options:
-    Option 1: perl TEdiscovery.pl <-p protein fasta file REQUIRED> <-g fasta file of genome processed with makeblastdb as shown below REQUIRED> <-n name for this analysis REQUIRED> <-a starting analysis step OPTIONAL> <-b end analysis step OPTIONAL>\n
-    Option 2: perl TEdiscovery.pl <-t output of tblastn REQUIRED> <-g fasta file of genome processed with makeblastdb as shown below REQUIRED> <-n name for this analysis REQUIRED> <-a starting analysis step OPTIONAL> <-b end analysis step OPTIONAL>
-    
-    Commands to generate required files for both options:
-    1) makeblastdb -in <genome fasta file name> -dbtype nucl
-    2) samtools faidx <genome fasta file name>
-       awk \'{OFS=\"\\t\"; print \$1,\$2}\' < <genome fasta file name>.fai > <genome fasta file name>.length
-
-    Command to generate required file for option 2
-    tblastn -query <protein fasta file> -db <genome fasta file name> -outfmt \"6 qseqid sseqid sstart send pident length qlen\" -out tblastn.o -num_threads <number of threads>
-    (the output file of this command should be provided as the -t parameter)\n";
+## CHECK INPUTS if help was called (this could probably be improved)
+if ($SHOW_HELP) {
+    my $help_file_location = "/home/peter/TE-discovery/lib/help.txt";
+    open (INPUT, $help_file_location) or die "ERROR: Cannot open help file at $help_file_location\n";
+    while (my $line = <INPUT>) {
+        print "$line";
+    }
+    print "\n";
+    exit;
 }
 
-## VARIABLES used by more than one step in the pipeline
-my $ANALYSIS_FILES_OUTPUT_DIR="./$ANALYSIS_NAME-analysis-files"; # directory to store output files of current analysis (no slash at the end), these can be destroyed when analysis is finished
+## CHECK INPUTS Validate required input files
+unless ($ANALYSIS_FOLDER and $ELEMENT_FOLDER) {
+    die "usage: perl mainscript.pl <-n folder name (full path) to store analysis files REQUIRED> <-e folder name to store elements REQUIRED> <-h for more help>\n";
+}
+
+## CHECK INPUTS set the start and end steps
+if ($START_STEP) {
+    unless ($END_STEP) {
+        $END_STEP = $START_STEP;
+    }
+}
+else { 
+    $START_STEP = 1;
+    $END_STEP = 100000; # set to a very high number;
+}
 
 ## CHECK INPUTS Create output directory for analysis files if necessary
-print "Preliminary steps...\n";
-if (-d $ANALYSIS_FILES_OUTPUT_DIR) {
-    die "Directory $ANALYSIS_FILES_OUTPUT_DIR already exists, the script needs to create a new empty directory\n";
+$ANALYSIS_FOLDER = fixdirname($ANALYSIS_FOLDER);
+if (-d $ANALYSIS_FOLDER) {
+    warn "Directory $ANALYSIS_FOLDER already exists\n";
 }
 else {
-    print "\tCreating directory $ANALYSIS_FILES_OUTPUT_DIR for storing files generated during the analysis\n";
-    mkdir( $ANALYSIS_FILES_OUTPUT_DIR ) or die "Couldn't create $ANALYSIS_FILES_OUTPUT_DIR directory, $!";
+    print "\tCreating directory $ANALYSIS_FOLDER for storing files generated during the analysis\n";
+    mkdir( $ANALYSIS_FOLDER ) or die "Couldn't create $ANALYSIS_FOLDER directory, $!";
+}
+
+## CHECK INPUTS Create output directory for elements that have been rejected
+my $reject_folder_path = $ANALYSIS_FOLDER . "/" . $REJECTED_ELEMENTS_FOLDER;
+if (-d $reject_folder_path) {
+    warn "Directory $reject_folder_path already exists\n";
+}
+else {
+    print "\tCreating directory $reject_folder_path for storing rejected elements\n";
+    mkdir( $reject_folder_path ) or die "Couldn't create $reject_folder_path directory, $!";
 }
 
 ## CHECK INPUTS Create output directory for individual elements if necessary
-my $ELEMENT_FOLDER="./$ANALYSIS_NAME-elements"; # directory where the analysis of individual element will be stored
+$ELEMENT_FOLDER = fixdirname($ELEMENT_FOLDER);
 if (-d $ELEMENT_FOLDER) {
-    die "Directory $ELEMENT_FOLDER already exists, the script needs to create a new empty directory\n";
+    warn "Directory $ELEMENT_FOLDER already exists\n";
 }
 else {
     print "\tCreating directory $ELEMENT_FOLDER that will have subdirectories for individual elements\n";
     mkdir( $ELEMENT_FOLDER ) or die "Couldn't create $ELEMENT_FOLDER directory, $!";
 }
 
-## Create files to store analysis parameters, and to store rejected sequences. 
-## Search for a unique names, with the same index for both files
-my $analysis_parameters_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/Analysis_parameters.txt"; # file to record parameters
-my $rejection_file_name = "$ANALYSIS_FILES_OUTPUT_DIR/Rejected_sequences.txt"; # file to store rejected sequences, and why
-if ((-f $analysis_parameters_file_name) or (-f $rejection_file_name)){
-   die "ERROR: Either or both files $analysis_parameters_file_name and/or $rejection_file_name already exists, this should not happen"
-}
-else {
-    open (ANALYSIS,'>', $analysis_parameters_file_name) or die "ERROR: cannot open file $analysis_parameters_file_name\n";
-    open (REJECT, '>', $rejection_file_name) or die "ERROR, cannot create output file $rejection_file_name\n";
-}
-print ANALYSIS "Analysis name: $ANALYSIS_NAME\n";
-my $datestring = localtime();
-print ANALYSIS "Date and time: $datestring\n";
-print ANALYSIS "Input file: $INPUT_PROTEIN_SEQUENCES\n";
-print ANALYSIS "Genome: $INPUT_GENOME\n\n";
-print ANALYSIS "Parameters, set in the script:\n";
+## Create or open files to store analysis parameters, and to store rejected sequences. 
+my $analysis_parameters_file_name = "$ANALYSIS_FOLDER/Analysis_parameters.txt"; # file to record parameters
+my $rejection_file_name = "$ANALYSIS_FOLDER/Rejected_sequences.txt"; # file to store rejected sequences, and why
+open (ANALYSIS,'>>', $analysis_parameters_file_name) or die "ERROR: cannot open file $analysis_parameters_file_name\n"; # create or append to file
+open (REJECT, '>>', $rejection_file_name) or die "ERROR, cannot create output file $rejection_file_name\n"; # create or append to file
 
-my $BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FILES_OUTPUT_DIR/tblastn.o"; # default name and location unless a file is provided, default file name has index added
-                                                                                # also, could not define this earlier because it depends on the ultimate analysis name
+my $datestring = localtime();
+print ANALYSIS "\nSTARTING ANALYSIS on $datestring\n";
+
+my $BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FOLDER/tblastn.o"; # default name and location unless a file is provided
 
 ### PIPELINE STEP 1 identify proteins that match the genome with parameters specified above under
 ###     The output is a list of proteins for further analysis recorded in the file $output_file_name
 ### CONSTANTS applicable to this step only (also record these in the file)
 my $GENOME_IDENTITY = 80; # IDENTIFYING PROTEINS, per protein, minimum percent identity between protein and genome
-print ANALYSIS "STEP1: GENOME_IDENTITY = $GENOME_IDENTITY\n";
 my $COVERAGE_RATIO = 0.5; # IDENTIFYING PROTEINS, per protein, minimum ratio of (blast match length) / (query length)
-print ANALYSIS "STEP1: COVERAGE_RATIO = $COVERAGE_RATIO\n";
 my $COPY_NUMBER = 2; # IDENTIFYING PROTEINS, minimum number of copies that hit different parts of the genome 
-print ANALYSIS "STEP1: COPY_NUMBER = $COPY_NUMBER\n";
 my $MIN_DISTANCE = 10000;   # IDENTIFYING PROTEINS, if two elements are on the same chromosome, how far they have to be, to be considered different elements
-                            # NOTE: the minimum distance should bigger than the $BLAST_EXTEND variable, to avoid having the same element recorded twice        
-print ANALYSIS "STEP1: MIN_DISTANCE = $MIN_DISTANCE\n";
+                            # NOTE: the minimum distance should bigger than the $BLAST_EXTEND variable, to avoid having the same element recorded twice    
+my $NUM_THREADS = `nproc --all`;# determine the number of processors on the current machine
+if ($?) { warn "WARNING could not determine the number of cores automatically, defaulting to 8\n"; $NUM_THREADS=8}
+chomp $NUM_THREADS; 
 
 my $step_number = 1;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
     print "Working on STEP $step_number ...\n";
+
+    ## update the analysis file with what is going on
+    print ANALYSIS "Running STEP 1\n";
+    print ANALYSIS "\tGENOME_IDENTITY = $GENOME_IDENTITY\n";
+    print ANALYSIS "\tCOVERAGE_RATIO = $COVERAGE_RATIO\n";
+    print ANALYSIS "\tCOPY_NUMBER = $COPY_NUMBER\n";
+    print ANALYSIS "\tMIN_DISTANCE = $MIN_DISTANCE\n";
+    print ANALYSIS "\tNUM_THREADS = $NUM_THREADS\n";
 
     ## VARIABLES, variable for this step
     my %protein_ids; # holds the id the input proteins that passed the filtering tests as key and the number of copies that passed the test as values
@@ -131,12 +143,20 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         close INPUT;
 
         $BLAST_OUTPUT_FILE_NAME = $TBLASTN_FILE;
-        print ANALYSIS "STEP1: tblastn output was provided in file $TBLASTN_FILE\n";
+        print ANALYSIS "\ttblastn file was provided in file $TBLASTN_FILE\n";
     }
     else {
+        # check that all the necessary files have been provided
+        unless ($INPUT_PROTEIN_SEQUENCES and $INPUT_GENOME) {
+            die ("ERROR, running STEP 1 requires either than both -p and -g parameters are set or that -t is set\n");
+        }
+
+        # update the analysis file
+        print ANALYSIS "\tInput file: $INPUT_PROTEIN_SEQUENCES\n";
+        print ANALYSIS "\tGenome: $INPUT_GENOME\n";
         `tblastn -query $INPUT_PROTEIN_SEQUENCES -db $INPUT_GENOME -outfmt "6 qseqid sseqid sstart send pident length qlen" -out $BLAST_OUTPUT_FILE_NAME -num_threads $NUM_THREADS`;
         if ($?) { die "ERROR executing tblastn, stopping analysis (hint: was the genome formated with makeblastdb?): error code $?\n"}
-        print ANALYSIS "STEP1: tblastn was run by the scritpt the output is in file $BLAST_OUTPUT_FILE_NAME\n";
+        print ANALYSIS "\ttblastn was executed, the output is in file $BLAST_OUTPUT_FILE_NAME\n";
     }
 
     ## Inspired by the Goubert et al. protocol, filter elements that 1) have >= 80% identity to genome, 2) have 50% length of the query, 3) are found at multiple locations
@@ -224,45 +244,53 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 ### For each element that had enough approved blast hits, look for TSD-TIR <---> TIR-TSD combinations 
 ### CONSTANTS applicable only for STEP 2
 my $BLAST_EXTEND = 2000; # IDENTIFYING PROTEINS, number of bp to extend on each side of the blast hit
-print ANALYSIS "STEP2: BLAST_EXTEND = $BLAST_EXTEND\n";
+
 my $MAX_SEQUENCE_NUMBER = 100; # ALIGNING SEQUENCES maximum number of sequences to consider, to save time
-print ANALYSIS "STEP2: MAX_SEQUENCE_NUMBER = $MAX_SEQUENCE_NUMBER\n";
 my $GAP_THRESHOLD=0.75; # REMOVING GAPS FROM ALIGNMENT, if an alignment position has this proportion or more of gaps, then remove it from the multiple sequence alignment
-print ANALYSIS "STEP2: GAP_THRESHOLD = $GAP_THRESHOLD\n";
 my $CONSLEVEL=0.60; # MAKING CONSENSUS OF SEQUENCES sequence consensus level for consensus
-print ANALYSIS "STEP2: CONSLEVEL = $CONSLEVEL\n";
 my $WINDOW_SIZE = 15; # MAKING CONSENSUS OF SEQUENCES size of the window looking for stretches of N's
-print ANALYSIS "STEP2: WINDOW_SIZE = $WINDOW_SIZE\n";
 my $SCAN_PROP = 0.5; # MAKING CONSENSUS OF SEQUENCES minimum proportion of side scan that has to be N's to be a real N full edge
-print ANALYSIS "STEP2: SCAN_PROP = $SCAN_PROP\n";
 my $MAX_WIN_N = 2; # MAKING CONSENSUS OF SEQUENCES maximum number of N's in the first window where the transition from N to non-N is
-print ANALYSIS "STEP2: MAX_WIN_N = $MAX_WIN_N\n";
 my $EDGE_TEST_PROPORTION = 0.05; # TESTING CONSENSUS SEQUENCES how far from the edge of the consensus do the non-gap positions have to start
-print ANALYSIS "STEP2: EDGE_TEST_PROPORTION = $EDGE_TEST_PROPORTION\n";
 my $MIN_TIR_SIZE = 10; # IDENTIFYING TIR-TSDS smallest allowable size for the TIR
-print ANALYSIS "STEP2: MIN_TIR_SIZE = $MIN_TIR_SIZE\n";
 my $TIR_MISMATCHES = 2; # IDENTIFYING TIR-TSDS maximum number of mismatches allowed between two TIRs
-print ANALYSIS "STEP2: TIR_MISMATCHES = $TIR_MISMATCHES\n";
 my $TIR_PROP_CUTOFF = 0.15; # IDENTIFYING TIR-TSDS proportion of elements with TIRs at which positions are reported
-print ANALYSIS "STEP2: TIR_PROP_CUTOFF = $TIR_PROP_CUTOFF\n";
 my $MIN_PROPORTION_SEQ_WITH_TIR=0.25; #IDENTIFYING TIRs minimum proportion of total elements for a sequence that must contain proper TIRs to be considered a candidate
-print ANALYSIS "STEP2: MIN_PROPORTION_SEQ_WITH_TIR = $MIN_PROPORTION_SEQ_WITH_TIR\n";
 my $MAX_TIR_PROPORTION=0.75; #IDENTIFYING TIRs how close to the maximum number of tirs do you have to be to qualify as a top TIR
-print ANALYSIS "STEP2: MAX_TIR_PROPORTION = $MAX_TIR_PROPORTION\n";
 my $MAX_END_PROPORTION=0.75; #IDENTIFYING TIRs how close to maximum proportion of sequences with identical start and stop of tir sequences you can be to a top number
-print ANALYSIS "STEP2: MAX_END_PROPORTION = $MAX_END_PROPORTION\n";
 my $MAX_TSD_PROPORTION=0.5; #IDENTIFYING TIRs how close to maximum number of TSDs to qualify as a top TSD sequence
 my %EXAMINE_CODES=("1111" => 1, "1101" => 2); # success codes to examine as key and priority as value
-print ANALYSIS "STEP2: %EXAMINE_CODES=(\"1111\" => 1, \"1101\" => 2) # TIR-TSD success codes that will allow an element to be examine further as key and priority as value\n";
-print ANALYSIS "STEP2: MAX_TSD_PROPORTION = $MAX_TSD_PROPORTION\n";
-print ANALYSIS "STEP2: TIR-TSD success code, first number: Is the proportion of sequences with TIRs higher than MIN_PROPORTION_SEQ_WITH_TIR?\n";
-print ANALYSIS "STEP2: TIR-TSD sode, second number: Does this candidate have one of the highest number of TIRs?\n";
-print ANALYSIS "STEP2: TIR-TSD sode, third number: Do the TIRs tend to start and end with the same bases?\n";
-print ANALYSIS "STEP2: TIR-TSD sode, first number: Does this candidate have one of the highest number of TSDs?\n";
 
 my $step_number = 2;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
     print "Working on STEP $step_number ...\n";
+
+    ## update the analysis file with what is being done and paramter values
+    print ANALYSIS "Running STEP 2\n";
+    print ANALYSIS "\tBLAST_EXTEND = $BLAST_EXTEND\n";
+    print ANALYSIS "\tMAX_SEQUENCE_NUMBER = $MAX_SEQUENCE_NUMBER\n";
+    print ANALYSIS "\tGAP_THRESHOLD = $GAP_THRESHOLD\n";
+    print ANALYSIS "\tCONSLEVEL = $CONSLEVEL\n";
+    print ANALYSIS "\tWINDOW_SIZE = $WINDOW_SIZE\n";
+    print ANALYSIS "\tSCAN_PROP = $SCAN_PROP\n";
+    print ANALYSIS "\tMAX_WIN_N = $MAX_WIN_N\n";
+    print ANALYSIS "\tEDGE_TEST_PROPORTION = $EDGE_TEST_PROPORTION\n";
+    print ANALYSIS "\tMIN_TIR_SIZE = $MIN_TIR_SIZE\n";
+    print ANALYSIS "\tTIR_MISMATCHES = $TIR_MISMATCHES\n";
+    print ANALYSIS "\tTIR_PROP_CUTOFF = $TIR_PROP_CUTOFF\n";
+    print ANALYSIS "\tMIN_PROPORTION_SEQ_WITH_TIR = $MIN_PROPORTION_SEQ_WITH_TIR\n";
+    print ANALYSIS "\tMAX_TIR_PROPORTION = $MAX_TIR_PROPORTION\n";
+    print ANALYSIS "\tMAX_END_PROPORTION = $MAX_END_PROPORTION\n";
+    print ANALYSIS "\t%EXAMINE_CODES=(\"1111\" => 1, \"1101\" => 2)\n";
+    print ANALYSIS "\tMAX_TSD_PROPORTION = $MAX_TSD_PROPORTION\n";
+
+    ## check that all the necessary files have been supplied
+    # checking that the genome length file is present
+    unless ((-f "$INPUT_GENOME.length") and ($INPUT_GENOME)){
+        die "ERROR: for this step you need to provide\n1) a fasta formated genome file, using the -g parameter\n2) in the same folder an associated length file generated using the commands below (genome must have been formated using makeblastdb)\n\tsamtools faidx \$genome\n\tawk \'{OFS=\"\\t\"; print \$1,\$2}\' < \$genome.fai > \$genome.length\n";
+    }
+    print ANALYSIS "\tGenome: $INPUT_GENOME\n";
+    print ANALYSIS "\tGenome length file: $INPUT_GENOME.length\n";
 
     ## VARIABLES, variable for this step
     my @elements; # name of all the elements that will be anlaysed in this step
@@ -313,11 +341,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         if ($j>= $MAX_SEQUENCE_NUMBER) {
             my $datestring = localtime();
             print README "$datestring, The number of BLAST hits ($j) exceeded the maximum for analysis ($MAX_SEQUENCE_NUMBER) analyzing only the first $MAX_SEQUENCE_NUMBER sequences\n";    
-        }
-
-        # checking that the genome length file is present
-        unless (-f "$INPUT_GENOME.length") {
-            die "ERROR: Cannot file find file $INPUT_GENOME.length needed for bedtools, generate one using\n(assuming it's been formated for BLAST with makeblastdb)\n\nsamtools faidx \$genome\nawk \'{OFS=\"\\t\"; print \$1,\$2}\' < \$genome.fai > \$genome.length\n";
         }
 
         # create the bed file
@@ -544,14 +567,14 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         elsif ($trimmed_conseq) { # get here if a consenus was found but it failed the edge test
             print README "$datestring, a trimmed consensus sequence was created but it failed the \"edge test\", stopping the analysis here\n";
             print REJECT "$datestring\t$element_name\tSTEP 2\tfailed the EDGE TEST\n";
-            `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
-            if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
+            `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+            if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $reject_folder_path: error code $?\n"}
         }
-        else { # get here if a no abrupt changes in the consensus sequences was detected
+        else { # get here if no abrupt changes in the consensus sequences was detected
             print README "$datestring, the consensus sequence showed no transitions into an element, stopping the analysis here\n";
             print REJECT "$datestring\t$element_name\tSTEP 2\tNo transitions to element observed in alignment file\n";
-            `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
-            if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
+            `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+            if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $reject_folder_path: error code $?\n"}
         }
 
         # STEP 2.2.6 
@@ -673,8 +696,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 print README "\n";
 
                 print REJECT "$datestring\t$element_name\tSTEP 2\tNo lines with acceptable TIR and TSD codes were found\n";
-                `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
-                if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
+                `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+                if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
             }
         }     
         close README;
@@ -690,6 +713,10 @@ my $temp_alignment_file = "/tmp/ali.fa"; # tried using perl temporary file syste
 my $step_number = 3;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
     print "Working on STEP $step_number ...\n";
+
+     ## update the analysis file with what is going on
+    print ANALYSIS "Running STEP 3\n";
+    print ANALYSIS "\t$TIR_bp = 30\n";
 
     my $pkey; # pressed key, used for input from user
 
@@ -908,7 +935,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 my $element_rejected = 0; # boolean, set to 0 unless option "this is not an element selected", used to know which README to edit
 
                 while ($menu2) { #keep displaying until the user ready to leave
-                    print "\nMENU 2: Select what to do with this element:\n";
+                    print "\nMENU 2 Select what to do with this element:\n";
                     print "0) Go back to the previous menu\n";
                     if ($TSD_type eq "TA") {
                         print "1) Update the README to say this is an element with TSDs of type TA and TIRs of size $TIR_size\n";
@@ -943,8 +970,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         my $datestring = localtime(); 
                         print README "$datestring, Manual Review 1 result: This is not an element\n";
                         print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
-                        `mv $ELEMENT_FOLDER/$element_name $ANALYSIS_FILES_OUTPUT_DIR`;
-                        if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FILES_OUTPUT_DIR: error code $?\n"}
+                        `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+                        if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
                         $element_rejected = 1;
                     }
                     elsif ($pkey == 3) {
@@ -970,7 +997,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     elsif ($pkey == 4) {
                         my $datestring = localtime(); 
                         if ($element_rejected) {
-                            print "Edit the file $ANALYSIS_FILES_OUTPUT_DIR/$element_name/README.txt starting with\n";
+                            print "Edit the file $ANALYSIS_FOLDER/$element_name/README.txt starting with\n";
                         }
                         else {
                             print "Edit the file $ELEMENT_FOLDER/$element_name/README.txt starting with\n";
