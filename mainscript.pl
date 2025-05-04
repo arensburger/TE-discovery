@@ -6,7 +6,7 @@
 use strict;
 use Getopt::Long;
 use File::Temp qw(tempfile);
-use FindBin::libs;  # this sets up that the directory lib will have all modules necessary to run the program 
+#use FindBin::libs;  # this sets up that the directory lib will have all modules necessary to run the program 
 use TEdiscovery;    # these are the subcripts necessary to run the pipeline
 use List::UtilsBy qw(max_by);
 use List::Util qw(max);
@@ -37,12 +37,7 @@ GetOptions(
 
 ## CHECK INPUTS if help was called (this could probably be improved)
 if ($SHOW_HELP) {
-    my $help_file_location = "/home/peter/TE-discovery/lib/help.txt";
-    open (INPUT, $help_file_location) or die "ERROR: Cannot open help file at $help_file_location\n";
-    while (my $line = <INPUT>) {
-        print "$line";
-    }
-    print "\n";
+    print "Description and input help can be found at https://github.com/arensburger/TE-discovery\n";
     exit;
 }
 
