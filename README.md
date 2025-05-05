@@ -69,7 +69,7 @@ The tblastn option is available so that this time consuming tblastn analysis can
 When running this step the `-g` parameter (described in STEP1) must be specified. In addition, the script will expect a file to be present in the same directory as the genome file. This file must have the name of the genome file followed by `.length`. Each line in this file should contain a fasta title from the genome file and the length in nucleotides of the associated sequence. This `.length` file can be generated using the following BASH commands:
 
 	samtools faidx <genome fasta formatted file name>
-	awk '{OFS="\t"; print \$1,\$2}\' < <genome fasta formatted file name>.fai > <genome fasta formatted file name>.length
+	awk '{OFS="\t"; print $1, $2}\' < <genome fasta formatted file name>.fai > <genome fasta formatted file name>.length
     
 ***STEP3 has no step specific parameters or requirements*** 
 
