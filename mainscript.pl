@@ -9,6 +9,7 @@ use File::Temp qw(tempfile);
 use List::UtilsBy qw(max_by);
 use List::Util qw(max);
 use Scalar::Util qw(looks_like_number);
+use Term::ANSIColor;
 
 ### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
@@ -151,7 +152,39 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         # update the analysis file
         print ANALYSIS "\tInput file: $INPUT_PROTEIN_SEQUENCES\n";
         print ANALYSIS "\tGenome: $INPUT_GENOME\n";
-        `tblastn -query $INPUT_PROTEIN_SEQUENCES -db $INPUT_GENOME -outfmt "6 qseqid sseqid sstart send pident length qlen" -out $BLAST_OUTPUT_FILE_NAME -num_threads $NUM_THREADS`;
+
+        # Find duplicate, or near duplicate, sequences in the input protein file
+        my $protein_file_no_redudants = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); # name of file output of cd-hit
+        `cd-hit -i $INPUT_PROTEIN_SEQUENCES -o $protein_file_no_redudants -T 0`;
+        if ($?) { die "ERROR executing cd-hit: error code $?\n"};
+
+        # identify sequences that are duplicates and updated the analysis files
+        my %cluster_number; # holds the sequence name as key and cluster number as value (excluding top sequence)
+        my %cluster_topseq; # holds the cluster number as key and reference element as value
+        open (INPUT, "$protein_file_no_redudants.clstr") or die "ERROR: Cannot open cluster file $protein_file_no_redudants.clstr\n";
+        my $current_cluster_number;
+        while (my $line = <INPUT>) { # record all the relevant information from the .clstr file
+            if ($line =~ /^>Cluster\s(\d+)/) {
+                $current_cluster_number = $1;
+            }
+            elsif ($line =~ />(\S+)\.\.\.\s\*/) {
+                $cluster_topseq{$current_cluster_number}=$1;
+            }
+            elsif ($line =~ />(\S+)\.\.\.\sat\s/) {
+                $cluster_number{$1}=$current_cluster_number;
+            }
+            else {
+                die "ERROR: unexpected line in cluster file $protein_file_no_redudants.clstr\n$line";
+            }
+        }
+        foreach my $dupseq (keys %cluster_number) { # update the Rejected file
+            my $datestring = localtime();
+            my $topseq = $cluster_topseq{$cluster_number{$dupseq}};
+            print REJECT "$datestring $dupseq overlaps with $topseq and was taken out of the analysis at STEP $step_number \n";
+        }
+
+        # run tblastn
+        `tblastn -query $protein_file_no_redudants -db $INPUT_GENOME -outfmt "6 qseqid sseqid sstart send pident length qlen" -out $BLAST_OUTPUT_FILE_NAME -num_threads $NUM_THREADS`;
         if ($?) { die "ERROR executing tblastn, stopping analysis (hint: was the genome formated with makeblastdb?): error code $?\n"}
         print ANALYSIS "\ttblastn was executed, the output is in file $BLAST_OUTPUT_FILE_NAME\n";
     }
@@ -706,7 +739,6 @@ print "Finished STEP $step_number\n";
 ### Present the elements to the user for manual review
 ### CONSTANTS applicable only for STEP 3
 my $TIR_bp = 30; # how many bp to display on the TIR side
-my $temp_alignment_file = "/tmp/ali.fa"; # tried using perl temporary file system, but aliview will not open those
 
 my $step_number = 3;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
@@ -714,7 +746,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
      ## update the analysis file with what is going on
     print ANALYSIS "Running STEP 3\n";
-    print ANALYSIS "\t$TIR_bp = 30\n";
+    print ANALYSIS "\tTIR_bp = $TIR_bp\n";
 
     my $pkey; # pressed key, used for input from user
 
@@ -729,7 +761,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             # check if a manual review is already present in the README file for this element
             my $grep_res = `grep "Manual Review 1 result" $specific_element_folder/README.txt`;
             if ($grep_res) {
-                warn "WARNING: A prior manual review result was found for element $_, ignoring this elment\n";
+                print "\tElement $_ has already been manually reviewed, ignoring\n";
             }
             else {
                 if (-e $tirtsd_file) {
@@ -759,7 +791,9 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
         $count++;
         my $review_elements = keys %files; # total number of elements to review
-        print "\tElement $element_name $count of $review_elements\n";
+        print color('bold blue');
+        print "\nElement $element_name $count of $review_elements\n";
+        print color('reset');
 
         # Variables specific to this section
         my $TIR_b1; # left bound of TIR accepted by user
@@ -768,7 +802,20 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         my $TSD_type; # if empty then it's a number othwise it's TA
         my $TIR_size; # size of TIR 
 
-        # open the README file
+        # check the README file for any previous manual review notes and display them
+        open (README, "$ELEMENT_FOLDER/$element_name/README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/README.txt\n";
+        my $prior_notes; 
+        while (my $line = <README>) {
+            if ($line =~ /Manual\sReview\s1\suser\snote/) {
+                $prior_notes .= $line;
+            }
+        } 
+        if ($prior_notes) {
+            print "\nPRIOR REVIEW NOTES FOR ELEMENT $element_name\n$prior_notes";
+        }
+        close README;
+
+        # open the README file for writing
         open (README, ">>$ELEMENT_FOLDER/$element_name/README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/README.txt\n";
 
         # record all the relevant lines from the current .tirtsd file
@@ -792,7 +839,9 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             my %alignment_sequences = fastatohash($files{$element_name}[1]); # load the existing alignment
 
             # Display the lines so the user can see what's available
+            print color('magenta');
             print "\nMENU 1\n";
+            print color('reset');
             print "0) Quit this element\n\n";
             print "#) code | TIR-boundaries, # sequences with TIRs, Mean TIR length | Number of TSDs, Selected TSD\n";
             my $i=1;
@@ -842,7 +891,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 push @selections, "$d[1]\t$d[2]\t$TSD\t$average_TIR_length\n";   
                 $i++;          
             }
-            print "\n$i) manually enter TIRs and TSD\n"; # display menu item to enter manual coordinates
+            print "$i) manually enter TIRs and TSD\n"; # display menu item to enter manual coordinates
                             
             do { # read the user input until it's a number within range
                  print "Line selection: ";
@@ -852,24 +901,28 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             if ($pkey == $i) { # This means the manual selection was entered  
                 my $entry_accepted; # used to know if user has finished selecting             
                 do {
-                    $entry_accepted = 1; # assume user will put in a correct entry, set to zero if not
-                    print "Enter the coordinates manually in the form \"TIR1-left-bound TIR2-right-bound TSD-size TIR-length\" (can put \"TA\" for size, TIR-length optional)\n";
-                    $pkey = <STDIN>;
-                    chomp $pkey;
-                    my @d = split " ", $pkey;
-                    if (looks_like_number($d[0])) { $TIR_b1 = $d[0] } else { $entry_accepted = 0}
-                    if (looks_like_number($d[1])) { $TIR_b2 = $d[1] } else { $entry_accepted = 0}
-                    if (($d[2] eq "TA") or ($d[2] eq "ta")) {
-                        $TSD_size = 2;
-                        $TSD_type = "TA";
-                    }
-                    elsif (looks_like_number($d[2])) {
-                        $TSD_size = $d[2];
+                    $entry_accepted = 0; # assume user will put in a correct entry, set to zero if not
+                    print "Enter left alignement coordinate: ";
+                    $pkey = <STDIN>; chomp $pkey;
+                    $TIR_b1 = $pkey;
+                    print "Enter right alignement coordinate: ";
+                    $pkey = <STDIN>; chomp $pkey;
+                    $TIR_b2 = $pkey;
+                    print "Enter TSD size: ";
+                    $pkey = <STDIN>; chomp $pkey;
+                    $TSD_size = $pkey;
+                    print "Enter TIR size (can enter 0 if you don't want to enter a size): ";
+                    $pkey = <STDIN>; chomp $pkey;
+                    $TIR_size = $pkey;
+                    if (looks_like_number($TIR_b1) and looks_like_number($TIR_b2) and looks_like_number($TSD_size) and looks_like_number($TIR_size)) {
+                        $entry_accepted=1;
                     }
                     else {
-                        $entry_accepted = 0
+                        warn "WARNING: Your coordinate entries don't seem to be numbers\n";
                     }
-                    if (looks_like_number($d[3])) { $TIR_size = $d[3]} else { $TIR_size = "N/A"}    
+                    unless ($TIR_size) {
+                        $TIR_size = "N/A";
+                    } 
                 } until ($entry_accepted);
             }
             elsif ($pkey == 0) { # the user has decided to quit
@@ -890,6 +943,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
             if ($menu1) { # only continue if the user has not elected to quit menu 1
                 # The TIRs and TSDs location have now been selected, next create an alignment to display these to the user  
+                my $temp_alignment_file = "/tmp/$element_name.fa"; # tried using perl temporary file system, but aliview will not open those
                 open (OUTPUT, ">", $temp_alignment_file) or die "Cannot create temporary alignment file $temp_alignment_file\n";
 
                 foreach my $seq_name (keys %alignment_sequences) {
@@ -926,6 +980,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 }
 
                 # MENU 2 display the alignement to the user and ask for evaluation
+                `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
                 `aliview $temp_alignment_file`;
                 if ($?) { die "Error executing: aliview $temp_alignment_file, error code $?\n"}
 
@@ -933,7 +988,9 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 my $element_rejected = 0; # boolean, set to 0 unless option "this is not an element selected", used to know which README to edit
 
                 while ($menu2) { #keep displaying until the user ready to leave
+                    print color('green');
                     print "\nMENU 2 Select what to do with this element:\n";
+                    print color('reset');
                     print "0) Go back to the previous menu\n";
                     if ($TSD_type eq "TA") {
                         print "1) Update the README to say this is an element with TSDs of type TA and TIRs of size $TIR_size\n";
