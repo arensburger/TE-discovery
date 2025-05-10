@@ -2,7 +2,7 @@
 
 file1="../mainscript.pl"
 file4="../README.md"
-file5="update_github.sh"
+file5="./update_github.sh"
 file6="../images/*"
 
 git commit -m 'auto commit' $file1
