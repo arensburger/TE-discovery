@@ -908,14 +908,25 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     print "Enter right alignement coordinate: ";
                     $pkey = <STDIN>; chomp $pkey;
                     $TIR_b2 = $pkey;
-                    print "Enter TSD size: ";
+                    print "Enter TSD size (can enter TA): ";
                     $pkey = <STDIN>; chomp $pkey;
                     $TSD_size = $pkey;
                     print "Enter TIR size (can enter 0 if you don't want to enter a size): ";
                     $pkey = <STDIN>; chomp $pkey;
                     $TIR_size = $pkey;
-                    if (looks_like_number($TIR_b1) and looks_like_number($TIR_b2) and looks_like_number($TSD_size) and looks_like_number($TIR_size)) {
-                        $entry_accepted=1;
+                    if (looks_like_number($TIR_b1) and looks_like_number($TIR_b2) and looks_like_number($TIR_size)) {
+                        if (($TSD_size eq "TA") or ($TSD_size eq "ta")) {
+                            $TSD_size = 2;
+                            $TSD_type = "TA";
+                            $entry_accepted=1;
+                        }
+                        elsif (looks_like_number($TSD_size)) {
+                            $TSD_type = "";
+                            $entry_accepted=1;
+                        }
+                        else {
+                            warn "WARNING: Your TSD coordinate entry is not valid\n";
+                        }
                     }
                     else {
                         warn "WARNING: Your coordinate entries don't seem to be numbers\n";
@@ -941,13 +952,17 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             }
             $pkey = ""; # reset the pressed key 
 
+            my $consensus_sequence; # this holds the consensus sequence and will be used to display the TIR sequence
             if ($menu1) { # only continue if the user has not elected to quit menu 1
                 # The TIRs and TSDs location have now been selected, next create an alignment to display these to the user  
                 my $temp_alignment_file = "/tmp/$element_name.fa"; # tried using perl temporary file system, but aliview will not open those
                 open (OUTPUT, ">", $temp_alignment_file) or die "Cannot create temporary alignment file $temp_alignment_file\n";
 
                 foreach my $seq_name (keys %alignment_sequences) {
-                    unless ($seq_name =~ /consensus/) { # avoid the line with the consensus sequence
+                    if ($seq_name =~ /consensus/) { 
+                        $consensus_sequence = $alignment_sequences{$seq_name};
+                    }
+                    else {# avoid the line with the consensus sequence
                         print OUTPUT ">$seq_name\n";
                         ## left side sequences
                         my $left_whole_seq = substr($alignment_sequences{$seq_name}, 0, $TIR_b1);
@@ -987,26 +1002,31 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 my $menu2 = 1; # boolean, set to 1 until the user is done with menu 2
                 my $element_rejected = 0; # boolean, set to 0 unless option "this is not an element selected", used to know which README to edit
 
+                my $TIR1_sequence = substr($consensus_sequence, ($TIR_b1-1), $TIR_size);
+                my $TIR2_sequence = substr($consensus_sequence, ($TIR_b2-$TIR_size), $TIR_size);
                 while ($menu2) { #keep displaying until the user ready to leave
                     print color('green');
                     print "\nMENU 2 Select what to do with this element:\n";
                     print color('reset');
                     print "0) Go back to the previous menu\n";
+                    # figure out the sequences of the current TIRs
+                    
                     if ($TSD_type eq "TA") {
-                        print "1) Update the README to say this is an element with TSDs of type TA and TIRs of size $TIR_size\n";
+                        print "1) Update the README to say this is an element with TSDs of type TA and TIRs $TIR1_sequence and $TIR2_sequence\n";
                     }
                     else {
-                        print "1) Update the README to say this as an element with TSDs of size $TSD_size and TIRs of size $TIR_size\n";
+                        print "1) Update the README to say this as an element with TSDs of size $TSD_size and TIRs $TIR1_sequence and $TIR2_sequence\n";
                     }
                     print "2) Update the README to say this is not an element\n";
-                    print "3) Change the TSD size and/or TIR size\n";
-                    print "4) Make a note in the README file\n";
-                    print "5) Done reviewing this element\n";
+                    print "3) Change the TSD size\n";
+                    print "4) Change the TIR sequence(s)\n";
+                    print "5) Make a note in the README file\n";
+                    print "6) Done reviewing this element\n";
 
                     do { # read the user input until it's a number within range
                         print "Line selection: ";
                         $pkey = <STDIN>;
-                    } until ((looks_like_number($pkey)) and ($pkey <= 5));
+                    } until ((looks_like_number($pkey)) and ($pkey <= 6));
 
                     # process the user's choice
                     if ($pkey == 0) {
@@ -1015,10 +1035,10 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     elsif ($pkey == 1) {
                         my $datestring = localtime(); 
                         if ($TSD_type eq "TA") {
-                            print README "$datestring, Manual Review 1 result: This is an element, TSD TA, TIR size $TIR_size\n";
+                            print README "$datestring, Manual Review 1 result: This is an element, TSD TA, TIRs $TIR1_sequence and $TIR2_sequence\n";
                         }
                         else {
-                            print README "$datestring, Manual Review 1 result: This is an element, TSD $TSD_size, TIR size $TIR_size\n";
+                            print README "$datestring, Manual Review 1 result: This is an element, TSD $TSD_size, TIRs $TIR1_sequence and $TIR2_sequence\n";
                         }
                     }
                     elsif ($pkey == 2) {
@@ -1039,17 +1059,28 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                                 $TSD_type = "TA";
                                 $pkey2 = 2;
                             }
+                            else {
+                                $TSD_type = ""; 
+                            }
                         } until (looks_like_number($pkey2));
                         $TSD_size = $pkey2;
-
-                        do { # read the user input until it's a number
-                            print "Enter TIR size, enter zero if size is unknown: ";
-                            $pkey2 = <STDIN>;
-                            chomp $pkey2;
-                        } until (looks_like_number($pkey2));
-                        $TIR_size = $pkey2;
                     }
                     elsif ($pkey == 4) {
+                        my $pkey2;
+                        print "Enter TIR1 sequence [$TIR1_sequence]: ";
+                        $pkey2 = <STDIN>;
+                        chomp $pkey2;
+                        if($pkey2) { # a new sequence has been entered
+                            $TIR1_sequence = $pkey2;
+                        }
+                        print "Enter TIR2 sequence [$TIR2_sequence]: ";
+                        $pkey2 = <STDIN>;
+                        chomp $pkey2;
+                        if($pkey2) { # a new sequence has been entered
+                            $TIR2_sequence = $pkey2;
+                        }
+                    }
+                    elsif ($pkey == 5) {
                         my $datestring = localtime(); 
                         if ($element_rejected) {
                             print "Edit the file $ANALYSIS_FOLDER/$element_name/README.txt starting with\n";
@@ -1061,7 +1092,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         print "Press enter when done: ";
                         <STDIN>;
                     }
-                    elsif ($pkey == 5) {
+                    elsif ($pkey == 6) {
                         $menu2 = 0;
                         $menu1 = 0;
                     }
