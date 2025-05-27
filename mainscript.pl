@@ -733,7 +733,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         close README;
     }    
 }
-print "Finished STEP $step_number\n";
 
 ### PIPELINE STEP 3 
 ### Present the elements to the user for manual review
@@ -1102,6 +1101,114 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         close README;
     }
 }
+
+### PIPELINE STEP 4 
+### Identify most likely transposase ORF based on identified TIR sequences
+
+my $step_number = 4;
+if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
+    print "Working on STEP $step_number ...\n";
+
+    ## Constant for this step
+    my $MAX_ELEMENT_SIZE = 5000; # maximum element size
+
+     ## update the analysis file with what is going on
+    print ANALYSIS "Running STEP 4\n";
+    unless ($INPUT_GENOME){
+        die "ERROR: for this step you need to provide a fasta formated genome file, using the -g parameter\n";
+    }
+    print ANALYSIS "\tGenome: $INPUT_GENOME\n";
+    print ANALYSIS "\tMAX_GENOME_SIZE = $MAX_ELEMENT_SIZE\n";
+
+    ## Read the README files and identify TIRs sequences and TSD
+    my %file_tirs;  # holds the element name as key and information on the element ends as array of values. 
+                    # specifically [0] = TSD size or type, [1] = TIR1 sequence, [2] = TIR2 sequence
+    opendir(my $dh, $ELEMENT_FOLDER) or die "ERROR: Cannot open element folder $ELEMENT_FOLDER, $!";
+    while (readdir $dh) {
+        unless ($_ =~ /^\./) {
+            if (-e "$ELEMENT_FOLDER/$_/README.txt") {
+                open (INPUT, "$ELEMENT_FOLDER/$_/README.txt") or die "ERROR: Cannot open file $!";
+                while (my $line = <INPUT>) {
+                    if ($line =~ /This\sis\san\selement,\sTSD\s(\S+),\sTIRs\s(\S+)\sand\s(\S+)/) {
+                        $file_tirs{$_}[0] = $1; # TSD size and type
+                        $file_tirs{$_}[1] = $2; # first TIR sequence
+                        $file_tirs{$_}[2] = $3; # second TIR sequence
+                    }
+                }
+                close INPUT; 
+            }
+            else {
+                warn "WARNING: No README.txt file was found in folder $ELEMENT_FOLDER/$_";
+            }
+            unless (exists $file_tirs{$_}) {
+                warn "WARNING: No TIR sequences were reported in the README file for element $_\n";
+            }
+        }
+    }
+    unless (keys %file_tirs) {
+        warn "WARNING: No files were found that needed ORFs identified\n";
+    }
+    
+    ## Identify the position in the genome of all the TIR sequences for each element
+    my %genome = fastatohash($INPUT_GENOME);
+    foreach my $element_name (keys %file_tirs) { # go through the elements
+        foreach my $chr (keys %genome) { # go through each genome subsections (calling it "chr" here)
+            my @tir1_forward; # location of all TIR1 sequence in the foward orienation
+            my @tir1_reverse; # etc.
+            my @tir2_forward; # 
+            my @tir2_reverse; # 
+            my $tir1 = lc($file_tirs{$element_name}[1]); # TIR1 sequence converted to lower case
+            my $tir2 = lc($file_tirs{$element_name}[2]); # TIR2 sequence converted to lower case
+
+            # do the searches in the forward direction
+            my $chr_seq = lc($genome{$chr}); # genome subsequence to search, converting all to lowercase for ease of search
+            while ($chr_seq =~ m/$tir1/g) {
+                push @tir1_forward, pos($chr_seq) - length($file_tirs{$element_name}[1]); # adjust the left position to compensate for where the loc is found
+            }
+            while ($chr_seq =~ m/$tir2/g) {
+                push @tir2_forward, pos($chr_seq);
+            }
+            # identify any pairs that are in the same orientation and not far from on another
+            for (my $i=0; $i<scalar @tir1_forward; $i++) {
+                for (my $j=0; $j<scalar @tir2_forward; $j++) {
+                    my $size = $tir2_forward[$j] - $tir1_forward[$i];
+                    if (($tir1_forward[$i] < $tir2_forward[$j]) and ($size < $MAX_ELEMENT_SIZE)){
+                        my $element_sequence = substr($chr_seq, $tir1_forward[$i], $size);
+                        my $toporf = findorf($element_sequence);
+                        my $i = rand(100000);
+                        print ">seq$i\n$toporf\n";
+                    }
+                }
+            }
+
+            # # do the searches in the reverse direction
+            # my $chr_seq = rc(lc($genome{$chr})); # genome subsequence to search, converting all to lowercase for ease of search
+            # while ($chr_seq =~ m/$tir1/g) {
+            #     push @tir1_reverse, pos($chr_seq);
+            # }
+            # while ($chr_seq =~ m/$tir2/g) {
+            #     push @tir2_reverse, pos($chr_seq);
+            # }
+
+            
+
+            # if (scalar @tir1_forward) {
+            #     print "$chr\n";
+            #     foreach my $p (@tir1_forward) {
+            #         print "$p, "
+            #     }
+            #     print "\n";
+            #     foreach my $p (@tir2_forward) {
+            #         print "$p, ";
+            #     }
+            #     print "\n";
+            # }
+        }   
+        exit;
+        print "done with $element_name\n"; 
+    }
+
+}
 close ANALYSIS;
 close REJECT;
 
@@ -1221,10 +1328,6 @@ sub gettir {
 	}
 
     ### get the TIR sequences if a long enough tir has been found
-    # if ($min_tir_size <= ($pos -1)) {
-    #     my $tir1_sequence = substr($s1, 0, ($pos - 1));
-    #     my $tir2_sequence = substr($s2, -($pos - 1), ($pos - 1));
-    #     return ($tir1_sequence, $tir2_sequence);
     if ($min_tir_size <= $lastgoodbase) {
         my $tir1_sequence = substr($s1, 0, ($lastgoodbase+1));
         my $tir2_sequence = substr($s2, -($lastgoodbase+1), ($lastgoodbase+1));
@@ -1234,15 +1337,6 @@ sub gettir {
         return ("","");
     }
 }
-
-#reverse complement
-sub rc {
-    my ($sequence) = @_;
-    $sequence = reverse $sequence;
-    $sequence =~ tr/ACGTRYMKSWacgtrymksw/TGCAYRKMWStgcayrkmws/;
-    return ($sequence);
-}
-
 
 #takes a string, converts it to lower case and checks if it contain an "n"
 sub cleanup {
@@ -1280,4 +1374,96 @@ sub fixdirname {
 		$string = substr($string, 0, -1);
 	}
 	return ($string);
+}
+
+# take a nucleotide sequence as input, return a specified number of the longest
+# ORF sequences. Requires the ORFs subroutine to work.
+sub findorf {
+    my ($nucleotide_sequence) = @_; # 
+    my $toporf; # this the longest orf
+    $nucleotide_sequence = uc($nucleotide_sequence); # all into upper case
+
+    my %orf; # holds the sequence of the longest orf for each frame in the key and the length as value
+    my $f1orf = ORFs($nucleotide_sequence);
+    $orf{$f1orf} = length ($f1orf);
+    my $f2orf = ORFs(substr($nucleotide_sequence, 1, (length $nucleotide_sequence) - 1));
+    $orf{$f2orf} = length ($f2orf);
+    my $f3orf = ORFs(substr($nucleotide_sequence, 2, (length $nucleotide_sequence) - 2));
+    $orf{$f3orf} = length ($f3orf);
+    $nucleotide_sequence = rc($nucleotide_sequence); # now do the same on the other DNA strand
+    my $f4orf = ORFs($nucleotide_sequence);
+    $orf{$f4orf} = length ($f4orf);
+    my $f5orf = ORFs(substr($nucleotide_sequence, 1, (length $nucleotide_sequence) - 1));
+    $orf{$f5orf} = length ($f5orf);
+    my $f6orf = ORFs(substr($nucleotide_sequence, 2, (length $nucleotide_sequence) - 2));
+    $orf{$f6orf} = length ($f6orf);
+    foreach my $orf_seq (sort { $orf{$b} <=> $orf{$a} } keys %orf) {
+        return ($orf_seq);
+    }
+    # my %merged_orfs =(%f1orfs, %f2orfs, %f3orfs, %f4orfs, %f5orfs, %f6orfs); # merge orf all the frames
+
+    # # identify the top ORFs
+    # my $i=0;
+    # foreach my $orf_seq (sort { $merged_orfs{$b} <=> $merged_orfs{$a} } keys %merged_orfs) {
+    #     if ($i < $top_number) {
+    #         $top_orfs{$orf_seq} = 1;
+    #     }
+    #     $i++;
+    # } 
+
+    # return (%top_orfs);
+}
+
+# this is sub-routine of the translate sub-routing
+sub ORFs {
+    my ($sequence) = @_;
+    my %transtable = qw/
+    TTT F TTC F TTA L TTG L TCT S TCC S TCA S TCG S TAT Y TAC Y TGT C TGC C TGG W TGA * TAA * TAG *
+    CTT L CTC L CTA L CTG L CCT P CCC P CCA P CCG P CAT H CAC H CAA Q CAG Q CGT R CGC R CGA R CGG R
+    ATT I ATC I ATA I ATG M ACT T ACC T ACA T ACG T AAT N AAC N AAA K AAG K AGT S AGC S AGA R AGG R
+    GTT V GTC V GTA V GTG V GCT A GCC A GCA A GCG A GAT D GAC D GAA E GAG E GGT G GGC G GGA G GGG G
+    /;
+    my %orfs; # open reading frame sequence as key and size as value
+    my $translated_sequence;#
+
+    # translate the sequence
+    for (my $i=0; $i<(length $sequence); $i=$i+3) {
+        my $codon = substr($sequence, $i, 3);
+        if (defined $transtable{$codon}) {
+            $translated_sequence .= $transtable{$codon};
+        }
+        else {
+            $translated_sequence .= "X"; # put an X if there's an N or some unknown sequence
+        }
+    }
+
+    # identify ORF
+    my $current_ORF; # temporary storage of ORF sequences
+    my $longestORF;
+    for (my $i=0; $i<(length $translated_sequence); $i++) {
+        my $t = substr($translated_sequence, $i, 1);
+        if (substr($translated_sequence, $i, 1) eq "*") {
+            $current_ORF .= "*"; # if present ORFs end with a stop codon
+            if (length $current_ORF > length $longestORF) {
+                $longestORF = $current_ORF;
+            }
+            $current_ORF = ""; # reset
+        }
+        else {
+            $current_ORF .= substr($translated_sequence, $i, 1);
+        }
+    }
+    if (length $current_ORF > length $longestORF) {
+        $longestORF = $current_ORF;
+    }
+
+    return ($longestORF)
+}
+
+#reverse complement
+sub rc {
+    my ($sequence) = @_;
+    $sequence = reverse $sequence;
+    $sequence =~ tr/ACGTRYMKSWacgtrymksw/TGCAYRKMWStgcayrkmws/;
+    return ($sequence);
 }
