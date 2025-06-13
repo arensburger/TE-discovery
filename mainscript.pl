@@ -1170,7 +1170,30 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         foreach my $chr (keys %genome) { # go through each genome subsections (calling it "chr" here)
             # identify all the element sequences in the forward orientation. Converting everything to lower case to avoid confusion with cases.
             # Also provinding the name of the chrososome and orientation so that the position of all the elements can recorded
-            %element_sequences = identify_element_sequence(lc($genome{$chr}), lc($file_tirs{$element_name}[1]), lc($file_tirs{$element_name}[2]), $MAX_ELEMENT_SIZE, $chr, "+");
+            my $tir1_seq = lc($file_tirs{$element_name}[1]);
+            my $tir2_seq = lc($file_tirs{$element_name}[2]);
+            %element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, "+");
+            unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
+                my %rc_element_sequences = identify_element_sequence(lc($genome{$chr}), lc($file_tirs{$element_name}[1]), lc($file_tirs{$element_name}[2]), $MAX_ELEMENT_SIZE, $chr, "-");
+                foreach my $rc_element (keys %rc_element_sequences) {
+                    $element_sequences{$rc_element} = $rc_element_sequences{$rc_element};
+                }
+            }
+
+            foreach my $k (keys %element_sequences) {
+                print "$k\n";
+            }
+#             for my $rce (keys %rc_element_sequences) {
+# #                print "$rce\n";
+#                 if ($rce =~ /(\S+):(\d+)-(\d+)/) {
+#                     my $test_location = "$1:$3-$2";
+#                     print "$test_location, $file_tirs{$element_name}[1], $file_tirs{$element_name}[2]\n";
+#                     if (exists $element_sequences{$test_location}) {
+#                         print "found one\n";
+#                     }
+                    
+#                 }
+  #          }
  #           my @reverse_sequence = identify_element_sequence(rc(lc($genome{$chr})), lc($file_tirs{$element_name}[1]), lc($file_tirs{$element_name}[2]), $MAX_ELEMENT_SIZE);
             # foreach my $sequence (@forward_sequence) {
             #     $element_sequences{$sequence} = 0;
@@ -1382,22 +1405,19 @@ sub rc {
 
 # identify element sequences
 sub identify_element_sequence {
-    my ($chr_seq, $tir1, $tir2, $maximum_size, $chromosome_name, $orientation) = @_;    # takes as input the chromosome sequence, the TIR sequences, the maximum element size
-                                                                                        # the chrosome name and orienation of the input sequence
+    my ($chr_seq, $tir1, $tir2, $maximum_size, $chromosome_name, $orientation) = @_; # takes as input the chromosome sequence, the TIR sequences,
+                                                                                     # the maximum element size of the element, the chrosome name and orienation of the input sequence
     my @tir1; # location of all TIR1 sequence
     my @tir2; # location of all TIR2 sequence 
     my %nucleotide_sequences; # location of elements as key and nucleotide sequence as value, this is what is returned
 
     # test that the orientation provided is known
-    unless (($orientation eq "+") or  ($orientation eq "-")) { die "ERROR: Orientation $orientation is not known in subroutine identy_\n"}
+    unless (($orientation eq "+") or  ($orientation eq "-")) { die "ERROR: Orientation $orientation is not known in subroutine identify_element_sequences\n$tir1, $tir2, $maximum_size, $chromosome_name, $orientation\n"}
 
-    # if the search says to search for the reverse strand, reverse complement the chrosmosome strand
+    # if the search says to search for the reverse strand, change the tir sequences
     if ($orientation eq "-") {
-        $chr_seq = rc($chr_seq);
-    }
-    elsif ($orientation eq "+") {}
-    else {
-        die "ERROR: Could not determine orientation in sub identify_element_sequene\n";
+        $tir1 = rc($tir2);
+        $tir2 = rc($tir1);
     }
 
     while ($chr_seq =~ m/$tir1/g) {
@@ -1411,9 +1431,17 @@ sub identify_element_sequence {
         for (my $j=0; $j<scalar @tir2; $j++) {
             my $size = $tir2[$j] - $tir1[$i];
             if (($tir1[$i] < $tir2[$j]) and ($size < $maximum_size)){
-                my $b1 = $tir1[$i]+1; #boundary of element, adjusted to start at 1 not 0
-                my $b2 = $tir2[$j]; #boundary of element, adjusted to start at 1 not 0
-                my $location_name = "$chromosome_name:$b1-$b2";
+                my $b1; # boundary of the element on the chromosome
+                my $b2; # boundary of the element on the chromosome
+                if ($orientation eq "+") {
+                    $b1 = $tir1[$i]+1; 
+                    $b2 = $tir2[$j];
+                }
+                else {
+                    $b2 = $tir1[$i]+1;
+                    $b1 = $tir2[$j];
+                }
+                my $location_name = "$chromosome_name:$b1-$b2"; 
                 $nucleotide_sequences{$location_name} = substr($chr_seq, $tir1[$i], $size);
             }
         }
