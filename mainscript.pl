@@ -1111,14 +1111,17 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
-
+    
      ## update the analysis file with what is going on
     print ANALYSIS "Running STEP 4\n";
-    unless ($INPUT_GENOME){
-        die "ERROR: for this step you need to provide a fasta formated genome file, using the -g parameter\n";
+    unless ($INPUT_GENOME and $INPUT_PROTEIN_SEQUENCES){
+        die "ERROR: for this step you need to provide two pieces of information:
+             1) a fasta formated genome file, using the -g parameter
+             2) the input protein file using the -p parameter\n";
     }
     print ANALYSIS "\tGenome: $INPUT_GENOME\n";
-    print ANALYSIS "\tMAX_GENOME_SIZE = $MAX_ELEMENT_SIZE\n";
+    print ANALYSIS "\tInput protein file: $INPUT_PROTEIN_SEQUENCES\n";
+    print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
 
     ## Read the README files and identify TIRs sequences and TSD
     my %file_tirs;  # holds the element name as key and information on the element ends as array of values. 
@@ -1148,66 +1151,59 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     unless (keys %file_tirs) {
         warn "WARNING: No files were found that needed ORFs identified\n";
     }
-    
+
+    ## load all the protein sequences and change the name to match the folder names
+    my %proteins = fastatohash($INPUT_PROTEIN_SEQUENCES);
+    foreach my $name (keys %proteins) {
+        if ($name =~ /^(\S+)/) {
+            $proteins{$1}=$proteins{$name};
+            delete $proteins{$name};
+        }
+    }
+
     ## Identify the position in the genome of all the TIR sequences for each element
     my %genome = fastatohash($INPUT_GENOME);
     foreach my $element_name (keys %file_tirs) { # go through the elements
+       
+        # identify the nucleotide sequences of sequences in between TIR locations
+        my %element_sequences; # holds the genomic sequence of all the elements with intact tirs, it's a hash to avoid duplications
         foreach my $chr (keys %genome) { # go through each genome subsections (calling it "chr" here)
-            my @tir1_forward; # location of all TIR1 sequence in the foward orienation
-            my @tir1_reverse; # etc.
-            my @tir2_forward; # 
-            my @tir2_reverse; # 
-            my $tir1 = lc($file_tirs{$element_name}[1]); # TIR1 sequence converted to lower case
-            my $tir2 = lc($file_tirs{$element_name}[2]); # TIR2 sequence converted to lower case
-
-            # do the searches in the forward direction
-            my $chr_seq = lc($genome{$chr}); # genome subsequence to search, converting all to lowercase for ease of search
-            while ($chr_seq =~ m/$tir1/g) {
-                push @tir1_forward, pos($chr_seq) - length($file_tirs{$element_name}[1]); # adjust the left position to compensate for where the loc is found
-            }
-            while ($chr_seq =~ m/$tir2/g) {
-                push @tir2_forward, pos($chr_seq);
-            }
-            # identify any pairs that are in the same orientation and not far from on another
-            for (my $i=0; $i<scalar @tir1_forward; $i++) {
-                for (my $j=0; $j<scalar @tir2_forward; $j++) {
-                    my $size = $tir2_forward[$j] - $tir1_forward[$i];
-                    if (($tir1_forward[$i] < $tir2_forward[$j]) and ($size < $MAX_ELEMENT_SIZE)){
-                        my $element_sequence = substr($chr_seq, $tir1_forward[$i], $size);
-                        my $toporf = findorf($element_sequence);
-                        my $i = rand(100000);
-                        print ">seq$i\n$toporf\n";
-                    }
-                }
-            }
-
-            # # do the searches in the reverse direction
-            # my $chr_seq = rc(lc($genome{$chr})); # genome subsequence to search, converting all to lowercase for ease of search
-            # while ($chr_seq =~ m/$tir1/g) {
-            #     push @tir1_reverse, pos($chr_seq);
+            # identify all the element sequences in the forward orientation. Converting everything to lower case to avoid confusion with cases.
+            # Also provinding the name of the chrososome and orientation so that the position of all the elements can recorded
+            %element_sequences = identify_element_sequence(lc($genome{$chr}), lc($file_tirs{$element_name}[1]), lc($file_tirs{$element_name}[2]), $MAX_ELEMENT_SIZE, $chr, "+");
+ #           my @reverse_sequence = identify_element_sequence(rc(lc($genome{$chr})), lc($file_tirs{$element_name}[1]), lc($file_tirs{$element_name}[2]), $MAX_ELEMENT_SIZE);
+            # foreach my $sequence (@forward_sequence) {
+            #     $element_sequences{$sequence} = 0;
             # }
-            # while ($chr_seq =~ m/$tir2/g) {
-            #     push @tir2_reverse, pos($chr_seq);
-            # }
-
-            
-
-            # if (scalar @tir1_forward) {
-            #     print "$chr\n";
-            #     foreach my $p (@tir1_forward) {
-            #         print "$p, "
-            #     }
-            #     print "\n";
-            #     foreach my $p (@tir2_forward) {
-            #         print "$p, ";
-            #     }
-            #     print "\n";
-            # }
+            # foreach my $sequence (@reverse_sequence) {
+            #     $element_sequences{$sequence} = 0;
+            # } 
         }   
-        exit;
-        print "done with $element_name\n"; 
-    }
 
+        # # make blast database file that contains the nucleotide sequences of the elements that were found
+        # my $database_input_file = File::Temp->new(UNLINK => 1); # file that contains the nucleotide sequence of all the identified elements
+        # open (OUTPUT, ">", $database_input_file) or die "$!";
+        # foreach my $seq (keys %element_sequences) {
+        #     print OUTPUT ">seq", rand(100000), "\n$seq\n"; # fasta lines with random name
+        # }   
+        # close OUTPUT;
+        # my $tblastn_database_name = File::Temp->new(UNLINK => 1); # file name for the tblastn database name
+        # `makeblastdb -in $database_input_file -dbtype nucl -out $tblastn_database_name`;
+        # if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
+
+        # # make file with original protein used to find the the current element
+        # my $protein_file = File::Temp->new(UNLINK => 1);
+        # open (OUTPUT, ">", $protein_file) or die "$!";
+        # print OUTPUT ">protein\n$proteins{$element_name}\n";
+        # close OUTPUT;
+
+        # # run tblastn
+        # my $tblastn_output = File::Temp->new(UNLINK => 1); 
+        # `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output`;
+        # if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
+        # `cp $tblastn_output ~/Desktop`;
+        # print "done with $element_name\n";
+    }
 }
 close ANALYSIS;
 close REJECT;
@@ -1225,16 +1221,16 @@ sub fastatohash {
     open (INPUT, $filename) or die "ERROR: cannot open input file $filename in fastatohash subroutine\n";
     my $line = <INPUT>;
 
-    ## record the first header
-    if ($line =~ /^>(.+)/) {
+    ## record the first header, ignoring everything after the first space in the header (to simplify recording later)
+    if ($line =~ /^>(\S+)/) {
         $current_header = $1;
     }
     else {
-        die "ERROR: file $filename does not appear to be a FASTA formatted file, this in the fastatohash subroutine\n";
+        die "ERROR: file $filename does not appear to be a FASTA formatted file (or there's a space in the header after the > sign), this in the fastatohash subroutine\n";
     }
 
     while ($line = <INPUT>) {
-        if ($line =~ /^>(.+)/) {
+        if ($line =~ /^>(\S+)/) {
             $current_header = $1;
             chomp $current_header; 
         }
@@ -1376,94 +1372,51 @@ sub fixdirname {
 	return ($string);
 }
 
-# take a nucleotide sequence as input, return a specified number of the longest
-# ORF sequences. Requires the ORFs subroutine to work.
-sub findorf {
-    my ($nucleotide_sequence) = @_; # 
-    my $toporf; # this the longest orf
-    $nucleotide_sequence = uc($nucleotide_sequence); # all into upper case
-
-    my %orf; # holds the sequence of the longest orf for each frame in the key and the length as value
-    my $f1orf = ORFs($nucleotide_sequence);
-    $orf{$f1orf} = length ($f1orf);
-    my $f2orf = ORFs(substr($nucleotide_sequence, 1, (length $nucleotide_sequence) - 1));
-    $orf{$f2orf} = length ($f2orf);
-    my $f3orf = ORFs(substr($nucleotide_sequence, 2, (length $nucleotide_sequence) - 2));
-    $orf{$f3orf} = length ($f3orf);
-    $nucleotide_sequence = rc($nucleotide_sequence); # now do the same on the other DNA strand
-    my $f4orf = ORFs($nucleotide_sequence);
-    $orf{$f4orf} = length ($f4orf);
-    my $f5orf = ORFs(substr($nucleotide_sequence, 1, (length $nucleotide_sequence) - 1));
-    $orf{$f5orf} = length ($f5orf);
-    my $f6orf = ORFs(substr($nucleotide_sequence, 2, (length $nucleotide_sequence) - 2));
-    $orf{$f6orf} = length ($f6orf);
-    foreach my $orf_seq (sort { $orf{$b} <=> $orf{$a} } keys %orf) {
-        return ($orf_seq);
-    }
-    # my %merged_orfs =(%f1orfs, %f2orfs, %f3orfs, %f4orfs, %f5orfs, %f6orfs); # merge orf all the frames
-
-    # # identify the top ORFs
-    # my $i=0;
-    # foreach my $orf_seq (sort { $merged_orfs{$b} <=> $merged_orfs{$a} } keys %merged_orfs) {
-    #     if ($i < $top_number) {
-    #         $top_orfs{$orf_seq} = 1;
-    #     }
-    #     $i++;
-    # } 
-
-    # return (%top_orfs);
-}
-
-# this is sub-routine of the translate sub-routing
-sub ORFs {
-    my ($sequence) = @_;
-    my %transtable = qw/
-    TTT F TTC F TTA L TTG L TCT S TCC S TCA S TCG S TAT Y TAC Y TGT C TGC C TGG W TGA * TAA * TAG *
-    CTT L CTC L CTA L CTG L CCT P CCC P CCA P CCG P CAT H CAC H CAA Q CAG Q CGT R CGC R CGA R CGG R
-    ATT I ATC I ATA I ATG M ACT T ACC T ACA T ACG T AAT N AAC N AAA K AAG K AGT S AGC S AGA R AGG R
-    GTT V GTC V GTA V GTG V GCT A GCC A GCA A GCG A GAT D GAC D GAA E GAG E GGT G GGC G GGA G GGG G
-    /;
-    my %orfs; # open reading frame sequence as key and size as value
-    my $translated_sequence;#
-
-    # translate the sequence
-    for (my $i=0; $i<(length $sequence); $i=$i+3) {
-        my $codon = substr($sequence, $i, 3);
-        if (defined $transtable{$codon}) {
-            $translated_sequence .= $transtable{$codon};
-        }
-        else {
-            $translated_sequence .= "X"; # put an X if there's an N or some unknown sequence
-        }
-    }
-
-    # identify ORF
-    my $current_ORF; # temporary storage of ORF sequences
-    my $longestORF;
-    for (my $i=0; $i<(length $translated_sequence); $i++) {
-        my $t = substr($translated_sequence, $i, 1);
-        if (substr($translated_sequence, $i, 1) eq "*") {
-            $current_ORF .= "*"; # if present ORFs end with a stop codon
-            if (length $current_ORF > length $longestORF) {
-                $longestORF = $current_ORF;
-            }
-            $current_ORF = ""; # reset
-        }
-        else {
-            $current_ORF .= substr($translated_sequence, $i, 1);
-        }
-    }
-    if (length $current_ORF > length $longestORF) {
-        $longestORF = $current_ORF;
-    }
-
-    return ($longestORF)
-}
-
 #reverse complement
 sub rc {
     my ($sequence) = @_;
     $sequence = reverse $sequence;
     $sequence =~ tr/ACGTRYMKSWacgtrymksw/TGCAYRKMWStgcayrkmws/;
     return ($sequence);
+}
+
+# identify element sequences
+sub identify_element_sequence {
+    my ($chr_seq, $tir1, $tir2, $maximum_size, $chromosome_name, $orientation) = @_;    # takes as input the chromosome sequence, the TIR sequences, the maximum element size
+                                                                                        # the chrosome name and orienation of the input sequence
+    my @tir1; # location of all TIR1 sequence
+    my @tir2; # location of all TIR2 sequence 
+    my %nucleotide_sequences; # location of elements as key and nucleotide sequence as value, this is what is returned
+
+    # test that the orientation provided is known
+    unless (($orientation eq "+") or  ($orientation eq "-")) { die "ERROR: Orientation $orientation is not known in subroutine identy_\n"}
+
+    # if the search says to search for the reverse strand, reverse complement the chrosmosome strand
+    if ($orientation eq "-") {
+        $chr_seq = rc($chr_seq);
+    }
+    elsif ($orientation eq "+") {}
+    else {
+        die "ERROR: Could not determine orientation in sub identify_element_sequene\n";
+    }
+
+    while ($chr_seq =~ m/$tir1/g) {
+        push @tir1, pos($chr_seq) - length($tir1); # adjust the left position to compensate for where the loc is found
+    }
+    while ($chr_seq =~ m/$tir2/g) {
+        push @tir2, pos($chr_seq);
+    }
+    # identify any pairs that are in the correct orientation and not too far from on another
+    for (my $i=0; $i<scalar @tir1; $i++) {
+        for (my $j=0; $j<scalar @tir2; $j++) {
+            my $size = $tir2[$j] - $tir1[$i];
+            if (($tir1[$i] < $tir2[$j]) and ($size < $maximum_size)){
+                my $b1 = $tir1[$i]+1; #boundary of element, adjusted to start at 1 not 0
+                my $b2 = $tir2[$j]; #boundary of element, adjusted to start at 1 not 0
+                my $location_name = "$chromosome_name:$b1-$b2";
+                $nucleotide_sequences{$location_name} = substr($chr_seq, $tir1[$i], $size);
+            }
+        }
+    }
+    return (%nucleotide_sequences);
 }
