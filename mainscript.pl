@@ -1152,14 +1152,22 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         warn "WARNING: No files were found that needed ORFs identified\n";
     }
 
-    ## load all the protein sequences and change the name to match the folder names
-    my %proteins = fastatohash($INPUT_PROTEIN_SEQUENCES);
-    foreach my $name (keys %proteins) {
-        if ($name =~ /^(\S+)/) {
-            $proteins{$1}=$proteins{$name};
-            delete $proteins{$name};
-        }
-    }
+    
+    my %proteins = fastatohash($INPUT_PROTEIN_SEQUENCES); # load all the protein sequences
+    # my $size = keys %proteins; print "size is $size\n";
+    # foreach my $k (keys %proteins) {
+    #     print "$k\n";
+    # }
+    # exit;
+
+    # foreach my $name (keys %proteins) {
+    #     if ($name =~ /^(\S+)/) {
+    #         $proteins{$1}=$proteins{$name};
+    #         print "$name\t$1\n";
+    #         delete $proteins{$name};
+    #     }
+    # }
+    # my $size = keys %proteins; print "size is $size\n";
 
     ## Identify the position in the genome of all the TIR sequences for each element
     my %genome = fastatohash($INPUT_GENOME);
@@ -1172,60 +1180,63 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             # Also provinding the name of the chrososome and orientation so that the position of all the elements can recorded
             my $tir1_seq = lc($file_tirs{$element_name}[1]);
             my $tir2_seq = lc($file_tirs{$element_name}[2]);
-            %element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, "+");
+            my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, "+"); # look for TIRs on the + strand
+            %element_sequences = (%element_sequences, %fw_element_sequences); # add elements found on the + strand to %element_sequences
             unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
                 my %rc_element_sequences = identify_element_sequence(lc($genome{$chr}), lc($file_tirs{$element_name}[1]), lc($file_tirs{$element_name}[2]), $MAX_ELEMENT_SIZE, $chr, "-");
-                foreach my $rc_element (keys %rc_element_sequences) {
-                    $element_sequences{$rc_element} = $rc_element_sequences{$rc_element};
+                %element_sequences = (%element_sequences, %rc_element_sequences); # add any new elements to the hash %element_sequences
+            }
+        }  
+
+        if (keys %element_sequences) { # do tbastn only if elements have been found
+
+            # make blast database file that contains the nucleotide sequences of the elements that were found
+            my $database_input_file = File::Temp->new(UNLINK => 1); # file that contains the nucleotide sequence of all the identified elements
+            open (OUTPUT, ">", $database_input_file) or die "$!";
+            foreach my $seq (keys %element_sequences) {
+                print OUTPUT ">$seq\n$element_sequences{$seq}\n";
+            }   
+            close OUTPUT;
+
+            my $tblastn_database_name = File::Temp->new(UNLINK => 1); # file name for the tblastn database name
+            `makeblastdb -in $database_input_file -dbtype nucl -out $tblastn_database_name`;
+            if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
+
+            # make file with original protein used to find the the current element
+            my $protein_file = File::Temp->new(UNLINK => 1);
+            open (OUTPUT, ">", $protein_file) or die "$!";
+            print OUTPUT ">protein\n$proteins{$element_name}\n";
+            close OUTPUT;
+
+            # run tblastn
+            my $tblastn_output = File::Temp->new(UNLINK => 1); 
+            `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output -outfmt "6 sseqid evalue sstrand"`;
+            if ($?) { die "ERROR executing tblastn: error code $?\n"}      
+
+            # interpret the tblasnt results
+            open (INPUT, $tblastn_output) or die "$!";
+            my %full_element_sequences; # holds the elements that had high tblastn match
+            while (my $line = <INPUT>) {
+                my @d = split " ", $line;
+print "$d[0] $d[1] $d[2] $d[3]\n";
+                if ($d[1] < 1e-6) {
+                    if (exists $element_sequences{$d[0]}) {
+                        $full_element_sequences{$d[0]} = $element_sequences{$d[0]};
+                    }
+                    else {
+                        die "ERROR: Cannot find element $d[0]\n";
+                    }
                 }
+            }   
+            my $output_name = "/home/peter/Desktop/$element_name" . "_full_element.fa";
+            open (OUTPUT, ">", $output_name) or die "$!";
+            foreach my $header (keys %full_element_sequences) {
+                print OUTPUT ">$header\n$full_element_sequences{$header}\n";
             }
-
-            foreach my $k (keys %element_sequences) {
-                print "$k\n";
-            }
-#             for my $rce (keys %rc_element_sequences) {
-# #                print "$rce\n";
-#                 if ($rce =~ /(\S+):(\d+)-(\d+)/) {
-#                     my $test_location = "$1:$3-$2";
-#                     print "$test_location, $file_tirs{$element_name}[1], $file_tirs{$element_name}[2]\n";
-#                     if (exists $element_sequences{$test_location}) {
-#                         print "found one\n";
-#                     }
-                    
-#                 }
-  #          }
- #           my @reverse_sequence = identify_element_sequence(rc(lc($genome{$chr})), lc($file_tirs{$element_name}[1]), lc($file_tirs{$element_name}[2]), $MAX_ELEMENT_SIZE);
-            # foreach my $sequence (@forward_sequence) {
-            #     $element_sequences{$sequence} = 0;
-            # }
-            # foreach my $sequence (@reverse_sequence) {
-            #     $element_sequences{$sequence} = 0;
-            # } 
-        }   
-
-        # # make blast database file that contains the nucleotide sequences of the elements that were found
-        # my $database_input_file = File::Temp->new(UNLINK => 1); # file that contains the nucleotide sequence of all the identified elements
-        # open (OUTPUT, ">", $database_input_file) or die "$!";
-        # foreach my $seq (keys %element_sequences) {
-        #     print OUTPUT ">seq", rand(100000), "\n$seq\n"; # fasta lines with random name
-        # }   
-        # close OUTPUT;
-        # my $tblastn_database_name = File::Temp->new(UNLINK => 1); # file name for the tblastn database name
-        # `makeblastdb -in $database_input_file -dbtype nucl -out $tblastn_database_name`;
-        # if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
-
-        # # make file with original protein used to find the the current element
-        # my $protein_file = File::Temp->new(UNLINK => 1);
-        # open (OUTPUT, ">", $protein_file) or die "$!";
-        # print OUTPUT ">protein\n$proteins{$element_name}\n";
-        # close OUTPUT;
-
-        # # run tblastn
-        # my $tblastn_output = File::Temp->new(UNLINK => 1); 
-        # `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output`;
-        # if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
-        # `cp $tblastn_output ~/Desktop`;
-        # print "done with $element_name\n";
+            close OUTPUT;
+            close INPUT;  
+        }
+        print "done with $element_name\n";
     }
 }
 close ANALYSIS;
