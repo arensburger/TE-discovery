@@ -57,7 +57,7 @@ else {
 }
 
 ## CHECK INPUTS Create output directory for analysis files if necessary
-#$ANALYSIS_FOLDER = fixdirname($ANALYSIS_FOLDER);
+$ANALYSIS_FOLDER = fixdirname($ANALYSIS_FOLDER);
 if (-d $ANALYSIS_FOLDER) {
     warn "Directory $ANALYSIS_FOLDER already exists\n";
 }
@@ -80,7 +80,7 @@ else {
 }
 
 ## CHECK INPUTS Create output directory for individual elements if necessary
-#$ELEMENT_FOLDER = fixdirname($ELEMENT_FOLDER);
+$ELEMENT_FOLDER = fixdirname($ELEMENT_FOLDER);
 if (-d $ELEMENT_FOLDER) {
     warn "Directory $ELEMENT_FOLDER already exists\n";
 }
@@ -408,112 +408,114 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
        `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences`;
         if ($?) { die "Error executing mafft, error code $?\n"}
 
-        # STEP 2.2.3
-        # remove positions from the alignment that have more gaps than the threshold given $GAP_THRESHOLD   
-        # a record of the deletions is made so the original alignment can be recreated later
+        my $conseq = consensus_sequence($GAP_THRESHOLD, $CONSLEVEL, $aligned_sequences);
+exit;
+        # # STEP 2.2.3        
+        # # remove positions from the alignment that have more gaps than the threshold given $GAP_THRESHOLD   
+        # # a record of the deletions is made so the original alignment can be recreated later
 
-        my %cp; # cp = current position, sequence name as key and current position as value at [0] and orientation at [1]
-                # [2] is boolean, value 0 until a non-gap has been reached
-        my %seq; # sequence name as key and string with mafft alignment as value
-        my %seqrmg; # sequences with gaps removed
-        my %pos; # holds the sequence name as key array with position of every nucleotide as value
-        my $alilen; # length in bp of the multiple sequence alignment
-        my $ali_trimmed_length; # length in bp of the multiple squence alignment after it's been trimmed
+        # my %cp; # cp = current position, sequence name as key and current position as value at [0] and orientation at [1]
+        #         # [2] is boolean, value 0 until a non-gap has been reached
+        # my %seq; # sequence name as key and string with mafft alignment as value
+        # my %seqrmg; # sequences with gaps removed
+        # my %pos; # holds the sequence name as key array with position of every nucleotide as value
+        # my $alilen; # length in bp of the multiple sequence alignment
+        # my $ali_trimmed_length; # length in bp of the multiple squence alignment after it's been trimmed
 
-        # populate the %cp hash with information about the multiple sequence alignment
-        my %seq = fastatohash($aligned_sequences); 
-        foreach my $name (keys %seq) { 
-            if ($name =~ /^(\S+):(\d+)-(\d+)\((.)\)/) {
-                my $chr = $1;
-                my $b1 = $2;
-                my $b2 = $3;
-                my $ori = $4;
-                if ($ori eq "+") {
-                    $cp{$name}[0] = $b1;
-                    $cp{$name}[1] = 1;
-                    $cp{$name}[2] = 0;
-                }
-                elsif ($ori eq "-") {
-                    $cp{$name}[0] = $b2;
-                    $cp{$name}[1] = -1;
-                    $cp{$name}[2] = 0;
-                }
-                else {
-                    die "ERROR: Reading sequence alignment for element $element_name, orientation not recognized on this element $name\n";
-                }
-            }
-            else {
-                die "ERROR: Reading sequence alignment for element $element_name, fasta title not formated as expected\n$name";
-            }
-            $alilen = length $seq{$name}; # this is the length of the sequence alignment prior to trimming
-        }
+        # # populate the %cp hash with information about the multiple sequence alignment
+        # my %seq = fastatohash($aligned_sequences); 
+        # foreach my $name (keys %seq) { 
+        #     if ($name =~ /^(\S+):(\d+)-(\d+)\((.)\)/) {
+        #         my $chr = $1;
+        #         my $b1 = $2;
+        #         my $b2 = $3;
+        #         my $ori = $4;
+        #         if ($ori eq "+") {
+        #             $cp{$name}[0] = $b1;
+        #             $cp{$name}[1] = 1;
+        #             $cp{$name}[2] = 0;
+        #         }
+        #         elsif ($ori eq "-") {
+        #             $cp{$name}[0] = $b2;
+        #             $cp{$name}[1] = -1;
+        #             $cp{$name}[2] = 0;
+        #         }
+        #         else {
+        #             die "ERROR: Reading sequence alignment for element $element_name, orientation not recognized on this element $name\n";
+        #         }
+        #     }
+        #     else {
+        #         die "ERROR: Reading sequence alignment for element $element_name, fasta title not formated as expected\n$name";
+        #     }
+        #     $alilen = length $seq{$name}; # this is the length of the sequence alignment prior to trimming
+        # }
 
-        # go through each position of the alignment and decide if the position needs to be removed
-        for (my $i=0; $i<$alilen; $i++) { # go through positions of the alignment
-            my $numgap; # number of gaps in this column
-            foreach my $name (keys %seq) { # go through each element of the mafft alignment
-                if (substr($seq{$name},$i,1) eq "-") {
-                    $numgap++;
-                }
-                else { # if this position does not have a gap then update %cp
-                    if ($cp{$name}[3] == 0) { # if this is the first time the position has a non-gapped position
-                        $cp{$name}[3] = 1;
-                    }
-                    else { # not the first encounter and position should be updated
-                        $cp{$name}[0] += $cp{$name}[1]; # position will be increased or decreased based on orientation
-                    }
-                }
-            }
-            unless ($numgap/(keys %seq) >= $GAP_THRESHOLD) { # if this column is kept, then copy it to %seqrmg and update %pos
-                foreach my $name (keys %seq) { # go through each element of the mafft alignment
-                    $seqrmg{$name} .= substr($seq{$name},$i,1);
-                    push @{ $pos{$name} },$cp{$name}[0];
-                }
-                $ali_trimmed_length++;
-            }
-        }
+        # # go through each position of the alignment and decide if the position needs to be removed
+        # for (my $i=0; $i<$alilen; $i++) { # go through positions of the alignment
+        #     my $numgap; # number of gaps in this column
+        #     foreach my $name (keys %seq) { # go through each element of the mafft alignment
+        #         if (substr($seq{$name},$i,1) eq "-") {
+        #             $numgap++;
+        #         }
+        #         else { # if this position does not have a gap then update %cp
+        #             if ($cp{$name}[3] == 0) { # if this is the first time the position has a non-gapped position
+        #                 $cp{$name}[3] = 1;
+        #             }
+        #             else { # not the first encounter and position should be updated
+        #                 $cp{$name}[0] += $cp{$name}[1]; # position will be increased or decreased based on orientation
+        #             }
+        #         }
+        #     }
+        #     unless ($numgap/(keys %seq) >= $GAP_THRESHOLD) { # if this column is kept, then copy it to %seqrmg and update %pos
+        #         foreach my $name (keys %seq) { # go through each element of the mafft alignment
+        #             $seqrmg{$name} .= substr($seq{$name},$i,1);
+        #             push @{ $pos{$name} },$cp{$name}[0];
+        #         }
+        #         $ali_trimmed_length++;
+        #     }
+        # }
 
-        # printing the .maf later, after the consensus has been created
+        # # printing the .maf later, after the consensus has been created
 
-        # output the file that will allow restoring the deleted positions, called .alipos
-        open (OUTPUT, '>', "$ELEMENT_FOLDER/$element_name/$element_name.alipos") or die "Error: cannot create file $element_name.alipos, $!\n";
-        for my $name (keys %pos) {
-            for my $j ( 0 .. $#{ $pos{$name}}) {
-                my $location = $j+1;
-                print OUTPUT "$name\t$location\t$pos{$name}[$j]\n";
-            }
-	    }
-        my $datestring = localtime(); # update the README file of new file created
-        print README "$datestring, File $element_name.alipos contains the information about positions removed in the alignment file\n";
-	    close OUTPUT;
+        # # output the file that will allow restoring the deleted positions, called .alipos
+        # open (OUTPUT, '>', "$ELEMENT_FOLDER/$element_name/$element_name.alipos") or die "Error: cannot create file $element_name.alipos, $!\n";
+        # for my $name (keys %pos) {
+        #     for my $j ( 0 .. $#{ $pos{$name}}) {
+        #         my $location = $j+1;
+        #         print OUTPUT "$name\t$location\t$pos{$name}[$j]\n";
+        #     }
+	    # }
+        # my $datestring = localtime(); # update the README file of new file created
+        # print README "$datestring, File $element_name.alipos contains the information about positions removed in the alignment file\n";
+	    # close OUTPUT;
 
-        # STEP 2.2.4
-        # Create a consensus sequence for this element
-        my $conseq; # initial consensus sequence (not trimmed on the ends)
-        my @prop_cons; # for each nucleotide position of the consensus sequence holds the proportion of sequences that have the most abundant nucleotide 
-        my @prop_complete_total; # for each nucleotide position the proportion of the complete total that have the consensus
+        # # STEP 2.2.4
+        # # Create a consensus sequence for this element
+        # my $conseq; # initial consensus sequence (not trimmed on the ends)
+        # my @prop_cons; # for each nucleotide position of the consensus sequence holds the proportion of sequences that have the most abundant nucleotide 
+        # my @prop_complete_total; # for each nucleotide position the proportion of the complete total that have the consensus
 
-        # loop though all positions and make a consensus sequence
-        for (my $i=0; $i < $ali_trimmed_length; $i++) {
-            my %abundance; # holds the nucleotide identify as key and frequency as value
-            my $total; # total number of relevant squences for this column
-            foreach my $key (keys %seqrmg) { # loop through all sequences and record any identified nucleotides
-                my $character = lc(substr($seqrmg{$key}, $i, 1));
-                if (($character eq "a") or ($character eq "c") or ($character eq "g") or ($character eq "t")) {
-                    $abundance{$character} += 1; # add the sequences
-                }
-                $total++; # count the number of sequences
-            }
+        # # loop though all positions and make a consensus sequence
+        # for (my $i=0; $i < $ali_trimmed_length; $i++) {
+        #     my %abundance; # holds the nucleotide identify as key and frequency as value
+        #     my $total; # total number of relevant squences for this column
+        #     foreach my $key (keys %seqrmg) { # loop through all sequences and record any identified nucleotides
+        #         my $character = lc(substr($seqrmg{$key}, $i, 1));
+        #         if (($character eq "a") or ($character eq "c") or ($character eq "g") or ($character eq "t")) {
+        #             $abundance{$character} += 1; # add the sequences
+        #         }
+        #         $total++; # count the number of sequences
+        #     }
 
-            # add the highest abundance nucleotide if above consensus level threshold
-            my $highest = max_by { $abundance{$_} } keys %abundance; # from https://perlmaven.com/highest-hash-value           
-            if (($abundance{$highest}/$total) >= $CONSLEVEL) {
-                $conseq .= $highest;
-            }
-            else {
-                $conseq .= "N";
-            }
-        }
+        #     # add the highest abundance nucleotide if above consensus level threshold
+        #     my $highest = max_by { $abundance{$_} } keys %abundance; # from https://perlmaven.com/highest-hash-value           
+        #     if (($abundance{$highest}/$total) >= $CONSLEVEL) {
+        #         $conseq .= $highest;
+        #     }
+        #     else {
+        #         $conseq .= "N";
+        #     }
+        # }
 
         # STEP 2.2.5
         # trim the ends of the consensus that have low agreement on a single sequence
@@ -1111,9 +1113,12 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
+    my $PROTEIN_TBLASTN_CUTOFF = 1e-6; # E-value cutoff for initial protein to match element nucleotide sequence
+    my $CONSENSUS_REMOVAL_THRESHOLD = 0.75; # minium number of taxa with a definite nucleotide at a position to make a consensus at this position
+    my $CONSENSUS_LEVEL = 0.5; # proportion of agreeing nucleotides to call a consensus 
     
      ## update the analysis file with what is going on
-    print ANALYSIS "Running STEP 4\n";
+    print ANALYSIS "Running STEP $step_number\n";
     unless ($INPUT_GENOME and $INPUT_PROTEIN_SEQUENCES){
         die "ERROR: for this step you need to provide two pieces of information:
              1) a fasta formated genome file, using the -g parameter
@@ -1122,6 +1127,9 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     print ANALYSIS "\tGenome: $INPUT_GENOME\n";
     print ANALYSIS "\tInput protein file: $INPUT_PROTEIN_SEQUENCES\n";
     print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
+    print ANALYSIS "\tPROTEIN_TBLASTN_CUTOFF = $PROTEIN_TBLASTN_CUTOFF\n";
+    print ANALYSIS "\tCONSENSUS_REMOVAL_THRESHOLD = $CONSENSUS_REMOVAL_THRESHOLD\n";
+    print ANALYSIS "\tCONSENSUS_LEVEL = $CONSENSUS_LEVEL\n";
 
     ## Read the README files and identify TIRs sequences and TSD
     my %file_tirs;  # holds the element name as key and information on the element ends as array of values. 
@@ -1144,40 +1152,30 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 warn "WARNING: No README.txt file was found in folder $ELEMENT_FOLDER/$_";
             }
             unless (exists $file_tirs{$_}) {
-                warn "WARNING: No TIR sequences were reported in the README file for element $_\n";
+                warn "WARNING: No appropriate line with TIR sequences were found in the README file for element $_\n";
             }
         }
     }
     unless (keys %file_tirs) {
-        warn "WARNING: No files were found that needed ORFs identified\n";
+        warn "WARNING: No elements where found for processing in this dataset\n";
     }
 
-    
-    my %proteins = fastatohash($INPUT_PROTEIN_SEQUENCES); # load all the protein sequences
-    # my $size = keys %proteins; print "size is $size\n";
-    # foreach my $k (keys %proteins) {
-    #     print "$k\n";
-    # }
-    # exit;
+    my %proteins = fastatohash($INPUT_PROTEIN_SEQUENCES); # this holds the sequence of all the original protein sequences
 
-    # foreach my $name (keys %proteins) {
-    #     if ($name =~ /^(\S+)/) {
-    #         $proteins{$1}=$proteins{$name};
-    #         print "$name\t$1\n";
-    #         delete $proteins{$name};
-    #     }
-    # }
-    # my $size = keys %proteins; print "size is $size\n";
+    ## Using the provided TIR sequences for this element, identify possible element sequences, then match these to the original protein sequence.
+    ## Report potential complete elements.
 
-    ## Identify the position in the genome of all the TIR sequences for each element
-    my %genome = fastatohash($INPUT_GENOME);
-    foreach my $element_name (keys %file_tirs) { # go through the elements
-       
-        # identify the nucleotide sequences of sequences in between TIR locations
-        my %element_sequences; # holds the genomic sequence of all the elements with intact tirs, it's a hash to avoid duplications
-        foreach my $chr (keys %genome) { # go through each genome subsections (calling it "chr" here)
+    my %genome = fastatohash($INPUT_GENOME); # load the genome into memory
+    foreach my $element_name (keys %file_tirs) { # go through the elements individually
+
+        # open README file for writing
+        open (README, ">>", "$ELEMENT_FOLDER/$element_name/README.txt") or die "ERROR: Could not open README file $ELEMENT_FOLDER/$element_name/README.txt\n";
+      
+        # identify the nucleotide sequences between TIR locations
+        my %element_sequences; # holds the genomic sequence with intact tirs, it's a hash to avoid duplications
+        foreach my $chr (keys %genome) { # go through each genome subsection (calling it "chr" here)
             # identify all the element sequences in the forward orientation. Converting everything to lower case to avoid confusion with cases.
-            # Also provinding the name of the chrososome and orientation so that the position of all the elements can recorded
+            # also provinding the name of the chrososome and orientation so that the position of all the elements can recorded
             my $tir1_seq = lc($file_tirs{$element_name}[1]);
             my $tir2_seq = lc($file_tirs{$element_name}[2]);
             my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, "+"); # look for TIRs on the + strand
@@ -1188,21 +1186,21 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             }
         }  
 
-        if (keys %element_sequences) { # do tbastn only if elements have been found
+        # Continue the analysis if complete elements have been found
+        if (keys %element_sequences) { 
 
-            # make blast database file that contains the nucleotide sequences of the elements that were found
-            my $database_input_file = File::Temp->new(UNLINK => 1); # file that contains the nucleotide sequence of all the identified elements
+            # make a blast database using the file that contains the nucleotide sequences of the element
+            my $database_input_file = File::Temp->new(UNLINK => 1); 
             open (OUTPUT, ">", $database_input_file) or die "$!";
             foreach my $seq (keys %element_sequences) {
                 print OUTPUT ">$seq\n$element_sequences{$seq}\n";
             }   
             close OUTPUT;
-
             my $tblastn_database_name = File::Temp->new(UNLINK => 1); # file name for the tblastn database name
             `makeblastdb -in $database_input_file -dbtype nucl -out $tblastn_database_name`;
             if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
 
-            # make file with original protein used to find the the current element
+            # make a file with the sequence of the original protein used to find the the current element
             my $protein_file = File::Temp->new(UNLINK => 1);
             open (OUTPUT, ">", $protein_file) or die "$!";
             print OUTPUT ">protein\n$proteins{$element_name}\n";
@@ -1210,32 +1208,82 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
             # run tblastn
             my $tblastn_output = File::Temp->new(UNLINK => 1); 
-            `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output -outfmt "6 sseqid evalue sstrand"`;
-            if ($?) { die "ERROR executing tblastn: error code $?\n"}      
-
-            # interpret the tblasnt results
-            open (INPUT, $tblastn_output) or die "$!";
-            my %full_element_sequences; # holds the elements that had high tblastn match
+            `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output -outfmt "6 sseqid evalue sstart send"`;
+            if ($?) { die "ERROR executing tblastn: error code $?\n"}   
+  
+            # interpret the tblastn results, identify element sequences that have low e-value and report them in the same orientation 
+            # as the protein 
+            my %complete_elements_sequences; # this will hold the identified element sequences as value, and genomic location as value
+            open (INPUT, $tblastn_output) or die "$!";           
             while (my $line = <INPUT>) {
-                my @d = split " ", $line;
-print "$d[0] $d[1] $d[2] $d[3]\n";
-                if ($d[1] < 1e-6) {
-                    if (exists $element_sequences{$d[0]}) {
-                        $full_element_sequences{$d[0]} = $element_sequences{$d[0]};
+                my @data = split " ", $line;
+                if ($data[1] < $PROTEIN_TBLASTN_CUTOFF) { # only continue if tblastn E value is low enough
+                    unless (exists $element_sequences{$data[0]}) { die "ERROR: Cannot find element $data[0]\n" } # a check to make sure the elemnent has been recorded
+                    # check the orientation of the element sequence compared to the protein, report all sequences in the same
+                    # orientation as the protein. Specifically test if the subject start position is lower than the end position or not
+                    # to determine orientation.
+                    if ($data[2] < $data[3]) {
+                        $complete_elements_sequences{$data[0]} = $element_sequences{$data[0]};
                     }
-                    else {
-                        die "ERROR: Cannot find element $d[0]\n";
-                    }
+                    else { # this element in on the other strand so change the orientation and reverse order of the positions on the location name
+                        if ($data[0] =~ /(\S+):(\d+)-(\d+)/) {
+                            my $updated_genomic_location = "$1:$3-$2";
+                            $complete_elements_sequences{$updated_genomic_location} = rc($element_sequences{$data[0]});
+                        }
+                        else {
+                            die "ERROR: Genomic location $data[0] could not be parsed $!";
+                        }
+                    }  
                 }
             }   
-            my $output_name = "/home/peter/Desktop/$element_name" . "_full_element.fa";
-            open (OUTPUT, ">", $output_name) or die "$!";
-            foreach my $header (keys %full_element_sequences) {
-                print OUTPUT ">$header\n$full_element_sequences{$header}\n";
+
+            # align the sequences and create a consensus sequence
+            if (%complete_elements_sequences) { # only make the consensus if complete elements were found
+                my $alignment_input_filename = File::Temp->new(UNLINK => 1);    # alignement program input and output files
+                my $alignment_output_filename = File::Temp->new(UNLINK => 1); 
+
+                # write sequences to the alignent input file
+                open (ALIINPUT, ">", $alignment_input_filename) or die "$!";
+                foreach my $header (keys %complete_elements_sequences) {
+                    print ALIINPUT ">$header\n$complete_elements_sequences{$header}\n";
+                }
+                close (ALIINPUT);
+                
+                # run the alignment and convert result into a hash
+                `mafft $alignment_input_filename > $alignment_output_filename`;
+                if ($?) { die "ERROR executing mafft: error code $?\n"}  
+                my $consensus_sequence = consensus_sequence($CONSENSUS_REMOVAL_THRESHOLD, $CONSENSUS_LEVEL, fastatohash($alignment_output_filename));
+
+                # report results
+                my $alignment_file_output_name = "$element_name" . "_complete-elements-alignment.fa";
+                `cp $alignment_output_filename $ELEMENT_FOLDER/$element_name/$alignment_file_output_name`;
+                if ($?) { die "ERROR using cp: error code $?\n"}  
+                my $consensus_file_name = "$element_name" . "_consensus.fa";
+                open (OUTPUT, ">", "$ELEMENT_FOLDER/$element_name/$consensus_file_name") or die "$!";
+                print OUTPUT ">consensus-$element_name\n$consensus_sequence\n";
+
+                my $datestring = localtime(); 
+                print README "$datestring, a consensus sequence of nearly-complete elements was created.\n";
+                print README "$datestring, File $alignment_file_output_name contains the alignment of nearly-complete elements\n";
+                print README "$datestring, File $consensus_file_name contains the consensus of nearly-complete elements\n"
             }
-            close OUTPUT;
-            close INPUT;  
+            else {
+                my $datestring = localtime(); 
+                print README "$datestring, in STEP $step_number, while TIRs were found no sequence matched the intial protein sequence\n";
+                print REJECT "$datestring\t$element_name\tSTEP $step_number\tNo matches to initial protein sequence with tblastn\n";
+                `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+                if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
+            }
         }
+        else {
+            my $datestring = localtime(); 
+            print README "$datestring, No genomic sequences with appropriately positioned TIRs were identified in STEP $step_number\n";
+            print REJECT "$datestring\t$element_name\tSTEP $step_number\tNo genomic sequences with appropriately positioned TIRs found\n";
+            `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+            if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
+        }
+
+        close README;
         print "done with $element_name\n";
     }
 }
@@ -1368,7 +1416,7 @@ sub gettir {
     }
 }
 
-#takes a string, converts it to lower case and checks if it contain an "n"
+# Takes a string, converts it to lower case and checks if it contain an "n"
 sub cleanup {
 	my ($s) = @_;
     $s = lc($s);
@@ -1380,6 +1428,7 @@ sub cleanup {
     }
 }
 
+# Takes a folder name and standardizes the formating
 sub fixdirname {
 	my ($string) = @_;
 	chomp $string;
@@ -1458,4 +1507,58 @@ sub identify_element_sequence {
         }
     }
     return (%nucleotide_sequences);
+}
+
+# create consensus sequence using a hash as an input
+sub consensus_sequence {
+    my ($removal_threshold, $consensus_level, %sequences) = @_; # mininum proportion of non-gaps per alignment position, and hash with sequences
+    my $alilen; # length of the alignment
+    my $conseq; # the final consensus sequence
+    my %trimmed_aligned_sequences; # this will be returned to the calling function, holds the aligned sequences with positions removed
+
+    # Input check, go through the hash elements and make sure they are all the same length (otherwise return a blank)
+    foreach my $s (keys %sequences) {
+        if ($alilen) { # go here if the initial length has been set
+            unless (length $sequences{$s} == $alilen) {
+                die ("WARNING: No consensus sequence created because there's a discrepancy in the input sequence lengths");
+                return ();
+            }
+        }
+        else { # go here if the intial length has not yet been set
+            $alilen = length $sequences{$s};
+        }
+    }
+
+    for (my $i=0; $i < $alilen; $i++) { # loop though each position in the alignment
+        my %nucleotide_abundance; # holds the abundance of ever nucleotide at the current position
+        my $other_abundance; # holds the abundance of anything other than a nucleotide at this position (i.e. gaps, N's, etc.)
+        my $total_nucleotides; # total number of nucleotides in this column
+        my %sequences_at_position; # this holds the names of the alignment taxa as key and squences at the current position as value
+
+        # loop through all sequences and record any identified nucleotides
+        foreach my $taxon (keys %sequences) { 
+            my $character = lc(substr($sequences{$taxon}, $i, 1));
+            if (($character eq "a") or ($character eq "c") or ($character eq "g") or ($character eq "t")) {
+                $nucleotide_abundance{$character} += 1; # add the sequences
+                $total_nucleotides++; # count the number of sequences
+            }   
+            $sequences_at_position{$taxon} = $character; # holds the characters at the current position, not sure if they will make it to the final alignment yet
+        }
+
+        # only keep adding postions if there are not too many gaps at this position
+        if (($total_nucleotides/(keys %sequences)) > $removal_threshold) { # figure out if there is a suffient number of nucleotides at this postion to add it to the consensus
+            my $highest = max_by { $nucleotide_abundance{$_} } keys %nucleotide_abundance; # from https://perlmaven.com/highest-hash-value           
+            if (($nucleotide_abundance{$highest}/$total_nucleotides) >= $consensus_level) {
+                $conseq .= $highest;
+            }
+            else {
+                $conseq .= "N";
+            }
+            foreach my $taxon (keys %sequences_at_position) {
+                $trimmed_aligned_sequences{$taxon} .= $sequences_at_position{$taxon};
+            }
+        }
+    }
+
+    return ($conseq, %trimmed_aligned_sequences);
 }
