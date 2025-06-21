@@ -408,8 +408,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
        `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences`;
         if ($?) { die "Error executing mafft, error code $?\n"}
 
-        my $conseq = consensus_sequence($GAP_THRESHOLD, $CONSLEVEL, $aligned_sequences);
-exit;
+        my ($conseq, %seqrmg) = create_consensus($GAP_THRESHOLD, $CONSLEVEL, $aligned_sequences); # create a conensus s
+
         # # STEP 2.2.3        
         # # remove positions from the alignment that have more gaps than the threshold given $GAP_THRESHOLD   
         # # a record of the deletions is made so the original alignment can be recreated later
@@ -576,10 +576,17 @@ exit;
             print OUTPUT ">consensus-$ltrans-$rtrans\n";
             print OUTPUT "$trimmed_conseq\n"
         }
+        my $ali_trimmed_length; # length of the alignment after trimming
         foreach my $name (keys %seqrmg) {
             print OUTPUT ">$name\n$seqrmg{$name}\n";
-            $ali_trimmed_length = length $seqrmg{$name}; # length of the alignment after trimming
+            $ali_trimmed_length = length $seqrmg{$name}; 
         }
+
+        print "$ali_trimmed_length\n";
+        my $ha = length ($conseq);
+        print "$ha\n";
+        exit;
+        
         my $datestring = localtime(); # update the README file of new file created
         print README "$datestring, File $element_name.maf is the alignment of sequences with positions containing $GAP_THRESHOLD proportion of gaps removed\n";
         close OUTPUT;
@@ -1252,7 +1259,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 # run the alignment and convert result into a hash
                 `mafft $alignment_input_filename > $alignment_output_filename`;
                 if ($?) { die "ERROR executing mafft: error code $?\n"}  
-                my $consensus_sequence = consensus_sequence($CONSENSUS_REMOVAL_THRESHOLD, $CONSENSUS_LEVEL, fastatohash($alignment_output_filename));
+                my ($consensus_sequence, %consensus_alignment) = create_consensus($CONSENSUS_REMOVAL_THRESHOLD, $CONSENSUS_LEVEL, fastatohash($alignment_output_filename));
 
                 # report results
                 my $alignment_file_output_name = "$element_name" . "_complete-elements-alignment.fa";
@@ -1510,7 +1517,7 @@ sub identify_element_sequence {
 }
 
 # create consensus sequence using a hash as an input
-sub consensus_sequence {
+sub create_consensus {
     my ($removal_threshold, $consensus_level, %sequences) = @_; # mininum proportion of non-gaps per alignment position, and hash with sequences
     my $alilen; # length of the alignment
     my $conseq; # the final consensus sequence
