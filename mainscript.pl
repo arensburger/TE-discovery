@@ -277,7 +277,7 @@ my $BLAST_EXTEND = 2000; # IDENTIFYING PROTEINS, number of bp to extend on each 
 
 my $MAX_SEQUENCE_NUMBER = 100; # ALIGNING SEQUENCES maximum number of sequences to consider, to save time
 my $GAP_THRESHOLD=0.75; # REMOVING GAPS FROM ALIGNMENT, if an alignment position has this proportion or more of gaps, then remove it from the multiple sequence alignment
-my $CONSLEVEL=0.60; # MAKING CONSENSUS OF SEQUENCES sequence consensus level for consensus
+my $CONSLEVEL=0.60; # MAKING CONSENSUS OF SEQUENCES sequence consensus levebedtoolsl for consensus
 my $WINDOW_SIZE = 15; # MAKING CONSENSUS OF SEQUENCES size of the window looking for stretches of N's
 my $SCAN_PROP = 0.5; # MAKING CONSENSUS OF SEQUENCES minimum proportion of side scan that has to be N's to be a real N full edge
 my $MAX_WIN_N = 2; # MAKING CONSENSUS OF SEQUENCES maximum number of N's in the first window where the transition from N to non-N is
@@ -314,7 +314,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     print ANALYSIS "\t%EXAMINE_CODES=(\"1111\" => 1, \"1101\" => 2)\n";
     print ANALYSIS "\tMAX_TSD_PROPORTION = $MAX_TSD_PROPORTION\n";
 
-    ## check that all the necessary files have been supplied
+    ## check that all the necessary files have been suppliedbedtoolsbedtools
     # checking that the genome length file is present
     unless ((-f "$INPUT_GENOME.length") and ($INPUT_GENOME)){
         die "ERROR: for this step you need to provide\n1) a fasta formated genome file, using the -g parameter\n2) in the same folder an associated length file generated using the commands below (genome must have been formated using makeblastdb)\n\tsamtools faidx \$genome\n\tawk \'{OFS=\"\\t\"; print \$1,\$2}\' < \$genome.fai > \$genome.length\n";
@@ -332,7 +332,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
     opendir(my $dh, $ELEMENT_FOLDER) or die "ERROR: Cannot open element folder $ELEMENT_FOLDER, $!";
     while (readdir $dh) {
-        unless ($_ =~ /^\./) { # prevents reading invisible files or the . and .. files
+        unless ($_ =~ /^\./) { # prevents reading invisible files or the . and .. filesawk '{OFS="\t"; print $1,$2}' < $genome.fai > $genome.length
             push @elements, $_;
         }
     }
@@ -406,9 +406,13 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         my $aligned_sequences = File::Temp->new(UNLINK => 1, SUFFIX => '.maf' ); 
      
        `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences`;
-        if ($?) { die "Error executing mafft, error code $?\n"}
 
-        my ($conseq, %seqrmg) = create_consensus($GAP_THRESHOLD, $CONSLEVEL, $aligned_sequences); # create a conensus s
+        if ($?) { die "Error executing mafft, error code $?\n"}
+        my ($conseq, %seqrmg) = create_consensus($GAP_THRESHOLD, $CONSLEVEL, fastatohash($aligned_sequences)); # create a conensus sequence
+        print "conseq is: $conseq\n";
+        foreach my $k (keys %seqrmg) {
+            print "$k\n";
+        }
 
         # # STEP 2.2.3        
         # # remove positions from the alignment that have more gaps than the threshold given $GAP_THRESHOLD   
@@ -1523,6 +1527,7 @@ sub create_consensus {
     my $conseq; # the final consensus sequence
     my %trimmed_aligned_sequences; # this will be returned to the calling function, holds the aligned sequences with positions removed
 
+    unless (keys %sequences) {die "ERROR: no data supplied to subroutine create_consensus"} # check that data has be passed 
     # Input check, go through the hash elements and make sure they are all the same length (otherwise return a blank)
     foreach my $s (keys %sequences) {
         if ($alilen) { # go here if the initial length has been set
