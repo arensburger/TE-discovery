@@ -36,7 +36,7 @@ GetOptions(
 
 ## CHECK INPUTS if help was called (this could probably be improved)
 if ($SHOW_HELP) {
-    print "Description and input help can be found at https://github.com/arensburger/TE-discovery\n";
+    print STDERR "Description and input help can be found at https://github.com/arensburger/TE-discovery\n";
     exit;
 }
 
@@ -59,10 +59,10 @@ else {
 ## CHECK INPUTS Create output directory for analysis files if necessary
 $ANALYSIS_FOLDER = fixdirname($ANALYSIS_FOLDER);
 if (-d $ANALYSIS_FOLDER) {
-    warn "Directory $ANALYSIS_FOLDER already exists\n";
+    print STDERR "WARNING: Directory $ANALYSIS_FOLDER already exists\n";
 }
 else {
-    print "Creating directory $ANALYSIS_FOLDER for storing files generated during the analysis\n";
+    print STDERR "Creating directory $ANALYSIS_FOLDER for storing files generated during the analysis\n";
     `mkdir $ANALYSIS_FOLDER`;
     if ($?) { die "ERROR creating directory: error code $?\n"}
 
@@ -71,10 +71,10 @@ else {
 ## CHECK INPUTS Create output directory for elements that have been rejected
 my $reject_folder_path = $ANALYSIS_FOLDER . "/" . $REJECTED_ELEMENTS_FOLDER;
 if (-d $reject_folder_path) {
-    warn "Directory $reject_folder_path already exists\n";
+    print STDERR "WARNING: Directory $reject_folder_path already exists\n";
 }
 else {
-    print "Creating directory $reject_folder_path for storing rejected elements\n";
+    print STDERR "Creating directory $reject_folder_path for storing rejected elements\n";
     `mkdir $reject_folder_path`;
     if ($?) { die "ERROR creating directory: error code $?\n"}
 }
@@ -82,10 +82,10 @@ else {
 ## CHECK INPUTS Create output directory for individual elements if necessary
 $ELEMENT_FOLDER = fixdirname($ELEMENT_FOLDER);
 if (-d $ELEMENT_FOLDER) {
-    warn "Directory $ELEMENT_FOLDER already exists\n";
+    print STDERR "WARNING: Directory $ELEMENT_FOLDER already exists\n";
 }
 else {
-    print "Creating directory $ELEMENT_FOLDER that will have subdirectories for individual elements\n";
+    print STDERR "Creating directory $ELEMENT_FOLDER that will have subdirectories for individual elements\n";
     `mkdir $ELEMENT_FOLDER`;
     if ($?) { die "ERROR creating directory: error code $?\n"}
 }
@@ -110,12 +110,12 @@ my $COPY_NUMBER = 2; # IDENTIFYING PROTEINS, minimum number of copies that hit d
 my $MIN_DISTANCE = 10000;   # IDENTIFYING PROTEINS, if two elements are on the same chromosome, how far they have to be, to be considered different elements
                             # NOTE: the minimum distance should bigger than the $BLAST_EXTEND variable, to avoid having the same element recorded twice    
 my $NUM_THREADS = `nproc --all`;# determine the number of processors on the current machine
-if ($?) { warn "WARNING could not determine the number of cores automatically, defaulting to 8\n"; $NUM_THREADS=8}
+if ($?) { print STDERR "WARNING could not determine the number of cores automatically, defaulting to 8\n"; $NUM_THREADS=8}
 chomp $NUM_THREADS; 
 
 my $step_number = 1;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
-    print "Working on STEP $step_number ...\n";
+    print STDERR "Working on STEP $step_number ...\n";
 
     ## update the analysis file with what is going on
     print ANALYSIS "Running STEP 1\n";
@@ -254,7 +254,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     my $i=0; # counts the number of output lines, to check if it's zero
     foreach my $prot_name (keys %protein_ids) {
         if (-d "$ELEMENT_FOLDER/$prot_name") {
-            print "\tWARNING: Element folder $ELEMENT_FOLDER/$prot_name already exists (this should not normally happen), writing files to this folder\n";
+            print STDERR "\tWARNING: Element folder $ELEMENT_FOLDER/$prot_name already exists (this should not normally happen), writing files to this folder\n";
         }
         else {
             mkdir( "$ELEMENT_FOLDER/$prot_name" ) or die "Couldn't create $ELEMENT_FOLDER/$prot_name directory, $!";
@@ -263,10 +263,10 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     }
 
     if ($i) {
-        print "Finished STEP $step_number, identified $i candidates for further analysis\n";
+        print STDERR "Finished STEP $step_number, identified $i candidates for further analysis\n";
     }
     else {
-        warn "WARNING: STEP $step_number did not result in any identified candiates, no output produced\n";
+        print STDERR "WARNING: STEP $step_number did not result in any identified candiates, no output produced\n";
     }
 }
 
@@ -289,11 +289,11 @@ my $MIN_PROPORTION_SEQ_WITH_TIR=0.25; #IDENTIFYING TIRs minimum proportion of to
 my $MAX_TIR_PROPORTION=0.75; #IDENTIFYING TIRs how close to the maximum number of tirs do you have to be to qualify as a top TIR
 my $MAX_END_PROPORTION=0.75; #IDENTIFYING TIRs how close to maximum proportion of sequences with identical start and stop of tir sequences you can be to a top number
 my $MAX_TSD_PROPORTION=0.5; #IDENTIFYING TIRs how close to maximum number of TSDs to qualify as a top TSD sequence
-my %EXAMINE_CODES=("1111" => 1, "1101" => 2); # success codes to examine as key and priority as value
+my %EXAMINE_CODES=("1111" => 1, "1101" => 2,  "1110" => 3); # success codes to examine as key and priority as value
 
 my $step_number = 2;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
-    print "Working on STEP $step_number ...\n";
+    print STDERR "Working on STEP $step_number ...\n";
 
     ## update the analysis file with what is being done and paramter values
     print ANALYSIS "Running STEP 2\n";
@@ -311,7 +311,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     print ANALYSIS "\tMIN_PROPORTION_SEQ_WITH_TIR = $MIN_PROPORTION_SEQ_WITH_TIR\n";
     print ANALYSIS "\tMAX_TIR_PROPORTION = $MAX_TIR_PROPORTION\n";
     print ANALYSIS "\tMAX_END_PROPORTION = $MAX_END_PROPORTION\n";
-    print ANALYSIS "\t%EXAMINE_CODES=(\"1111\" => 1, \"1101\" => 2)\n";
+    print ANALYSIS "\t%EXAMINE_CODES=(\"1111\" => 1, \"1101\" => 2, \"1110\" => 3)\n";
     print ANALYSIS "\tMAX_TSD_PROPORTION = $MAX_TSD_PROPORTION\n";
 
     ## check that all the necessary files have been suppliedbedtoolsbedtools
@@ -347,7 +347,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
         # report progess to screen
         my $size = scalar @elements;
-        print "\tProcessing $element_name, number $i of $size\n";
+        print STDERR "\tProcessing $element_name, number $i of $size\n";
         $i++;
 
         # create or open the README file for this element
@@ -397,131 +397,23 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         `bedtools slop -s -i "$ELEMENT_FOLDER/$element_name/$element_name.bed" -g "$INPUT_GENOME.length" -b $BLAST_EXTEND > $slopfile`;
         if ($?) { die "ERROR executing bedtools: error code $?\n"}
 
+        # for very small chromosomes extending the blast hits can result in duplicate lines in the slop file, removing any duplicate lines
+        my $slopfile2 = File::Temp->new(UNLINK => 1, SUFFIX => '.slop' );
+        `sort $slopfile | uniq > $slopfile2`;
+        if ($?) { die "ERROR removing duplicate lines from slop file: error code $?\n"}
+
          my $extended_fasta_name = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); # name fo the file with extended fasta sequences
-        `bedtools getfasta -fi $INPUT_GENOME -fo $extended_fasta_name -bed $slopfile -s`;
+        `bedtools getfasta -fi $INPUT_GENOME -fo $extended_fasta_name -bed $slopfile2 -s`;
         if ($?) { die "ERROR executing bedtools: error code $?\n"}
 
         # STEP 2.2.2
-        # align the sequences
+        # align the sequences and make a consensus sequence
         my $aligned_sequences = File::Temp->new(UNLINK => 1, SUFFIX => '.maf' ); 
-     
        `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences`;
-
         if ($?) { die "Error executing mafft, error code $?\n"}
         my ($conseq, %seqrmg) = create_consensus($GAP_THRESHOLD, $CONSLEVEL, fastatohash($aligned_sequences)); # create a conensus sequence
-        print "conseq is: $conseq\n";
-        foreach my $k (keys %seqrmg) {
-            print "$k\n";
-        }
 
-        # # STEP 2.2.3        
-        # # remove positions from the alignment that have more gaps than the threshold given $GAP_THRESHOLD   
-        # # a record of the deletions is made so the original alignment can be recreated later
-
-        # my %cp; # cp = current position, sequence name as key and current position as value at [0] and orientation at [1]
-        #         # [2] is boolean, value 0 until a non-gap has been reached
-        # my %seq; # sequence name as key and string with mafft alignment as value
-        # my %seqrmg; # sequences with gaps removed
-        # my %pos; # holds the sequence name as key array with position of every nucleotide as value
-        # my $alilen; # length in bp of the multiple sequence alignment
-        # my $ali_trimmed_length; # length in bp of the multiple squence alignment after it's been trimmed
-
-        # # populate the %cp hash with information about the multiple sequence alignment
-        # my %seq = fastatohash($aligned_sequences); 
-        # foreach my $name (keys %seq) { 
-        #     if ($name =~ /^(\S+):(\d+)-(\d+)\((.)\)/) {
-        #         my $chr = $1;
-        #         my $b1 = $2;
-        #         my $b2 = $3;
-        #         my $ori = $4;
-        #         if ($ori eq "+") {
-        #             $cp{$name}[0] = $b1;
-        #             $cp{$name}[1] = 1;
-        #             $cp{$name}[2] = 0;
-        #         }
-        #         elsif ($ori eq "-") {
-        #             $cp{$name}[0] = $b2;
-        #             $cp{$name}[1] = -1;
-        #             $cp{$name}[2] = 0;
-        #         }
-        #         else {
-        #             die "ERROR: Reading sequence alignment for element $element_name, orientation not recognized on this element $name\n";
-        #         }
-        #     }
-        #     else {
-        #         die "ERROR: Reading sequence alignment for element $element_name, fasta title not formated as expected\n$name";
-        #     }
-        #     $alilen = length $seq{$name}; # this is the length of the sequence alignment prior to trimming
-        # }
-
-        # # go through each position of the alignment and decide if the position needs to be removed
-        # for (my $i=0; $i<$alilen; $i++) { # go through positions of the alignment
-        #     my $numgap; # number of gaps in this column
-        #     foreach my $name (keys %seq) { # go through each element of the mafft alignment
-        #         if (substr($seq{$name},$i,1) eq "-") {
-        #             $numgap++;
-        #         }
-        #         else { # if this position does not have a gap then update %cp
-        #             if ($cp{$name}[3] == 0) { # if this is the first time the position has a non-gapped position
-        #                 $cp{$name}[3] = 1;
-        #             }
-        #             else { # not the first encounter and position should be updated
-        #                 $cp{$name}[0] += $cp{$name}[1]; # position will be increased or decreased based on orientation
-        #             }
-        #         }
-        #     }
-        #     unless ($numgap/(keys %seq) >= $GAP_THRESHOLD) { # if this column is kept, then copy it to %seqrmg and update %pos
-        #         foreach my $name (keys %seq) { # go through each element of the mafft alignment
-        #             $seqrmg{$name} .= substr($seq{$name},$i,1);
-        #             push @{ $pos{$name} },$cp{$name}[0];
-        #         }
-        #         $ali_trimmed_length++;
-        #     }
-        # }
-
-        # # printing the .maf later, after the consensus has been created
-
-        # # output the file that will allow restoring the deleted positions, called .alipos
-        # open (OUTPUT, '>', "$ELEMENT_FOLDER/$element_name/$element_name.alipos") or die "Error: cannot create file $element_name.alipos, $!\n";
-        # for my $name (keys %pos) {
-        #     for my $j ( 0 .. $#{ $pos{$name}}) {
-        #         my $location = $j+1;
-        #         print OUTPUT "$name\t$location\t$pos{$name}[$j]\n";
-        #     }
-	    # }
-        # my $datestring = localtime(); # update the README file of new file created
-        # print README "$datestring, File $element_name.alipos contains the information about positions removed in the alignment file\n";
-	    # close OUTPUT;
-
-        # # STEP 2.2.4
-        # # Create a consensus sequence for this element
-        # my $conseq; # initial consensus sequence (not trimmed on the ends)
-        # my @prop_cons; # for each nucleotide position of the consensus sequence holds the proportion of sequences that have the most abundant nucleotide 
-        # my @prop_complete_total; # for each nucleotide position the proportion of the complete total that have the consensus
-
-        # # loop though all positions and make a consensus sequence
-        # for (my $i=0; $i < $ali_trimmed_length; $i++) {
-        #     my %abundance; # holds the nucleotide identify as key and frequency as value
-        #     my $total; # total number of relevant squences for this column
-        #     foreach my $key (keys %seqrmg) { # loop through all sequences and record any identified nucleotides
-        #         my $character = lc(substr($seqrmg{$key}, $i, 1));
-        #         if (($character eq "a") or ($character eq "c") or ($character eq "g") or ($character eq "t")) {
-        #             $abundance{$character} += 1; # add the sequences
-        #         }
-        #         $total++; # count the number of sequences
-        #     }
-
-        #     # add the highest abundance nucleotide if above consensus level threshold
-        #     my $highest = max_by { $abundance{$_} } keys %abundance; # from https://perlmaven.com/highest-hash-value           
-        #     if (($abundance{$highest}/$total) >= $CONSLEVEL) {
-        #         $conseq .= $highest;
-        #     }
-        #     else {
-        #         $conseq .= "N";
-        #     }
-        # }
-
-        # STEP 2.2.5
+        # STEP 2.2.3
         # trim the ends of the consensus that have low agreement on a single sequence
         my $ltrans=0; # position of the transition from "not the element" to the "element" on the left side of the alignment
         my $rtrans=length $conseq; # position of the transition from "not the element" to the "element" on the right side of the alignment
@@ -534,11 +426,10 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             my $nBases = $winseq =~ tr/ACGTacgt//; # $nBases holds number known bases in the current window
             push @Nnum, (length $winseq) - $nBases; # this add the number of non-bases to the array @Nnum for current window
         }
-
         # find where the transtion from high number of N's in the consenus to low number occurs
         # finding the transition on the left side
         my $i=0;
-        while (($ltrans==0) and ($i < ((length $conseq)-$WINDOW_SIZE + 1))) {
+        while (($ltrans==0) and ($i < ((length $conseq)-$WINDOW_SIZE + 1))) { # if an ltran position is found it will be higher than zero, even if it's the first base
             if ($Nnum[$i] <= $MAX_WIN_N) { # find the first window from the left that has $MAX_WIN_N propotion of N
                                             # this is where the transition is
                 my $s = substr($conseq, $i, $WINDOW_SIZE);
@@ -573,45 +464,24 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 $trimmed_conseq .= "-";
             } 
         }
-
+print "$trimmed_conseq\n";
+exit;
         # output the alignment file with positions removed, called .maf add the consensus if there is one
         open (OUTPUT, '>', "$ELEMENT_FOLDER/$element_name/$element_name.maf") or die "ERROR: Cannot create file $element_name.maf, $!\n";
         if (length($trimmed_conseq)) {
             print OUTPUT ">consensus-$ltrans-$rtrans\n";
             print OUTPUT "$trimmed_conseq\n"
         }
-        my $ali_trimmed_length; # length of the alignment after trimming
         foreach my $name (keys %seqrmg) {
             print OUTPUT ">$name\n$seqrmg{$name}\n";
-            $ali_trimmed_length = length $seqrmg{$name}; 
         }
-
-        print "$ali_trimmed_length\n";
-        my $ha = length ($conseq);
-        print "$ha\n";
-        exit;
         
         my $datestring = localtime(); # update the README file of new file created
         print README "$datestring, File $element_name.maf is the alignment of sequences with positions containing $GAP_THRESHOLD proportion of gaps removed\n";
         close OUTPUT;
 
-        # Test to see if this consensus sequence passes the "edge test". The trimmed consensus should not be too close 
-        # to the edge of the alignment (this would suggest that the whole region, not just an element inside it, is conserved)
-        my $edge_test; # boolean, will be set to 1 if the consensus is not too close to the edge
-        if (($ltrans > ($EDGE_TEST_PROPORTION * (length $trimmed_conseq))) and ($rtrans < ((1 - $EDGE_TEST_PROPORTION) * (length $trimmed_conseq)))) {
-            $edge_test = 1;
-        }
-
-        # update the README file
-        my $datestring = localtime(); 
-        if ($edge_test and $trimmed_conseq) {
-            print README "$datestring, a trimmed consensus sequence was created that passed the \"edge test\"\n";
-        }
-        elsif ($trimmed_conseq) { # get here if a consenus was found but it failed the edge test
-            print README "$datestring, a trimmed consensus sequence was created but it failed the \"edge test\", stopping the analysis here\n";
-            print REJECT "$datestring\t$element_name\tSTEP 2\tfailed the EDGE TEST\n";
-            `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
-            if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $reject_folder_path: error code $?\n"}
+        if ($trimmed_conseq) { # get here if a consenus was found
+            print README "$datestring, a trimmed consensus sequence was created\n";
         }
         else { # get here if no abrupt changes in the consensus sequences was detected
             print README "$datestring, the consensus sequence showed no transitions into an element, stopping the analysis here\n";
@@ -620,9 +490,9 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $reject_folder_path: error code $?\n"}
         }
 
-        # STEP 2.2.6 
+        # STEP 2.2.4 
         # identify the TIR and TSD locations around the edges of the consensus sequence
-        if ($trimmed_conseq and $edge_test) { # only continue if consensus was created and edge test was passed
+        if ($trimmed_conseq) { # only continue if consensus was created and edge test was passed
 
             # Variables relevant to identifying TIRs and TSDs
             my $range = 5; # how many bp to search around for tirs
@@ -630,7 +500,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             my $max_proportion_first_last_bases; # highest number of locations that start and end with the same bases
             my $max_TSD_number; # highest number of intact TSDs
             my @tsd_tir_combinations; # array of possible locations along with various information
-
             for (my $i=$ltrans-$range; $i<=$ltrans+$range; $i++) {
 	            for (my $j=$rtrans-$range; $j<=$rtrans+$range; $j++) {
 		            my $number_of_tirs_found=0; # nubmer of sequences that match the TIR criteria
@@ -638,6 +507,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     my %tsds_found; # keys is TSD type "TA", "2", ... "10" and key is number of TSDs found
                     foreach my $sequence_name (keys %seqrmg) {
                         my ($tir1_sequence, $tir2_sequence) = gettir($seqrmg{$sequence_name}, $i, $j, $MIN_TIR_SIZE, $TIR_MISMATCHES); # figure if this sequences has a tir at these positions and if so, report first and last nucleotide
+
                         if ($tir1_sequence) {
                             $number_of_tirs_found += 1;
                             my $bases = substr($tir1_sequence, 0, 3) . substr($tir2_sequence, -3, 3); # recording the first and last 3 bases 
@@ -743,7 +613,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
             }
         }     
-        close README;
+        close README; 
     }    
 }
 
@@ -754,7 +624,7 @@ my $TIR_bp = 30; # how many bp to display on the TIR side
 
 my $step_number = 3;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
-    print "Working on STEP $step_number ...\n";
+    print STDERR "Working on STEP $step_number ...\n";
 
      ## update the analysis file with what is going on
     print ANALYSIS "Running STEP 3\n";
@@ -773,7 +643,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             # check if a manual review is already present in the README file for this element
             my $grep_res = `grep "Manual Review 1 result" $specific_element_folder/README.txt`;
             if ($grep_res) {
-                print "\tElement $_ has already been manually reviewed, ignoring\n";
+                print STDERR "\tElement $_ has already been manually reviewed, ignoring\n";
             }
             else {
                 if (-e $tirtsd_file) {
@@ -794,7 +664,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         }
     }
     unless (keys %files) {
-        warn "WARNING: No files that need manual review were found\n";
+        print STDERR "WARNING: No files that need manual review were found\n";
     }
 
     my $count = 0; # used to report to the user how many elements need to be reviewed
@@ -937,11 +807,11 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                             $entry_accepted=1;
                         }
                         else {
-                            warn "WARNING: Your TSD coordinate entry is not valid\n";
+                            print STDERR "WARNING: Your TSD coordinate entry is not valid\n";
                         }
                     }
                     else {
-                        warn "WARNING: Your coordinate entries don't seem to be numbers\n";
+                        print STDERR "WARNING: Your coordinate entries don't seem to be numbers\n";
                     }
                     unless ($TIR_size) {
                         $TIR_size = "N/A";
@@ -1120,7 +990,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
 my $step_number = 4;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
-    print "Working on STEP $step_number ...\n";
+    print STDERR "Working on STEP $step_number ...\n";
 
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
@@ -1160,15 +1030,15 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 close INPUT; 
             }
             else {
-                warn "WARNING: No README.txt file was found in folder $ELEMENT_FOLDER/$_";
+                print STDERR "WARNING: No README.txt file was found in folder $ELEMENT_FOLDER/$_";
             }
             unless (exists $file_tirs{$_}) {
-                warn "WARNING: No appropriate line with TIR sequences were found in the README file for element $_\n";
+                print STDERR "WARNING: No appropriate line with TIR sequences were found in the README file for element $_\n";
             }
         }
     }
     unless (keys %file_tirs) {
-        warn "WARNING: No elements where found for processing in this dataset\n";
+        print STDERR "WARNING: No elements where found for processing in this dataset\n";
     }
 
     my %proteins = fastatohash($INPUT_PROTEIN_SEQUENCES); # this holds the sequence of all the original protein sequences
@@ -1295,7 +1165,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         }
 
         close README;
-        print "done with $element_name\n";
+        print STDERR "done with $element_name\n";
     }
 }
 close ANALYSIS;
@@ -1344,7 +1214,6 @@ sub gettsd {
 	my $seq_right_side = substr($seq, $loc2, -1);
 	$seq_left_side =~ s/-//g; # remove gaps
 	$seq_right_side =~ s/-//g;
-
     my $TSD_length;
     if ($type eq "TA") {
         $TSD_length = 2;
@@ -1520,32 +1389,53 @@ sub identify_element_sequence {
     return (%nucleotide_sequences);
 }
 
+### modify this to update the position numbers to where the consensus is and only report the part with the consensus
 # create consensus sequence using a hash as an input
 sub create_consensus {
     my ($removal_threshold, $consensus_level, %sequences) = @_; # mininum proportion of non-gaps per alignment position, and hash with sequences
     my $alilen; # length of the alignment
-    my $conseq; # the final consensus sequence
-    my %trimmed_aligned_sequences; # this will be returned to the calling function, holds the aligned sequences with positions removed
+    my @positions; # each element is a postion in the alignment, if the value is 0 then the position is not part of the consensus otherwise it has the nucleotide of the consensus
+    my %alignment_sequence_names; # as key holds the full name of the alignement squence input, as value an array with [0] chromosome, [1] start position, [2] stop position, [3] orientation
+    my $consensus_start; # position where the consensus will start
+    my $consensus_end; # position where the consensus will end
 
-    unless (keys %sequences) {die "ERROR: no data supplied to subroutine create_consensus"} # check that data has be passed 
     # Input check, go through the hash elements and make sure they are all the same length (otherwise return a blank)
-    foreach my $s (keys %sequences) {
+    unless (keys %sequences) {die "ERROR: no data supplied to subroutine create_consensus"} # check that data has be passed 
+    
+    # go through the input alignment, check that lengths are all the same and parse the input names;
+    foreach my $name (keys %sequences) {
+
+        # check that the lengths of the input alignments are all the same
         if ($alilen) { # go here if the initial length has been set
-            unless (length $sequences{$s} == $alilen) {
-                die ("WARNING: No consensus sequence created because there's a discrepancy in the input sequence lengths");
-                return ();
+            unless (length $sequences{$name} == $alilen) {
+                die ("ERROR: No consensus sequence created because there's a discrepancy in the input sequence lengths");
             }
         }
         else { # go here if the intial length has not yet been set
-            $alilen = length $sequences{$s};
+            $alilen = length $sequences{$name};
+        }
+
+        # parse the input names
+        if ($name =~ /^(\S+):(\d+)-(\d+)\((\S)\)/) {
+            $alignment_sequence_names{$name}[0] = $1;
+            $alignment_sequence_names{$name}[1] = $2;
+            $alignment_sequence_names{$name}[2] = $3;
+            $alignment_sequence_names{$name}[3] = $4;
+
+            #check that the start position is less than the end position, this is necessary for updating position locations later
+            unless ($alignment_sequence_names{$name}[1] < $alignment_sequence_names{$name}[2]) {
+                die "ERROR: In subrouting create_consensus, the start position must be smaller than the end position, found was not the case for the sequence $name\n";
+            }
+        }
+        else {
+            die "ERROR: don't recognize alignment input name $name in sub create_consensus\n";
         }
     }
 
-    for (my $i=0; $i < $alilen; $i++) { # loop though each position in the alignment
+    # go through each position in the alignment and figure out if this position should be kept for the consensus or not. Also record the position where the consensus starts and ends
+    for (my $i=0; $i < $alilen; $i++) { 
         my %nucleotide_abundance; # holds the abundance of ever nucleotide at the current position
-        my $other_abundance; # holds the abundance of anything other than a nucleotide at this position (i.e. gaps, N's, etc.)
         my $total_nucleotides; # total number of nucleotides in this column
-        my %sequences_at_position; # this holds the names of the alignment taxa as key and squences at the current position as value
 
         # loop through all sequences and record any identified nucleotides
         foreach my $taxon (keys %sequences) { 
@@ -1554,23 +1444,70 @@ sub create_consensus {
                 $nucleotide_abundance{$character} += 1; # add the sequences
                 $total_nucleotides++; # count the number of sequences
             }   
-            $sequences_at_position{$taxon} = $character; # holds the characters at the current position, not sure if they will make it to the final alignment yet
         }
 
-        # only keep adding postions if there are not too many gaps at this position
+        # decide if this is a position that will be part of the consensus or not
         if (($total_nucleotides/(keys %sequences)) > $removal_threshold) { # figure out if there is a suffient number of nucleotides at this postion to add it to the consensus
             my $highest = max_by { $nucleotide_abundance{$_} } keys %nucleotide_abundance; # from https://perlmaven.com/highest-hash-value           
-            if (($nucleotide_abundance{$highest}/$total_nucleotides) >= $consensus_level) {
-                $conseq .= $highest;
+            if (($nucleotide_abundance{$highest}/$total_nucleotides) >= $consensus_level) { # this will be true if there's consensus sequence here
+                push @positions, $highest;
             }
             else {
-                $conseq .= "N";
+                push @positions, "N";
             }
-            foreach my $taxon (keys %sequences_at_position) {
-                $trimmed_aligned_sequences{$taxon} .= $sequences_at_position{$taxon};
+            # update the position of the consensus start and ends of the consensus sequence
+            unless ($consensus_start) {
+                $consensus_start = $i;
+            }
+            $consensus_end = $i;
+        }
+        else {
+            push @positions, 0;
+        }
+    }
+
+    # Go through each position of the alignment, update the start and end position of the alignement sequences, create consensus sequence, 
+    # produce a hash with aligned files the length of the consensus. This will done by treating three groups of aligned sequence separately:
+    # 1) alignements before the consensus, 2) alignments in the consensus, 3) alignments after the consensus
+    
+    my $conseq; # the final consensus sequence
+    my %temp_aligned_sequences; # holds the aligned sequences that align with the consensus, but it's temporary because the sequences names will still need updating
+
+    # 1) alignments before the consensus, update the start positions of all the alignements
+    for (my $i=0; $i < $consensus_start; $i++) { 
+        foreach my $taxon (keys %sequences) { # go through each alignment taxon at this alignment position
+            my $character = lc(substr($sequences{$taxon}, $i, 1));
+            unless ($character eq "-") { # if the character is not a gap then the start position must be updated 
+                $alignment_sequence_names{$taxon}[1] += 1
+            }
+        }
+    }
+    # 2) alignments in the consensus, create the consensus sequence and add the
+    for (my $i=$consensus_start; $i <= $consensus_end; $i++) { 
+        unless ($positions[$i] eq "0") {
+            $conseq .= $positions[$i];
+            foreach my $taxon (keys %sequences) { # go through each alignemtn taxon at this alignment position
+                my $character = lc(substr($sequences{$taxon}, $i, 1));
+                $temp_aligned_sequences{$taxon} .= $character;
+            }
+        }
+        
+    }
+    # 3) update the alignment position ends
+    for (my $i=$alilen; $i > $consensus_end; $i--) {
+        foreach my $taxon (keys %sequences) {
+            my $character = lc(substr($sequences{$taxon}, $i, 1));
+            unless ($character eq "-") {
+                $alignment_sequence_names{$taxon}[2] -= 1;
             }
         }
     }
 
-    return ($conseq, %trimmed_aligned_sequences);
+    # create the alignment that will will be returned, this will also make sure that any duplicates will be removed
+    my %final_aligned_sequences;
+    foreach my $taxon (keys %temp_aligned_sequences) {
+        my $name = $alignment_sequence_names{$taxon}[0] . ":" . $alignment_sequence_names{$taxon}[1] . "-" . $alignment_sequence_names{$taxon}[2] . "(" . $alignment_sequence_names{$taxon}[3] . ")";
+        $final_aligned_sequences{$name} = $temp_aligned_sequences{$taxon};
+    }
+    return ($conseq, %final_aligned_sequences);
 }
