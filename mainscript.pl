@@ -411,6 +411,52 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         my $aligned_sequences = File::Temp->new(UNLINK => 1, SUFFIX => '.maf' ); 
        `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences`;
         if ($?) { die "Error executing mafft, error code $?\n"}
+`cp $aligned_sequences /home/peter/Desktop/aligned_sequence.fa`;
+        # STEP 2.2.2.1
+        # determine if there's an area in this alignment where most sequences agree on a single sequence
+
+        my %aliseq = fastatohash($aligned_sequences); # aligned sequences
+        my @agreement_location; # holds alignment position where the alignment agrees on a nucleotide, rather than an N or a gap
+        my @agreement_percentage; # holds the highest percentage of sequences that agree on one nucleotide at a postion
+        my $alignment_length = length($aliseq{(keys %aliseq)[rand keys %aliseq]}); # pick a random sequence to get the length of the alignment (assuming all are the same length)
+        
+        # determine the highest percentage of agreement on a single nucleotide at each position
+        for (my $i=0; $i<$alignment_length; $i++) {
+            my %chars; # holds the characters found at the current position as key, and abundance as value
+            foreach my $taxon (keys %aliseq) {
+                my $character = lc(substr($aliseq{$taxon}, $i, 1));
+                $chars{$character} += 1;
+            }
+            my $most_abundant_character = max_by { $chars{$_} } keys %chars;
+            unless (($most_abundant_character eq "-") or ($most_abundant_character eq "n")) {
+                push @agreement_location, $i;
+                push @agreement_percentage, ($chars{$most_abundant_character}/(keys %aliseq));
+            }
+        }
+
+        # determine if there's the minimum number of high percentage positions in a row
+        my $AGREEMENT_LEVEL = 0.65; # minimum proportion of sequences that must agree on single nucleotide to call it a high level
+        my $NUC_IN_A_ROW = 5; # minimum number of high percentage nucleotides in a row that must agree to classify this as likely to contain an element
+
+        my $current_run=0; # how many high level nucleotides in a row have been detected
+        my $i=0;
+        while (($i < scalar @agreement_location) and ($current_run < $NUC_IN_A_ROW)) {
+            if ($agreement_percentage[$i] >= $AGREEMENT_LEVEL) {
+                $current_run++;
+            }
+            else {
+                $current_run = 0;
+            }
+            $i++;
+        }
+        if ($current_run >= $NUC_IN_A_ROW) {
+            print "Found element\t $current_run\n";
+        }
+        else {
+            print "No element found\n";
+        }
+
+exit;
         my ($conseq, %seqrmg) = create_consensus($GAP_THRESHOLD, $CONSLEVEL, fastatohash($aligned_sequences)); # create a conensus sequence
 
         # STEP 2.2.3
@@ -464,8 +510,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 $trimmed_conseq .= "-";
             } 
         }
-print "$trimmed_conseq\n";
-exit;
+
         # output the alignment file with positions removed, called .maf add the consensus if there is one
         open (OUTPUT, '>', "$ELEMENT_FOLDER/$element_name/$element_name.maf") or die "ERROR: Cannot create file $element_name.maf, $!\n";
         if (length($trimmed_conseq)) {
