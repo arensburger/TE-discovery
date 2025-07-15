@@ -434,27 +434,85 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             }
         }
 
-        # determine if there's the minimum number of high percentage positions in a row
-        my $AGREEMENT_LEVEL = 0.65; # minimum proportion of sequences that must agree on single nucleotide to call it a high level
-        my $NUC_IN_A_ROW = 5; # minimum number of high percentage nucleotides in a row that must agree to classify this as likely to contain an element
+        # for (my $i=0; $i<scalar @agreement_location; $i++) {
+        #     print "$agreement_location[$i]\t$agreement_percentage[$i]\n";
+        # }
+        # exit;
 
-        my $current_run=0; # how many high level nucleotides in a row have been detected
-        my $i=0;
-        while (($i < scalar @agreement_location) and ($current_run < $NUC_IN_A_ROW)) {
-            if ($agreement_percentage[$i] >= $AGREEMENT_LEVEL) {
-                $current_run++;
+        # # determine if there's the minimum number of high percentage positions in a row
+        # my $AGREEMENT_LEVEL = 0.65; # minimum proportion of sequences that must agree on single nucleotide to call it a high level
+        # my $NUC_IN_A_ROW = 5; # minimum number of high percentage nucleotides in a row that must agree to classify this as likely to contain an element
+
+        # my $current_run=0; # how many high level nucleotides in a row have been detected
+        # my $i=0;
+        # while (($i < scalar @agreement_location) and ($current_run < $NUC_IN_A_ROW)) {
+        #     if ($agreement_percentage[$i] >= $AGREEMENT_LEVEL) {
+        #         $current_run++;
+        #     }
+        #     else {
+        #         $current_run = 0;
+        #     }
+        #     $i++;
+        # }
+        # if ($current_run >= $NUC_IN_A_ROW) {
+        #     print "Found element\t $current_run\n";
+        # }
+        # else {
+        #     print "No element found\n";
+        # }
+
+        # find the edge of the alignment by looking for a sharp difference in how similar the alignement sequences are
+        # First create @agreement_delta that holds the difference in proprtion of agreed on nucleotide in windows to the left and
+        # right of each alignment position. Second, look for instances close to the edge of the alignement where there's a significant
+        # change in agreement
+        my $EDGE_WINDOW = 20; # number of nucleotides to scan for the edge
+        my $SIGNIFICANCE_LEVEL = 3.5; # number of standard deviations away from the mean to call a difference significant
+        my @agreement_delta; # for each positions that agrees on a nucleotide the difference between averages of windows on both sides 
+
+        # calculating difference in window agreement for every position
+        for (my $i=($EDGE_WINDOW); $i < ((scalar @agreement_location) - $EDGE_WINDOW); $i++) {
+            my $sum_left_window; # sum of the agreement levels in the window before the current location, will be used for an average
+            my $sum_right_window; # sum of the agreement levels in the window incuding and after the current location, will be used for an average
+            for (my $j=1; $j <= $EDGE_WINDOW; $j++) {
+                $sum_left_window += $agreement_percentage[$i-$j];
+                $sum_right_window += $agreement_percentage[$i+$j-1];
             }
-            else {
-                $current_run = 0;
-            }
+            push @agreement_delta, ($sum_right_window/$EDGE_WINDOW) - ($sum_left_window/$EDGE_WINDOW);
+        }
+
+        # calculate the mean of windows delta
+        my $sum_delta;
+        for (my $i=0; $i<scalar @agreement_delta; $i++) { 
+            $sum_delta += $agreement_delta[$i];
+        }
+        my $mean_delta = $sum_delta / (scalar @agreement_delta);
+# my $ha = (scalar @agreement_delta);
+# my $ha2 = $sum_delta;
+# print "$ha2\t$ha\n"; exit;
+        
+        #calculate the standard deviation
+        my $sum_diff;
+        for (my $i=0; $i<scalar @agreement_delta; $i++) {
+            $sum_diff += ($agreement_delta[$i] - $mean_delta) ** 2;
+        }
+        my $stdev_delta = sqrt((1/(scalar @agreement_delta))*$sum_diff);
+
+        # identifying any significant changes in agreement to estimate the edge of the element on the left side
+        my $i = 0;
+        my $left_edge_found = 0; # boolean
+        while (($i < scalar @agreement_delta) and ($left_edge_found == 0)){
+            my $location = $agreement_location[$i+$EDGE_WINDOW-1];
+            my $difference_from_mean = ($agreement_delta[$i] - $mean_delta) / $stdev_delta; 
             $i++;
+            print "$location\t$stdev_delta\t$difference_from_mean\t$agreement_delta[$i]\t$mean_delta\n";
         }
-        if ($current_run >= $NUC_IN_A_ROW) {
-            print "Found element\t $current_run\n";
-        }
-        else {
-            print "No element found\n";
-        }
+
+# for (my $i=0; $i < scalar @agreement_delta; $i++) {
+#     my $location = $agreement_location[$i+$EDGE_WINDOW-1];
+#     my $agree = $agreement_percentage[$i];
+#     my $delta = $agreement_delta[$i];
+#     print "$location\t$agree\t$delta\n";
+# }
 
 exit;
         my ($conseq, %seqrmg) = create_consensus($GAP_THRESHOLD, $CONSLEVEL, fastatohash($aligned_sequences)); # create a conensus sequence
