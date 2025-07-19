@@ -512,7 +512,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         }
 
         # Scan for a window of significance on the left and right sides of the alignment
-        # Scan on the left first
+        # Scan for the left edge
         my $left_edge_found = 0; # boolean, set to 1 once a window is found
         my $left_edge_fold; # highest fold value found in the window
         my $left_edge_location; # location of the hight fold value
@@ -527,12 +527,33 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             }
             $i++;
         }
+        # Scan for the right edge
+        my $right_edge_found = 0; # boolean, set to 1 once a window is found
+        my $right_edge_fold; # highest fold value found in the window
+        my $right_edge_location; # location of the hight fold value
+        my $i=(scalar @agreement_delta) - 1; #start from the right   
+        while (($i >= 0) and ($right_edge_found == 0)) {
+            if ($significant_fold_change[$i] < $right_edge_fold) {
+                $right_edge_fold = $significant_fold_change[$i];
+                $right_edge_location = $agreement_location[$i+$EDGE_WINDOW-1];
+            }
+            elsif (($right_edge_fold < 0) and ($significant_fold_change[$i] == 0)) {
+                $right_edge_found = 1;
+            }
+            $i--;
+        }
 
         if ($left_edge_found) {
             print "left location is $left_edge_location\n";
         }
         else {
             print "no left location found\n";
+        }
+        if ($right_edge_found) {
+            print "right location is $right_edge_location\n";
+        }
+        else {
+            print "no right location found\n";
         }
 
 
