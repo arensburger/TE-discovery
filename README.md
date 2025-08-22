@@ -1,7 +1,7 @@
 # TE-discovery
 ## Description
 These scripts are a pipeline used to identify novel transposable element sequences from eukaryotic genomes that have the structure:
-
+ 
 ![](images/Transposon_picture.png)
 
 The innovation of these scripts, compared to alternative methods (e.g. RepeatModeler), is that they start with possible transposase sequences and then identify the signature structures of transposable, rather than being primarily on sequence homology (this allows completely new elements to be discovered), and that human review steps are incorporated into the pipeline to ensure high quality results. These scripts emphasize quality over quantity. While not all elements will be identified, even low copy number elements may be identified with high confidence.
