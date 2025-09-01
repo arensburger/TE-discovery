@@ -1,6 +1,6 @@
 # TE Discovery Pipeline - Main Script
 # Author: Peter Arensburger
-# Date: March 2025 -1
+# Date: March 2025
 # Description: This script runs the full TE discovery pipeline using input protein sequences and genome data.
 
 use strict;
