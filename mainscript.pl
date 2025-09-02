@@ -411,7 +411,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         my $aligned_sequences = File::Temp->new(UNLINK => 1, SUFFIX => '.maf' ); 
        `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences`;
         if ($?) { die "Error executing mafft, error code $?\n"}
-`cp $aligned_sequences /home/peter/Desktop/aligned_sequence.fa`;
+`cp $aligned_sequences /home/peter/Desktop/Ptep/aligned_sequence.fa`;
         # STEP 2.2.2.1
         # determine if there's an area in this alignment where most sequences agree on a single sequence
 
@@ -433,6 +433,11 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 push @agreement_percentage, ($chars{$most_abundant_character}/(keys %aliseq));
             }
         }
+
+### A new approach to the whole thing: identify possible transition points by looking at the difference in conservation between two adjacent bases, those with high differences are possible
+# transition candidtes. The for each candidite, scroll up and down 10 bases or so, and record how many look like a real transition (i.e. high in the element, low outside the element). The real
+# edge is where the numbers are most consistent.
+
 
         # for (my $i=0; $i<scalar @agreement_location; $i++) {
         #     print "$agreement_location[$i]\t$agreement_percentage[$i]\n";
@@ -463,13 +468,13 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
         # Find the edge of the alignment by looking for a sharp difference in how similar the alignement sequences are. The
         # steps are: 1)create @agreement_delta that holds the difference in proprtion of agreed on nucleotide in windows to the left and
-        # right of each alignment position. 2) Calculate the mean and standard deviations of the delata values. 3) Identify positions 
+        # right of each alignment position. 2) Calculate the mean and standard deviations of the delta values. 3) Identify positions in
         # the alignment with significant differences in delta. 4) Scan either side of the alignment for the first location of significant 
         # differences, and if there are several in a row select the one with the highest delta as the edge
 
         my $EDGE_WINDOW = 20; # number of nucleotides to scan for the edge
         my $SIGNIFICANCE_LEVEL = 3.5; # number of standard deviations away from the mean to call a difference significant
-        my @agreement_delta; # for each positions that agrees on a nucleotide the difference between averages of windows on both sides 
+        my @agreement_delta; # for each position that agrees on a nucleotide, the difference between averages of windows on both sides 
 
         # Creating @agreement_delta, calculating difference in window agreement for every position
         for (my $i=($EDGE_WINDOW); $i < ((scalar @agreement_location) - $EDGE_WINDOW); $i++) {
@@ -496,65 +501,93 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         }
         my $stdev_delta = sqrt((1/(scalar @agreement_delta))*$sum_diff);
 
-        # Identifying any significant changes in agreement to estimate the edge of the element on the left side. First every
-        # position of the alignment identify the change in alignment agreement on either side of the position, this the 
-        my @significant_fold_change; # for every position of the @agreement_delta array has 0 if no signficant difference or the number of std. deviations if not
+        for (my $i=($EDGE_WINDOW); $i < ((scalar @agreement_location) - $EDGE_WINDOW); $i++) {
+            my $location = $agreement_location[$i+$EDGE_WINDOW-1]; # postion in the alignment
+            my $percentage = $agreement_percentage[$i+$EDGE_WINDOW-1];
+            my $delta = $agreement_delta[$i];
+            print "$location\t$percentage\t$delta\n";
+        }
+exit;
+
+
+#         # Identifying any significant changes in agreement to estimate the edge of the element on the left side. First every
+#         # position of the alignment identify the change in alignment agreement on either side of the position, this the 
+#         my @significant_fold_change; # for every position of the @agreement_delta array has 0 if no signficant difference or the number of std. deviations if not
+#         for (my $i=0; $i < scalar @agreement_delta; $i++) {
+#             my $location = $agreement_location[$i+$EDGE_WINDOW-1]; # postion in the alignment
+#             my $folds_from_mean = ($agreement_delta[$i] - $mean_delta) / $stdev_delta; # number of standard deviations away from mean
+#             if (abs($folds_from_mean) >= $SIGNIFICANCE_LEVEL) {
+#                 push @significant_fold_change, $folds_from_mean;
+#             }
+#             else {
+#                 push @significant_fold_change, 0;
+#             }
+# #           print "$location\t$significant_fold_change[-1]\n";
+#         }
+
+        # Identify the leftmost position that thas a signficant change in alignment agreement, and the rightmost location. These are the 
+        # locations where an edge should be looked for.
+ #       my @significant_fold_change; # for every position of the @agreement_delta array has 0 if no signficant difference or the number of std. deviations if not
+
         for (my $i=0; $i < scalar @agreement_delta; $i++) {
-#            my $location = $agreement_location[$i+$EDGE_WINDOW-1]; # postion in the alignment
+            my $location = $agreement_location[$i+$EDGE_WINDOW-1]; # postion in the alignment
             my $folds_from_mean = ($agreement_delta[$i] - $mean_delta) / $stdev_delta; # number of standard deviations away from mean
             if (abs($folds_from_mean) >= $SIGNIFICANCE_LEVEL) {
-                push @significant_fold_change, $folds_from_mean;
+ #               push @significant_fold_change, $folds_from_mean;
             }
             else {
-                push @significant_fold_change, 0;
+#                push @significant_fold_change, 0;
             }
 #           print "$location\t$significant_fold_change[-1]\n";
         }
 
-        # Scan for a window of significance on the left and right sides of the alignment
-        # Scan for the left edge
-        my $left_edge_found = 0; # boolean, set to 1 once a window is found
-        my $left_edge_fold; # highest fold value found in the window
-        my $left_edge_location; # location of the hight fold value
-        my $i=0;        
-        while (($i < scalar @agreement_delta) and ($left_edge_found == 0)) {
-            if ($significant_fold_change[$i] > $left_edge_fold) {
-                $left_edge_fold = $significant_fold_change[$i];
-                $left_edge_location = $agreement_location[$i+$EDGE_WINDOW-1];
-            }
-            elsif (($left_edge_fold > 0) and ($significant_fold_change[$i] == 0)) {
-                $left_edge_found = 1;
-            }
-            $i++;
-        }
-        # Scan for the right edge
-        my $right_edge_found = 0; # boolean, set to 1 once a window is found
-        my $right_edge_fold; # highest fold value found in the window
-        my $right_edge_location; # location of the hight fold value
-        my $i=(scalar @agreement_delta) - 1; #start from the right   
-        while (($i >= 0) and ($right_edge_found == 0)) {
-            if ($significant_fold_change[$i] < $right_edge_fold) {
-                $right_edge_fold = $significant_fold_change[$i];
-                $right_edge_location = $agreement_location[$i+$EDGE_WINDOW-1];
-            }
-            elsif (($right_edge_fold < 0) and ($significant_fold_change[$i] == 0)) {
-                $right_edge_found = 1;
-            }
-            $i--;
-        }
 
-        if ($left_edge_found) {
-            print "left location is $left_edge_location\n";
-        }
-        else {
-            print "no left location found\n";
-        }
-        if ($right_edge_found) {
-            print "right location is $right_edge_location\n";
-        }
-        else {
-            print "no right location found\n";
-        }
+
+
+        # # Scan for a window of significance on the left and right sides of the alignment
+        # # Scan for the left edge
+        # my $left_edge_found = 0; # boolean, set to 1 once a window is found
+        # my $left_edge_fold; # highest fold value found in the window
+        # my $left_edge_location; # location of the hight fold value
+        # my $i=0;        
+        # while (($i < scalar @agreement_delta) and ($left_edge_found == 0)) {
+        #     if ($significant_fold_change[$i] > $left_edge_fold) {
+        #         $left_edge_fold = $significant_fold_change[$i];
+        #         $left_edge_location = $agreement_location[$i+$EDGE_WINDOW-1];
+        #     }
+        #     elsif (($left_edge_fold > 0) and ($significant_fold_change[$i] == 0)) {
+        #         $left_edge_found = 1;
+        #     }
+        #     $i++;
+        # }
+        # # Scan for the right edge
+        # my $right_edge_found = 0; # boolean, set to 1 once a window is found
+        # my $right_edge_fold; # highest fold value found in the window
+        # my $right_edge_location; # location of the hight fold value
+        # my $i=(scalar @agreement_delta) - 1; #start from the right   
+        # while (($i >= 0) and ($right_edge_found == 0)) {
+        #     if ($significant_fold_change[$i] < $right_edge_fold) {
+        #         $right_edge_fold = $significant_fold_change[$i];
+        #         $right_edge_location = $agreement_location[$i+$EDGE_WINDOW-1];
+        #     }
+        #     elsif (($right_edge_fold < 0) and ($significant_fold_change[$i] == 0)) {
+        #         $right_edge_found = 1;
+        #     }
+        #     $i--;
+        # }
+
+        # if ($left_edge_found) {
+        #     print "left location is $left_edge_location\n";
+        # }
+        # else {
+        #     print "no left location found\n";
+        # }
+        # if ($right_edge_found) {
+        #     print "right location is $right_edge_location\n";
+        # }
+        # else {
+        #     print "no right location found\n";
+        # }
 
 
 
