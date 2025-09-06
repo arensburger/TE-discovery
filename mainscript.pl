@@ -100,6 +100,7 @@ my $datestring = localtime();
 print ANALYSIS "\nSTARTING ANALYSIS on $datestring\n";
 
 my $BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FOLDER/tblastn.o"; # default name and location unless a file is provided
+my $GOOD_BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FOLDER/good_blast.o"; # blast file filtered for good elements according to Goubert
 
 ### PIPELINE STEP 1 identify proteins that match the genome with parameters specified above under
 ###     The output is a list of proteins for further analysis recorded in the file $output_file_name
@@ -192,6 +193,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     ## Inspired by the Goubert et al. protocol, filter elements that 1) have >= 80% identity to genome, 2) have 50% length of the query, 3) are found at multiple locations
     my %candidate_protein; # hash with protein name as key and string with chromosome and middle location of element on that chromsome
     open (INPUT, "$BLAST_OUTPUT_FILE_NAME") or die "ERROR: Cannot open file $BLAST_OUTPUT_FILE_NAME\n";
+    open (OUTPUT, ">", $GOOD_BLAST_OUTPUT_FILE_NAME) or die "ERROR: Cannot create good blast file $GOOD_BLAST_OUTPUT_FILE_NAME\n";
     while (my $line = <INPUT>) {
         my $gi=0; # boolean, set to zero until the genome identity test is passed
         my $cr=0; # boolean, set to zero until the coverage ratio test is passed
@@ -223,12 +225,14 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         if ($gi and $cr and $md) { # if the current protein and locus combination passed all the tests then record it in %protein_ids, if not record as rejected
             push @{ $candidate_protein{$data[0]}}, "$data[1]\t$middle_position";
             $protein_ids{$data[0]} = $#{$candidate_protein{$data[0]}} + 1; # update the hash %protein_ids with the current number of loci that passed the tests
+            print OUTPUT "$line"; # add the current line to the blast file that will be used down the line
         }   
         else {
             $rejected_ids{$data[0]} = "STEP $step_number\tError code (genome identity/coverage/minimum distance): $gi $cr $md"
         }   
     }
     close INPUT;
+    close OUTPUT;
 
     # updated the rejected file
     foreach my $r (keys %rejected_ids) {
@@ -357,7 +361,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         # for each sequence of this element extend it by $BLAST_EXTEND bps on both sides of the sequence
         my @blastlines = (); # holds all the relevant blast lines for this element
         my $j; # counter of the number of blast lines for this element
-        open (INPUT, $BLAST_OUTPUT_FILE_NAME) or die "ERROR: cannot open file blast file output $BLAST_OUTPUT_FILE_NAME\n";
+        open (INPUT, $GOOD_BLAST_OUTPUT_FILE_NAME) or die "ERROR: cannot open file good blast file $GOOD_BLAST_OUTPUT_FILE_NAME\n";
         while (my $line = <INPUT>) {
             my @data = split ' ', $line;
             if ($data[0] eq $element_name) {

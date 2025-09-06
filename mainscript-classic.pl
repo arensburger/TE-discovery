@@ -101,7 +101,6 @@ print ANALYSIS "\nSTARTING ANALYSIS on $datestring\n";
 my $BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FOLDER/tblastn.o"; # default name and location unless a file is provided
 my $GOOD_BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FOLDER/good_blast.o"; # blast file filtered for good elements according to Goubert
 
-
 ### PIPELINE STEP 1 identify proteins that match the genome with parameters specified above under
 ###     The output is a list of proteins for further analysis recorded in the file $output_file_name
 ### CONSTANTS applicable to this step only (also record these in the file)
@@ -161,7 +160,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     ## Inspired by the Goubert et al. protocol, filter elements that 1) have >= 80% identity to genome, 2) have 50% length of the query, 3) are found at multiple locations
     my %candidate_protein; # hash with protein name as key and string with chromosome and middle location of element on that chromsome
     open (INPUT, "$BLAST_OUTPUT_FILE_NAME") or die "ERROR: Cannot open file $BLAST_OUTPUT_FILE_NAME\n";
-  #  my $good_blast_file_name = File::Temp->new(UNLINK => 1, SUFFIX => '.blast' ); # this file only keeps the blast hits that passed the Goubert tests, it's what he calls "good blast"
     open (OUTPUT, ">", $GOOD_BLAST_OUTPUT_FILE_NAME) or die "ERROR: Cannot create good blast file $GOOD_BLAST_OUTPUT_FILE_NAME\n";
     while (my $line = <INPUT>) {
         my $gi=0; # boolean, set to zero until the genome identity test is passed
