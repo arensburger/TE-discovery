@@ -314,7 +314,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     print ANALYSIS "\t%EXAMINE_CODES=(\"1111\" => 1, \"1101\" => 2, \"1110\" => 3)\n";
     print ANALYSIS "\tMAX_TSD_PROPORTION = $MAX_TSD_PROPORTION\n";
 
-    ## check that all the necessary files have been suppliedbedtoolsbedtools
+    ## check that all the necessary files have been supplied
     # checking that the genome length file is present
     unless ((-f "$INPUT_GENOME.length") and ($INPUT_GENOME)){
         die "ERROR: for this step you need to provide\n1) a fasta formated genome file, using the -g parameter\n2) in the same folder an associated length file generated using the commands below (genome must have been formated using makeblastdb)\n\tsamtools faidx \$genome\n\tawk \'{OFS=\"\\t\"; print \$1,\$2}\' < \$genome.fai > \$genome.length\n";
