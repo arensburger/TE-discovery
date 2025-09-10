@@ -438,6 +438,32 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             }
         }
 
+        # find location with highest likelihood of being the transition
+
+        # put these on top when done
+        my $HIGH_POSITION_CONSENSUS=0.65; # proportion of conservation at an alignment position to call it "high"
+        my $SEARCH_WINDOW_SIZE=20; # how big a window to search on either side of a potential transition postion
+
+        my $left_highest_transition_position=0; # position of the most likely transition on the left 
+        my $left_highest_transition_ratio; # highest ratio of conserved positions inside / outside the element
+        my $right_highest_transition_position=0; # position of the most likely transition on the left 
+        my $right_highest_transition_ratio; # highest ratio of conserved positions inside / outside the element
+
+        for (my $i=0; $i < scalar @agreement_percentage; $i++) {
+            for (my $j=$i-$SEARCH_WINDOW_SIZE; $j<$i+$SEARCH_WINDOW_SIZE; $j++) {
+                if ((($i-$SEARCH_WINDOW_SIZE) < 0) or (($i+$SEARCH_WINDOW_SIZE) > scalar @agreement_percentage)) {
+                    print "$i, out of bounds\n";
+                }    
+                elsif (($agreement_location[$j] > ($agreement_location[$i]-$SEARCH_WINDOW_SIZE)) and ($agreement_location[$j] < ($agreement_location[$i]+$SEARCH_WINDOW_SIZE))) {
+                    print "$i\t$agreement_location[$i]\t$agreement_location[$j]\tuse this\n";
+                }
+                else {
+                    print "$i\t$agreement_location[$i]\t$agreement_location[$j]\tdo not use\n";
+                }
+            }
+        }
+exit;
+
 ### A new approach to the whole thing: identify possible transition points by looking at the difference in conservation between two adjacent bases, those with high differences are possible
 # transition candidtes. The for each candidite, scroll up and down 10 bases or so, and record how many look like a real transition (i.e. high in the element, low outside the element). The real
 # edge is where the numbers are most consistent.
@@ -511,7 +537,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             my $delta = $agreement_delta[$i];
             print "$location\t$percentage\t$delta\n";
         }
-exit;
+
 
 
 #         # Identifying any significant changes in agreement to estimate the edge of the element on the left side. First every
