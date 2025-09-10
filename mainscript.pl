@@ -449,17 +449,19 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         my $right_highest_transition_position=0; # position of the most likely transition on the left 
         my $right_highest_transition_ratio; # highest ratio of conserved positions inside / outside the element
 
-        for (my $i=0; $i < scalar @agreement_percentage; $i++) {
-            for (my $j=$i-$SEARCH_WINDOW_SIZE; $j<$i+$SEARCH_WINDOW_SIZE; $j++) {
-                if ((($i-$SEARCH_WINDOW_SIZE) < 0) or (($i+$SEARCH_WINDOW_SIZE) > scalar @agreement_percentage)) {
-                    print "$i, out of bounds\n";
+        for (my $i=0; $i < scalar @agreement_percentage; $i++) { # go through each position that has consensus nucleotide
+            for (my $j=$i-$SEARCH_WINDOW_SIZE; $j<$i+$SEARCH_WINDOW_SIZE; $j++) { # check positions up and down from current position
+                unless ((($i-$SEARCH_WINDOW_SIZE) < 0) or (($i+$SEARCH_WINDOW_SIZE) > scalar @agreement_percentage)) { # this will exclude searches outside the bounds of the @agreement_percentage array
+                    if (($agreement_location[$j] > ($agreement_location[$i]-$SEARCH_WINDOW_SIZE)) and ($agreement_location[$j] < ($agreement_location[$i]+$SEARCH_WINDOW_SIZE))) { # this will be true if a consensus has been recorded for a postion this far away from the current position
+                        print "currently at $agreement_location[$i] searching $agreement_location[$j]\n";
+                    }
                 }    
-                elsif (($agreement_location[$j] > ($agreement_location[$i]-$SEARCH_WINDOW_SIZE)) and ($agreement_location[$j] < ($agreement_location[$i]+$SEARCH_WINDOW_SIZE))) {
-                    print "$i\t$agreement_location[$i]\t$agreement_location[$j]\tuse this\n";
-                }
-                else {
-                    print "$i\t$agreement_location[$i]\t$agreement_location[$j]\tdo not use\n";
-                }
+                # elsif (($agreement_location[$j] > ($agreement_location[$i]-$SEARCH_WINDOW_SIZE)) and ($agreement_location[$j] < ($agreement_location[$i]+$SEARCH_WINDOW_SIZE))) {
+                #     print "$i\t$agreement_location[$i]\t$agreement_location[$j]\tuse this\n";
+                # }
+                # else {
+                #     print "$i\t$agreement_location[$i]\t$agreement_location[$j]\tdo not use\n";
+                # }
             }
         }
 exit;
