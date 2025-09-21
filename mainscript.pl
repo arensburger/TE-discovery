@@ -411,59 +411,91 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         if ($?) { die "ERROR executing bedtools: error code $?\n"}
 
         # STEP 2.2.2
-        # align the sequences and make a consensus sequence
+        # 1) align the sequences and 2) determine the edges of the element
+        # To find the eddges the idea is to find the two positions in the alignment whit the sharpest transition from no consensus outside
+        # element to high consensus inside. This is done looking up and down each position for a distance of $SEARCH_WINDOW_SIZE.
+
+        # 2.2.2.1 Align the sequences
         my $aligned_sequences = File::Temp->new(UNLINK => 1, SUFFIX => '.maf' ); 
        `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences`;
         if ($?) { die "Error executing mafft, error code $?\n"}
-`cp $aligned_sequences /home/peter/Desktop/Ptep/aligned_sequence.fa`;
-        # STEP 2.2.2.1
-        # determine if there's an area in this alignment where most sequences agree on a single sequence
+        
+        # 2.2.2.2 the edges of the element
+        my $HIGH_POSITION_CONSENSUS=0.75; # proportion of conservation at an alignment position to call it highly conserved
+        my $SEARCH_WINDOW_SIZE=20; # how big a window to search on either side of a potential transition postion
+        my $MAX_GAP_N_AT_POSITION=0.5; # maximum proportion of gaps or N's at an alignment position, if above the position is ignored in this analysis
 
         my %aliseq = fastatohash($aligned_sequences); # aligned sequences
-        my @agreement_location; # holds alignment position where the alignment agrees on a nucleotide, rather than an N or a gap
-        my @agreement_percentage; # holds the highest percentage of sequences that agree on one nucleotide at a postion
         my $alignment_length = length($aliseq{(keys %aliseq)[rand keys %aliseq]}); # pick a random sequence to get the length of the alignment (assuming all are the same length)
-        
-        # determine the highest percentage of agreement on a single nucleotide at each position
+        my @agreement_percentage; # holds the highest percentage of sequences that agree on one nucleotide at a postion
+        my %location_conversion; # holds the position of the alignment without gaps as key and corresponding alignment with gaps as value
+
+        # 2.2.2.3 determine the highest percentage of agreement on a single nucleotide at each position
+        # go through the alignment to do two things 1) exclude positions that are mostly gaps or "n", 2) record positions that have high agreement on a single nucleotide.
+        # keep track of excluded elements so the correct positions can be reported later
         for (my $i=0; $i<$alignment_length; $i++) {
             my %chars; # holds the characters found at the current position as key, and abundance as value
             foreach my $taxon (keys %aliseq) {
                 my $character = lc(substr($aliseq{$taxon}, $i, 1));
                 $chars{$character} += 1;
             }
-            my $most_abundant_character = max_by { $chars{$_} } keys %chars;
-            unless (($most_abundant_character eq "-") or ($most_abundant_character eq "n")) {
-                push @agreement_location, $i;
-                push @agreement_percentage, ($chars{$most_abundant_character}/(keys %aliseq));
+
+            # decide if this position has too many N's or gaps
+            my $number_of_sequences_in_alignment = keys %aliseq;
+            unless ((($chars{"-"}/$number_of_sequences_in_alignment) > $MAX_GAP_N_AT_POSITION) or (($chars{"n"}/$number_of_sequences_in_alignment) > $MAX_GAP_N_AT_POSITION)){
+                my $most_abundant_character = max_by { $chars{$_} } keys %chars;
+                if (($most_abundant_character eq "-") or ($most_abundant_character eq "n")) {
+                    push @agreement_percentage, 0;
+                }
+                else {
+                    push @agreement_percentage, ($chars{$most_abundant_character}/(keys %aliseq)); 
+                }
+                my $last_new_location = scalar @agreement_percentage;
+                $location_conversion{$last_new_location} = $i+1;
             }
+            
         }
-
-        # find location with highest likelihood of being the transition
-
-        # put these on top when done
-        my $HIGH_POSITION_CONSENSUS=0.65; # proportion of conservation at an alignment position to call it "high"
-        my $SEARCH_WINDOW_SIZE=20; # how big a window to search on either side of a potential transition postion
-
+ 
+        # 2.2.2.4 Find location with highest likelihood of being the transition
         my $left_highest_transition_position=0; # position of the most likely transition on the left 
-        my $left_highest_transition_ratio; # highest ratio of conserved positions inside / outside the element
+        my $left_highest_transition_number; # highest ratio of conserved positions inside / outside the element
         my $right_highest_transition_position=0; # position of the most likely transition on the left 
-        my $right_highest_transition_ratio; # highest ratio of conserved positions inside / outside the element
+        my $right_highest_transition_number; # highest ratio of conserved positions inside / outside the element
 
-        for (my $i=0; $i < scalar @agreement_percentage; $i++) { # go through each position that has consensus nucleotide
-            for (my $j=$i-$SEARCH_WINDOW_SIZE; $j<$i+$SEARCH_WINDOW_SIZE; $j++) { # check positions up and down from current position
-                unless ((($i-$SEARCH_WINDOW_SIZE) < 0) or (($i+$SEARCH_WINDOW_SIZE) > scalar @agreement_percentage)) { # this will exclude searches outside the bounds of the @agreement_percentage array
-                    if (($agreement_location[$j] > ($agreement_location[$i]-$SEARCH_WINDOW_SIZE)) and ($agreement_location[$j] < ($agreement_location[$i]+$SEARCH_WINDOW_SIZE))) { # this will be true if a consensus has been recorded for a postion this far away from the current position
-                        print "currently at $agreement_location[$i] searching $agreement_location[$j]\n";
+        for (my $i=0; $i < scalar @agreement_percentage; $i++) { # go through each position that has a consensus nucleotide
+            my $cons_left = 0;  # number of positions in the current window above $HIGH_POSITION_CONSENSUS to the left of the current position (not including it)
+            my $cons_right = 0; # number of positions in the current window above $HIGH_POSITION_CONSENSUS to the right of the current position (not including it)
+            my $cons_current = 0; # boolean, set to 1 if th current position is above $HIGH_POSITION_CONSENSUS
+
+            for (my $j=$i-$SEARCH_WINDOW_SIZE; $j<$i+$SEARCH_WINDOW_SIZE+1; $j++) { # check positions up and down from current position
+                unless ((($i-$SEARCH_WINDOW_SIZE) < 0) or (($i+$SEARCH_WINDOW_SIZE+1) > scalar @agreement_percentage)) { # this will exclude searches outside the bounds of the @agreement_percentage array (i.e. below zero or above the size of the array)
+                    if ($agreement_percentage[$j] > $HIGH_POSITION_CONSENSUS) { # true if this is a high consensus position in the window
+                        if ($j < $i) {
+                            $cons_left++;
+                        }
+                        elsif ($j > $i) {
+                            $cons_right++;
+                        }
+                        else {
+                            $cons_current=1;
+                        }
                     }
                 }    
-                # elsif (($agreement_location[$j] > ($agreement_location[$i]-$SEARCH_WINDOW_SIZE)) and ($agreement_location[$j] < ($agreement_location[$i]+$SEARCH_WINDOW_SIZE))) {
-                #     print "$i\t$agreement_location[$i]\t$agreement_location[$j]\tuse this\n";
-                # }
-                # else {
-                #     print "$i\t$agreement_location[$i]\t$agreement_location[$j]\tdo not use\n";
-                # }
+            }
+
+            # Update to see if better transition has been found
+            if ($cons_current) { # only consider transitions at positions with high agreement
+                if ((($cons_right+1) - $cons_left) > $left_highest_transition_number) {
+                    $left_highest_transition_position = $location_conversion{$i};
+                    $left_highest_transition_number = (($cons_right+1) - $cons_left); # the + 1 is to account that the current position is inside the element
+                }
+                if ((($cons_left+1) - $cons_right) > $right_highest_transition_number) {
+                    $right_highest_transition_position = $location_conversion{$i};
+                    $right_highest_transition_number = (($cons_left+1) - $cons_right) # the + 1 is to account that the current position is inside the element
+                }
             }
         }
+        print "transitions at $left_highest_transition_position and $right_highest_transition_position\n";
 exit;
 
 ### A new approach to the whole thing: identify possible transition points by looking at the difference in conservation between two adjacent bases, those with high differences are possible
@@ -504,41 +536,41 @@ exit;
         # the alignment with significant differences in delta. 4) Scan either side of the alignment for the first location of significant 
         # differences, and if there are several in a row select the one with the highest delta as the edge
 
-        my $EDGE_WINDOW = 20; # number of nucleotides to scan for the edge
-        my $SIGNIFICANCE_LEVEL = 3.5; # number of standard deviations away from the mean to call a difference significant
-        my @agreement_delta; # for each position that agrees on a nucleotide, the difference between averages of windows on both sides 
+        # my $EDGE_WINDOW = 20; # number of nucleotides to scan for the edge
+        # my $SIGNIFICANCE_LEVEL = 3.5; # number of standard deviations away from the mean to call a difference significant
+        # my @agreement_delta; # for each position that agrees on a nucleotide, the difference between averages of windows on both sides 
 
-        # Creating @agreement_delta, calculating difference in window agreement for every position
-        for (my $i=($EDGE_WINDOW); $i < ((scalar @agreement_location) - $EDGE_WINDOW); $i++) {
-            my $sum_left_window; # sum of the agreement levels in the window before the current location, will be used for an average
-            my $sum_right_window; # sum of the agreement levels in the window incuding and after the current location, will be used for an average
-            for (my $j=1; $j <= $EDGE_WINDOW; $j++) {
-                $sum_left_window += $agreement_percentage[$i-$j];
-                $sum_right_window += $agreement_percentage[$i+$j-1];
-            }
-            push @agreement_delta, ($sum_right_window/$EDGE_WINDOW) - ($sum_left_window/$EDGE_WINDOW);
-        }
+        # # Creating @agreement_delta, calculating difference in window agreement for every position
+        # for (my $i=($EDGE_WINDOW); $i < ((scalar @agreement_location) - $EDGE_WINDOW); $i++) {
+        #     my $sum_left_window; # sum of the agreement levels in the window before the current location, will be used for an average
+        #     my $sum_right_window; # sum of the agreement levels in the window incuding and after the current location, will be used for an average
+        #     for (my $j=1; $j <= $EDGE_WINDOW; $j++) {
+        #         $sum_left_window += $agreement_percentage[$i-$j];
+        #         $sum_right_window += $agreement_percentage[$i+$j-1];
+        #     }
+        #     push @agreement_delta, ($sum_right_window/$EDGE_WINDOW) - ($sum_left_window/$EDGE_WINDOW);
+        # }
 
-        # Calculate the mean of windows delta
-        my $sum_delta;
-        for (my $i=0; $i<scalar @agreement_delta; $i++) { 
-            $sum_delta += $agreement_delta[$i];
-        }
-        my $mean_delta = $sum_delta / (scalar @agreement_delta);
+        # # Calculate the mean of windows delta
+        # my $sum_delta;
+        # for (my $i=0; $i<scalar @agreement_delta; $i++) { 
+        #     $sum_delta += $agreement_delta[$i];
+        # }
+        # my $mean_delta = $sum_delta / (scalar @agreement_delta);
         
-        # Calculate the standard deviation
-        my $sum_diff;
-        for (my $i=0; $i<scalar @agreement_delta; $i++) {
-            $sum_diff += ($agreement_delta[$i] - $mean_delta) ** 2;
-        }
-        my $stdev_delta = sqrt((1/(scalar @agreement_delta))*$sum_diff);
+        # # Calculate the standard deviation
+        # my $sum_diff;
+        # for (my $i=0; $i<scalar @agreement_delta; $i++) {
+        #     $sum_diff += ($agreement_delta[$i] - $mean_delta) ** 2;
+        # }
+        # my $stdev_delta = sqrt((1/(scalar @agreement_delta))*$sum_diff);
 
-        for (my $i=($EDGE_WINDOW); $i < ((scalar @agreement_location) - $EDGE_WINDOW); $i++) {
-            my $location = $agreement_location[$i+$EDGE_WINDOW-1]; # postion in the alignment
-            my $percentage = $agreement_percentage[$i+$EDGE_WINDOW-1];
-            my $delta = $agreement_delta[$i];
-            print "$location\t$percentage\t$delta\n";
-        }
+        # for (my $i=($EDGE_WINDOW); $i < ((scalar @agreement_location) - $EDGE_WINDOW); $i++) {
+        #     my $location = $agreement_location[$i+$EDGE_WINDOW-1]; # postion in the alignment
+        #     my $percentage = $agreement_percentage[$i+$EDGE_WINDOW-1];
+        #     my $delta = $agreement_delta[$i];
+        #     print "$location\t$percentage\t$delta\n";
+        # }
 
 
 
@@ -561,17 +593,17 @@ exit;
         # locations where an edge should be looked for.
  #       my @significant_fold_change; # for every position of the @agreement_delta array has 0 if no signficant difference or the number of std. deviations if not
 
-        for (my $i=0; $i < scalar @agreement_delta; $i++) {
-            my $location = $agreement_location[$i+$EDGE_WINDOW-1]; # postion in the alignment
-            my $folds_from_mean = ($agreement_delta[$i] - $mean_delta) / $stdev_delta; # number of standard deviations away from mean
-            if (abs($folds_from_mean) >= $SIGNIFICANCE_LEVEL) {
- #               push @significant_fold_change, $folds_from_mean;
-            }
-            else {
-#                push @significant_fold_change, 0;
-            }
-#           print "$location\t$significant_fold_change[-1]\n";
-        }
+#         for (my $i=0; $i < scalar @agreement_delta; $i++) {
+#             my $location = $agreement_location[$i+$EDGE_WINDOW-1]; # postion in the alignment
+#             my $folds_from_mean = ($agreement_delta[$i] - $mean_delta) / $stdev_delta; # number of standard deviations away from mean
+#             if (abs($folds_from_mean) >= $SIGNIFICANCE_LEVEL) {
+#  #               push @significant_fold_change, $folds_from_mean;
+#             }
+#             else {
+# #                push @significant_fold_change, 0;
+#             }
+# #           print "$location\t$significant_fold_change[-1]\n";
+#         }
 
 
 
