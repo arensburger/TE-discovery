@@ -416,23 +416,26 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         # element to high consensus inside. This is done looking up and down each position for a distance of $SEARCH_WINDOW_SIZE.
 
         # 2.2.2.1 Align the sequences
-        my $aligned_sequences = File::Temp->new(UNLINK => 1, SUFFIX => '.maf' ); 
-       `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences`;
+#        my $aligned_sequences = File::Temp->new(UNLINK => 1, SUFFIX => '.maf' ); 
+        my $aligned_sequences_file_name = "$ELEMENT_FOLDER/$element_name/$element_name.maf";
+        `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences_file_name`;
         if ($?) { die "Error executing mafft, error code $?\n"}
+        my $datestring = localtime();
+        print README "$datestring, Aligned extended BLAST sequences are in file $element_name.maf";
         
-        # 2.2.2.2 the edges of the element
+        # 2.2.2.2 determine the highest percentage of agreement on a single nucleotide at each position
+        # go through the alignment to do two things 1) exclude positions that are mostly gaps or "n", 2) record positions that have high agreement on a single nucleotide.
+        # keep track of excluded elements so the correct positions can be reported later
         my $HIGH_POSITION_CONSENSUS=0.75; # proportion of conservation at an alignment position to call it highly conserved
         my $SEARCH_WINDOW_SIZE=20; # how big a window to search on either side of a potential transition postion
         my $MAX_GAP_N_AT_POSITION=0.5; # maximum proportion of gaps or N's at an alignment position, if above the position is ignored in this analysis
 
-        my %aliseq = fastatohash($aligned_sequences); # aligned sequences
+        my %aliseq = fastatohash($aligned_sequences_file_name); # aligned sequences
         my $alignment_length = length($aliseq{(keys %aliseq)[rand keys %aliseq]}); # pick a random sequence to get the length of the alignment (assuming all are the same length)
-        my @agreement_percentage; # holds the highest percentage of sequences that agree on one nucleotide at a postion
+        my @agreement_proportion; # holds the highest percentage of sequences that agree on one nucleotide at a postion
         my %location_conversion; # holds the position of the alignment without gaps as key and corresponding alignment with gaps as value
+        my $consensus_sequence; # this will hold a consensus sequence for the whole alignment
 
-        # 2.2.2.3 determine the highest percentage of agreement on a single nucleotide at each position
-        # go through the alignment to do two things 1) exclude positions that are mostly gaps or "n", 2) record positions that have high agreement on a single nucleotide.
-        # keep track of excluded elements so the correct positions can be reported later
         for (my $i=0; $i<$alignment_length; $i++) {
             my %chars; # holds the characters found at the current position as key, and abundance as value
             foreach my $taxon (keys %aliseq) {
@@ -442,34 +445,44 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
             # decide if this position has too many N's or gaps
             my $number_of_sequences_in_alignment = keys %aliseq;
-            unless ((($chars{"-"}/$number_of_sequences_in_alignment) > $MAX_GAP_N_AT_POSITION) or (($chars{"n"}/$number_of_sequences_in_alignment) > $MAX_GAP_N_AT_POSITION)){
+            if ((($chars{"-"}/$number_of_sequences_in_alignment) > $MAX_GAP_N_AT_POSITION) or (($chars{"n"}/$number_of_sequences_in_alignment) > $MAX_GAP_N_AT_POSITION)){
+                $consensus_sequence .= "n";
+            }
+            else {
                 my $most_abundant_character = max_by { $chars{$_} } keys %chars;
                 if (($most_abundant_character eq "-") or ($most_abundant_character eq "n")) {
-                    push @agreement_percentage, 0;
+                    push @agreement_proportion, 0;
                 }
                 else {
-                    push @agreement_percentage, ($chars{$most_abundant_character}/(keys %aliseq)); 
+                    push @agreement_proportion, ($chars{$most_abundant_character}/(keys %aliseq)); 
                 }
-                my $last_new_location = scalar @agreement_percentage;
-                $location_conversion{$last_new_location} = $i+1;
+                $location_conversion{scalar @agreement_proportion} = $i+1; # update the convertion hash so the correct position can be recorded later
+                
+                #update the consensus sequence
+                if ($agreement_proportion[-1] >= $CONSLEVEL) {
+                    $consensus_sequence .= $most_abundant_character;
+                }
+                else {
+                    $consensus_sequence .= "n"
+                }
             }
             
         }
  
-        # 2.2.2.4 Find location with highest likelihood of being the transition
+        # 2.2.2.3 Find location with highest likelihood of being the transition
         my $left_highest_transition_position=0; # position of the most likely transition on the left 
         my $left_highest_transition_number; # highest ratio of conserved positions inside / outside the element
         my $right_highest_transition_position=0; # position of the most likely transition on the left 
         my $right_highest_transition_number; # highest ratio of conserved positions inside / outside the element
 
-        for (my $i=0; $i < scalar @agreement_percentage; $i++) { # go through each position that has a consensus nucleotide
+        for (my $i=0; $i < scalar @agreement_proportion; $i++) { # go through each position that has a consensus nucleotide
             my $cons_left = 0;  # number of positions in the current window above $HIGH_POSITION_CONSENSUS to the left of the current position (not including it)
             my $cons_right = 0; # number of positions in the current window above $HIGH_POSITION_CONSENSUS to the right of the current position (not including it)
             my $cons_current = 0; # boolean, set to 1 if th current position is above $HIGH_POSITION_CONSENSUS
 
             for (my $j=$i-$SEARCH_WINDOW_SIZE; $j<$i+$SEARCH_WINDOW_SIZE+1; $j++) { # check positions up and down from current position
-                unless ((($i-$SEARCH_WINDOW_SIZE) < 0) or (($i+$SEARCH_WINDOW_SIZE+1) > scalar @agreement_percentage)) { # this will exclude searches outside the bounds of the @agreement_percentage array (i.e. below zero or above the size of the array)
-                    if ($agreement_percentage[$j] > $HIGH_POSITION_CONSENSUS) { # true if this is a high consensus position in the window
+                unless ((($i-$SEARCH_WINDOW_SIZE) < 0) or (($i+$SEARCH_WINDOW_SIZE+1) > scalar @agreement_proportion)) { # this will exclude searches outside the bounds of the @agreement_proportion array (i.e. below zero or above the size of the array)
+                    if ($agreement_proportion[$j] > $HIGH_POSITION_CONSENSUS) { # true if this is a high consensus position in the window
                         if ($j < $i) {
                             $cons_left++;
                         }
@@ -495,8 +508,10 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 }
             }
         }
-        print "transitions at $left_highest_transition_position and $right_highest_transition_position\n";
-exit;
+
+#       print "transitions at $left_highest_transition_position and $right_highest_transition_position\n";
+#        print ">cons\n$consensus_sequence\n";
+#exit;
 
 ### A new approach to the whole thing: identify possible transition points by looking at the difference in conservation between two adjacent bases, those with high differences are possible
 # transition candidtes. The for each candidite, scroll up and down 10 bases or so, and record how many look like a real transition (i.e. high in the element, low outside the element). The real
@@ -504,7 +519,7 @@ exit;
 
 
         # for (my $i=0; $i<scalar @agreement_location; $i++) {
-        #     print "$agreement_location[$i]\t$agreement_percentage[$i]\n";
+        #     print "$agreement_location[$i]\t$agreement_proportion[$i]\n";
         # }
         # exit;
 
@@ -515,7 +530,7 @@ exit;
         # my $current_run=0; # how many high level nucleotides in a row have been detected
         # my $i=0;
         # while (($i < scalar @agreement_location) and ($current_run < $NUC_IN_A_ROW)) {
-        #     if ($agreement_percentage[$i] >= $AGREEMENT_LEVEL) {
+        #     if ($agreement_proportion[$i] >= $AGREEMENT_LEVEL) {
         #         $current_run++;
         #     }
         #     else {
@@ -545,8 +560,8 @@ exit;
         #     my $sum_left_window; # sum of the agreement levels in the window before the current location, will be used for an average
         #     my $sum_right_window; # sum of the agreement levels in the window incuding and after the current location, will be used for an average
         #     for (my $j=1; $j <= $EDGE_WINDOW; $j++) {
-        #         $sum_left_window += $agreement_percentage[$i-$j];
-        #         $sum_right_window += $agreement_percentage[$i+$j-1];
+        #         $sum_left_window += $agreement_proportion[$i-$j];
+        #         $sum_right_window += $agreement_proportion[$i+$j-1];
         #     }
         #     push @agreement_delta, ($sum_right_window/$EDGE_WINDOW) - ($sum_left_window/$EDGE_WINDOW);
         # }
@@ -567,7 +582,7 @@ exit;
 
         # for (my $i=($EDGE_WINDOW); $i < ((scalar @agreement_location) - $EDGE_WINDOW); $i++) {
         #     my $location = $agreement_location[$i+$EDGE_WINDOW-1]; # postion in the alignment
-        #     my $percentage = $agreement_percentage[$i+$EDGE_WINDOW-1];
+        #     my $percentage = $agreement_proportion[$i+$EDGE_WINDOW-1];
         #     my $delta = $agreement_delta[$i];
         #     print "$location\t$percentage\t$delta\n";
         # }
@@ -657,94 +672,101 @@ exit;
 
 # for (my $i=0; $i < scalar @agreement_delta; $i++) {
 #     my $location = $agreement_location[$i+$EDGE_WINDOW-1];
-#     my $agree = $agreement_percentage[$i];
+#     my $agree = $agreement_proportion[$i];
 #     my $delta = $agreement_delta[$i];
 #     print "$location\t$agree\t$delta\n";
 # }
 
-exit;
-        my ($conseq, %seqrmg) = create_consensus($GAP_THRESHOLD, $CONSLEVEL, fastatohash($aligned_sequences)); # create a conensus sequence
+# exit;
+#         my ($conseq, %seqrmg) = create_consensus($GAP_THRESHOLD, $CONSLEVEL, fastatohash($aligned_sequences_file_name)); # create a conensus sequence
 
-        # STEP 2.2.3
-        # trim the ends of the consensus that have low agreement on a single sequence
-        my $ltrans=0; # position of the transition from "not the element" to the "element" on the left side of the alignment
-        my $rtrans=length $conseq; # position of the transition from "not the element" to the "element" on the right side of the alignment
-        my $trimmed_conseq; # consensus sequence trimmed of side sequences, remains blank if no transition was found
+#         # STEP 2.2.3
+#         # trim the ends of the consensus that have low agreement on a single sequence
+#          my $ltrans=0; # position of the transition from "not the element" to the "element" on the left side of the alignment
+#          my $rtrans=length $conseq; # position of the transition from "not the element" to the "element" on the right side of the alignment
+#          my $trimmed_conseq; # consensus sequence trimmed of side sequences, remains blank if no transition was found
 
-        # record the number of N's in each window
-        my @Nnum; # number of N's (or non-known bases) in the consensus in windows of size $WINDOW_SIZE
-        for (my $i=0; $i <= ((length $conseq)-$WINDOW_SIZE); $i++) {
-            my $winseq = substr ($conseq, $i, $WINDOW_SIZE);
-            my $nBases = $winseq =~ tr/ACGTacgt//; # $nBases holds number known bases in the current window
-            push @Nnum, (length $winseq) - $nBases; # this add the number of non-bases to the array @Nnum for current window
-        }
-        # find where the transtion from high number of N's in the consenus to low number occurs
-        # finding the transition on the left side
-        my $i=0;
-        while (($ltrans==0) and ($i < ((length $conseq)-$WINDOW_SIZE + 1))) { # if an ltran position is found it will be higher than zero, even if it's the first base
-            if ($Nnum[$i] <= $MAX_WIN_N) { # find the first window from the left that has $MAX_WIN_N propotion of N
-                                            # this is where the transition is
-                my $s = substr($conseq, $i, $WINDOW_SIZE);
-                unless ($s =~ /^N/i) { # prevent the transtion occuring at an N
-                    $ltrans = $i+1;
-                }
-            }
-            $i++;
-        }
+#         # record the number of N's in each window
+#         my @Nnum; # number of N's (or non-known bases) in the consensus in windows of size $WINDOW_SIZE
+#         for (my $i=0; $i <= ((length $conseq)-$WINDOW_SIZE); $i++) {
+#             my $winseq = substr ($conseq, $i, $WINDOW_SIZE);
+#             my $nBases = $winseq =~ tr/ACGTacgt//; # $nBases holds number known bases in the current window
+#             push @Nnum, (length $winseq) - $nBases; # this add the number of non-bases to the array @Nnum for current window
+#         }
+#         # find where the transtion from high number of N's in the consenus to low number occurs
+#         # finding the transition on the left side
+#         my $i=0;
+#         while (($ltrans==0) and ($i < ((length $conseq)-$WINDOW_SIZE + 1))) { # if an ltran position is found it will be higher than zero, even if it's the first base
+#             if ($Nnum[$i] <= $MAX_WIN_N) { # find the first window from the left that has $MAX_WIN_N propotion of N
+#                                             # this is where the transition is
+#                 my $s = substr($conseq, $i, $WINDOW_SIZE);
+#                 unless ($s =~ /^N/i) { # prevent the transtion occuring at an N
+#                     $ltrans = $i+1;
+#                 }
+#             }
+#             $i++;
+#         }
 
-        # finding the transition on the right side
-        my $i=(length $conseq)-$WINDOW_SIZE;
-        while (($rtrans==(length $conseq)) and ($i >= 0)) {
-            if ($Nnum[$i] <= $MAX_WIN_N) {
-                my $s = substr($conseq, $i, $WINDOW_SIZE);
-                unless ($s =~ /^N/i) { # prevent the transtion occuring at an N
-                    $rtrans = $i+$WINDOW_SIZE;
-                }
-            }
-            $i--;
-	    }
+#         # finding the transition on the right side
+#         my $i=(length $conseq)-$WINDOW_SIZE;
+#         while (($rtrans==(length $conseq)) and ($i >= 0)) {
+#             if ($Nnum[$i] <= $MAX_WIN_N) {
+#                 my $s = substr($conseq, $i, $WINDOW_SIZE);
+#                 unless ($s =~ /^N/i) { # prevent the transtion occuring at an N
+#                     $rtrans = $i+$WINDOW_SIZE;
+#                 }
+#             }
+#             $i--;
+# 	    }
 
-        # if both a left and right transition are found, then create the trimmed consensus sequence and add it to the alignment file
-        if (($ltrans > 0) and ($rtrans < (length $conseq))) { 
-            for (my $i=0; $i<$ltrans-1; $i++) {
-                $trimmed_conseq .= "-";
-            }
-            for (my $i=($ltrans-1); $i<($rtrans); $i++) {
-                $trimmed_conseq .= substr($conseq, $i, 1);
-            }
-            for (my $i=($rtrans); $i<(length $conseq); $i++) {
-                $trimmed_conseq .= "-";
-            } 
-        }
+#         # if both a left and right transition are found, then create the trimmed consensus sequence and add it to the alignment file
+#         if (($ltrans > 0) and ($rtrans < (length $conseq))) { 
+#             for (my $i=0; $i<$ltrans-1; $i++) {
+#                 $trimmed_conseq .= "-";
+#             }
+#             for (my $i=($ltrans-1); $i<($rtrans); $i++) {
+#                 $trimmed_conseq .= substr($conseq, $i, 1);
+#             }
+#             for (my $i=($rtrans); $i<(length $conseq); $i++) {
+#                 $trimmed_conseq .= "-";
+#             } 
+#         }
 
-        # output the alignment file with positions removed, called .maf add the consensus if there is one
-        open (OUTPUT, '>', "$ELEMENT_FOLDER/$element_name/$element_name.maf") or die "ERROR: Cannot create file $element_name.maf, $!\n";
-        if (length($trimmed_conseq)) {
-            print OUTPUT ">consensus-$ltrans-$rtrans\n";
-            print OUTPUT "$trimmed_conseq\n"
-        }
-        foreach my $name (keys %seqrmg) {
-            print OUTPUT ">$name\n$seqrmg{$name}\n";
-        }
+#         # output the alignment file with positions removed, called .maf add the consensus if there is one
+#         open (OUTPUT, '>', "$ELEMENT_FOLDER/$element_name/$element_name.maf") or die "ERROR: Cannot create file $element_name.maf, $!\n";
+#         if (length($trimmed_conseq)) {
+#             print OUTPUT ">consensus-$ltrans-$rtrans\n";
+#             print OUTPUT "$trimmed_conseq\n"
+#         }
+#         foreach my $name (keys %seqrmg) {
+#             print OUTPUT ">$name\n$seqrmg{$name}\n";
+#         }
         
-        my $datestring = localtime(); # update the README file of new file created
-        print README "$datestring, File $element_name.maf is the alignment of sequences with positions containing $GAP_THRESHOLD proportion of gaps removed\n";
-        close OUTPUT;
+#         my $datestring = localtime(); # update the README file of new file created
+#         print README "$datestring, File $element_name.maf is the alignment of sequences with positions containing $GAP_THRESHOLD proportion of gaps removed\n";
+#         close OUTPUT;
 
-        if ($trimmed_conseq) { # get here if a consenus was found
-            print README "$datestring, a trimmed consensus sequence was created\n";
-        }
-        else { # get here if no abrupt changes in the consensus sequences was detected
-            print README "$datestring, the consensus sequence showed no transitions into an element, stopping the analysis here\n";
-            print REJECT "$datestring\t$element_name\tSTEP 2\tNo transitions to element observed in alignment file\n";
-            `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
-            if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $reject_folder_path: error code $?\n"}
-        }
+#         if ($trimmed_conseq) { # get here if a consenus was found
+#             print README "$datestring, a trimmed consensus sequence was created\n";
+#         }
+#         else { # get here if no abrupt changes in the consensus sequences was detected
+#             print README "$datestring, the consensus sequence showed no transitions into an element, stopping the analysis here\n";
+#             print REJECT "$datestring\t$element_name\tSTEP 2\tNo transitions to element observed in alignment file\n";
+#             `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+#             if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $reject_folder_path: error code $?\n"}
+#         }
 
+
+
+         my $ltrans=0; # position of the transition from "not the element" to the "element" on the left side of the alignment
+         my $rtrans=length $conseq; # position of the transition from "not the element" to the "element" on the right side of the alignment
+         my %seqrmg;
         # STEP 2.2.4 
-        # identify the TIR and TSD locations around the edges of the consensus sequence
-        if ($trimmed_conseq) { # only continue if consensus was created and edge test was passed
-
+        # identify the TIR and TSD locations around the edges of transitions (if transtions were found)
+        if ($left_highest_transition_position and $right_highest_transition_position) { # only continue if a transition was found
+# here I need to create a hash with just the element sequences and sequences with lots of gaps removed. I can use the consensus seqeunce created earlier as a guide 
+# to areas that need to be removed.
+exit;
             # Variables relevant to identifying TIRs and TSDs
             my $range = 5; # how many bp to search around for tirs
             my $max_TIR_number; # highest number of TIRs observed for one pair of start and end positions
@@ -863,7 +885,19 @@ exit;
                 `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
                 if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
             }
-        }     
+        } 
+        else {
+            my $datestring = localtime();
+            if ($left_highest_transition_position) {
+                print README "$datestring, A left element edge was identified at aligment position $left_highest_transition_position but none on the right, stoping analysis here\n";
+            }
+            elsif ($right_highest_transition_position) {
+                print README "$datestring, A rigth element edge was identified at aligment position $right_highest_transition_position but none on the right, stoping analysis here\n";
+            }
+            else {
+                print README "$datestring, No element edge was identified on either left or right, stoping analysis here\n";
+            }
+        }    
         close README; 
     }    
 }
