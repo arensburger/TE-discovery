@@ -759,15 +759,44 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
 
          my $ltrans=0; # position of the transition from "not the element" to the "element" on the left side of the alignment
-         my $rtrans=length $conseq; # position of the transition from "not the element" to the "element" on the right side of the alignment
-         my %seqrmg;
+#         my $rtrans=length $conseq; # position of the transition from "not the element" to the "element" on the right side of the alignment
+         my $rtrans; # position of the transition from "not the element" to the "element" on the right side of the alignment
+
+         
         # STEP 2.2.4 
         # identify the TIR and TSD locations around the edges of transitions (if transtions were found)
+        my %seqrmg; # holds the current sequences but with postions of low agreement removed
+        my $ltrans; # position of the transition from "not the element" to the "element" on the left side of the alignment, using the numbering in %seqrmg
+        my $rtrans; # position of the transition from "not the element" to the "element" on the right side of the alignment, using the numbering in %seqrmg
         if ($left_highest_transition_position and $right_highest_transition_position) { # only continue if a transition was found
-# here I need to create a hash with just the element sequences and sequences with lots of gaps removed. I can use the consensus seqeunce created earlier as a guide 
-# to areas that need to be removed.
+
+            # populate %seqrmg with low agreement postions removed, using the previously determined $consensus_sequence as reference
+            my $j; # counter of positions in %seqrmg
+            for (my $i=0; $i < length $consensus_sequence; $i++) {
+                unless ((substr $consensus_sequence, $i, 1) eq "n") {
+                    foreach my $seq (keys %aliseq) {
+                        $seqrmg{$seq} .= substr $aliseq{$seq}, $i, 1;
+                    }
+                    $j++;
+                }
+
+                #if reached either transition position convert position numbers to $ltrans and $rtrans
+                if ($i == $left_highest_transition_position) {
+                    $ltrans = $j-1;
+                }
+                if ($i == $right_highest_transition_position) {
+                    $rtrans = $j-1;
+                }
+
+            }
+foreach my $s (keys %aliseq) {
+    print ">$s\n$seqrmg{$s}\n";
+}            
+
+print STDERR "$ltrans, $rtrans\n";
 exit;
-            # Variables relevant to identifying TIRs and TSDs
+            # identify possible TIRs and TSDs
+
             my $range = 5; # how many bp to search around for tirs
             my $max_TIR_number; # highest number of TIRs observed for one pair of start and end positions
             my $max_proportion_first_last_bases; # highest number of locations that start and end with the same bases
