@@ -434,6 +434,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         my $alignment_length = length($aliseq{(keys %aliseq)[rand keys %aliseq]}); # pick a random sequence to get the length of the alignment (assuming all are the same length)
         my @agreement_proportion; # holds the highest percentage of sequences that agree on one nucleotide at a postion
         my %location_conversion; # holds the position of the alignment without gaps as key and corresponding alignment with gaps as value
+        my %reverse_location_conversion; # holds the position with gaps as key and the corresponding full alignment position as value
+
         my $consensus_sequence; # this will hold a consensus sequence for the whole alignment
 
         for (my $i=0; $i<$alignment_length; $i++) {
@@ -457,7 +459,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     push @agreement_proportion, ($chars{$most_abundant_character}/(keys %aliseq)); 
                 }
                 $location_conversion{scalar @agreement_proportion} = $i+1; # update the convertion hash so the correct position can be recorded later
-                
+
                 #update the consensus sequence
                 if ($agreement_proportion[-1] >= $CONSLEVEL) {
                     $consensus_sequence .= $most_abundant_character;
@@ -468,7 +470,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             }
             
         }
- 
+
         # 2.2.2.3 Find location with highest likelihood of being the transition
         my $left_highest_transition_position=0; # position of the most likely transition on the left 
         my $left_highest_transition_number; # highest ratio of conserved positions inside / outside the element
@@ -789,13 +791,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 }
 
             }
-foreach my $s (keys %aliseq) {
-    print ">$s\n$seqrmg{$s}\n";
-}            
-
-print STDERR "$ltrans, $rtrans\n";
-exit;
-            # identify possible TIRs and TSDs
 
             my $range = 5; # how many bp to search around for tirs
             my $max_TIR_number; # highest number of TIRs observed for one pair of start and end positions
@@ -815,32 +810,35 @@ exit;
                             my $bases = substr($tir1_sequence, 0, 3) . substr($tir2_sequence, -3, 3); # recording the first and last 3 bases 
                             $tir_first_and_last_bases{$bases} += 1;
                         }
-                        $tsds_found{"TA"} += gettsd($seqrmg{$sequence_name}, $i, $j, "TA");
-                        $tsds_found{2} += gettsd($seqrmg{$sequence_name}, $i, $j, 2);
-                        $tsds_found{3} += gettsd($seqrmg{$sequence_name}, $i, $j, 3);
-                        $tsds_found{4} += gettsd($seqrmg{$sequence_name}, $i, $j, 4);
-                        $tsds_found{5} += gettsd($seqrmg{$sequence_name}, $i, $j, 5);
-                        $tsds_found{6} += gettsd($seqrmg{$sequence_name}, $i, $j, 6);
-                        $tsds_found{7} += gettsd($seqrmg{$sequence_name}, $i, $j, 7);
-                        $tsds_found{8} += gettsd($seqrmg{$sequence_name}, $i, $j, 8);
-                        $tsds_found{9} += gettsd($seqrmg{$sequence_name}, $i, $j, 9);
-                        $tsds_found{10} += gettsd($seqrmg{$sequence_name}, $i, $j,10);
-                    }
 
-                    # figure out the most abundant begining and end of the TIR 
-                    my $most_abundant_tir_seq=0;
+# need to see if the tsds_found script will work this way                      
+                        $tsds_found{"TA"} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, "TA");
+                        # $tsds_found{"TA"} += gettsd($seqrmg{$sequence_name}, $i, $j, "TA");
+                        # $tsds_found{2} += gettsd($seqrmg{$sequence_name}, $i, $j, 2);
+                        # $tsds_found{3} += gettsd($seqrmg{$sequence_name}, $i, $j, 3);
+                        # $tsds_found{4} += gettsd($seqrmg{$sequence_name}, $i, $j, 4);
+                        # $tsds_found{5} += gettsd($seqrmg{$sequence_name}, $i, $j, 5);
+                        # $tsds_found{6} += gettsd($seqrmg{$sequence_name}, $i, $j, 6);
+                        # $tsds_found{7} += gettsd($seqrmg{$sequence_name}, $i, $j, 7);
+                        # $tsds_found{8} += gettsd($seqrmg{$sequence_name}, $i, $j, 8);
+                        # $tsds_found{9} += gettsd($seqrmg{$sequence_name}, $i, $j, 9);
+                        # $tsds_found{10} += gettsd($seqrmg{$sequence_name}, $i, $j,10);
+                    }
+exit;
+                    # for this combination of positions, what is the highest proportion of sequences that have a particular TIR (determined only by the first 3 bps.) 
+                    my $most_abundant_tir_proportion=0;
                     foreach my $name (sort { $tir_first_and_last_bases{$a} <=> $tir_first_and_last_bases{$b} } keys %tir_first_and_last_bases) {
-                        $most_abundant_tir_seq = $tir_first_and_last_bases{$name}/$number_of_tirs_found;
+                        $most_abundant_tir_proportion = $tir_first_and_last_bases{$name}/$number_of_tirs_found;
                     }
 
-                    # record all the data for this compbination of $i and $j and update maximum values
-                    $max_TIR_number = max($max_TIR_number, $number_of_tirs_found);
-                    $max_proportion_first_last_bases = max ($max_proportion_first_last_bases, $most_abundant_tir_seq);
-                    $max_TSD_number = max ($max_TSD_number, $tsds_found{"TA"}, $tsds_found{2}, $tsds_found{3}, $tsds_found{4}, $tsds_found{5}, $tsds_found{6}, $tsds_found{7}, $tsds_found{8}, $tsds_found{9}, $tsds_found{10});
-                    push @tsd_tir_combinations, "$i\t$j\t$number_of_tirs_found\t$most_abundant_tir_seq\t$tsds_found{\"TA\"}\t$tsds_found{2}\t$tsds_found{3}\t$tsds_found{4}\t$tsds_found{5}\t$tsds_found{6}\t$tsds_found{7}\t$tsds_found{8}\t$tsds_found{9}\t$tsds_found{10}";
+                    # record all the data for this combination of $i and $j and update maximum values accross different $i and $j's
+                    $max_TIR_number = max($max_TIR_number, $number_of_tirs_found); # assign highest of all the TIR proportions 
+                    $max_proportion_first_last_bases = max ($max_proportion_first_last_bases, $most_abundant_tir_proportion);
+                    # $max_TSD_number = max ($max_TSD_number, $tsds_found{"TA"}, $tsds_found{2}, $tsds_found{3}, $tsds_found{4}, $tsds_found{5}, $tsds_found{6}, $tsds_found{7}, $tsds_found{8}, $tsds_found{9}, $tsds_found{10});
+                    # push @tsd_tir_combinations, "$i\t$j\t$number_of_tirs_found\t$most_abundant_tir_proportion\t$tsds_found{\"TA\"}\t$tsds_found{2}\t$tsds_found{3}\t$tsds_found{4}\t$tsds_found{5}\t$tsds_found{6}\t$tsds_found{7}\t$tsds_found{8}\t$tsds_found{9}\t$tsds_found{10}";
                 }
             }
-
+exit;
             # go through the element and identify those candidate locations that pass the tests for TIR-TSD combinatations
             my @successful_candidates; # locations and tsd numbers of candidate locations that the analysis will continue with
             my %failed_candidates; # success codes of the failed candidate and number of candidates as value, used to report failure to the user 
