@@ -418,10 +418,13 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         # 2.2.2.1 Align the sequences
 #        my $aligned_sequences = File::Temp->new(UNLINK => 1, SUFFIX => '.maf' ); 
         my $aligned_sequences_file_name = "$ELEMENT_FOLDER/$element_name/$element_name.maf";
-        `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences_file_name`;
-        if ($?) { die "Error executing mafft, error code $?\n"}
+
+# changing this just for the 780 element
+#        `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences_file_name`;
+#        if ($?) { die "Error executing mafft, error code $?\n"}
+        $aligned_sequences_file_name = "/home/peter/Desktop/XP_042912780.1.maf";
         my $datestring = localtime();
-        print README "$datestring, Aligned extended BLAST sequences are in file $element_name.maf";
+        print README "$datestring, Aligned extended BLAST sequences are in file $element_name.maf\n";
         
         # 2.2.2.2 determine the highest percentage of agreement on a single nucleotide at each position
         # go through the alignment to do two things 1) exclude positions that are mostly gaps or "n", 2) record positions that have high agreement on a single nucleotide.
@@ -812,19 +815,30 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         }
 
 # need to see if the tsds_found script will work this way                      
-                        $tsds_found{"TA"} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, "TA");
-                        # $tsds_found{"TA"} += gettsd($seqrmg{$sequence_name}, $i, $j, "TA");
-                        # $tsds_found{2} += gettsd($seqrmg{$sequence_name}, $i, $j, 2);
-                        # $tsds_found{3} += gettsd($seqrmg{$sequence_name}, $i, $j, 3);
-                        # $tsds_found{4} += gettsd($seqrmg{$sequence_name}, $i, $j, 4);
-                        # $tsds_found{5} += gettsd($seqrmg{$sequence_name}, $i, $j, 5);
-                        # $tsds_found{6} += gettsd($seqrmg{$sequence_name}, $i, $j, 6);
-                        # $tsds_found{7} += gettsd($seqrmg{$sequence_name}, $i, $j, 7);
-                        # $tsds_found{8} += gettsd($seqrmg{$sequence_name}, $i, $j, 8);
-                        # $tsds_found{9} += gettsd($seqrmg{$sequence_name}, $i, $j, 9);
-                        # $tsds_found{10} += gettsd($seqrmg{$sequence_name}, $i, $j,10);
-                    }
-exit;
+                        $tsds_found{"TA"} += gettsd($seqrmg{$sequence_name}, $i, $j, "TA");
+                        $tsds_found{2} += gettsd($seqrmg{$sequence_name}, $i, $j, 2);
+                        $tsds_found{3} += gettsd($seqrmg{$sequence_name}, $i, $j, 3);
+                        $tsds_found{4} += gettsd($seqrmg{$sequence_name}, $i, $j, 4);
+                        $tsds_found{5} += gettsd($seqrmg{$sequence_name}, $i, $j, 5);
+                        $tsds_found{6} += gettsd($seqrmg{$sequence_name}, $i, $j, 6);
+                        $tsds_found{7} += gettsd($seqrmg{$sequence_name}, $i, $j, 7);
+                        $tsds_found{8} += gettsd($seqrmg{$sequence_name}, $i, $j, 8);
+                        $tsds_found{9} += gettsd($seqrmg{$sequence_name}, $i, $j, 9);
+                        $tsds_found{10} += gettsd($seqrmg{$sequence_name}, $i, $j,10);
+
+                        # $tsds_found{"TA"} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, "TA");
+                        # $tsds_found{2} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 2);
+                        # $tsds_found{3} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 3);
+                        # $tsds_found{4} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 4);
+                        # $tsds_found{5} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 5);
+                        # $tsds_found{6} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 6);
+                        # $tsds_found{7} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 7);
+                        # $tsds_found{8} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 8);
+                        # $tsds_found{9} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 9);
+                        # $tsds_found{10} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j},10);
+
+                    }                    
+
                     # for this combination of positions, what is the highest proportion of sequences that have a particular TIR (determined only by the first 3 bps.) 
                     my $most_abundant_tir_proportion=0;
                     foreach my $name (sort { $tir_first_and_last_bases{$a} <=> $tir_first_and_last_bases{$b} } keys %tir_first_and_last_bases) {
@@ -838,7 +852,7 @@ exit;
                     # push @tsd_tir_combinations, "$i\t$j\t$number_of_tirs_found\t$most_abundant_tir_proportion\t$tsds_found{\"TA\"}\t$tsds_found{2}\t$tsds_found{3}\t$tsds_found{4}\t$tsds_found{5}\t$tsds_found{6}\t$tsds_found{7}\t$tsds_found{8}\t$tsds_found{9}\t$tsds_found{10}";
                 }
             }
-exit;
+
             # go through the element and identify those candidate locations that pass the tests for TIR-TSD combinatations
             my @successful_candidates; # locations and tsd numbers of candidate locations that the analysis will continue with
             my %failed_candidates; # success codes of the failed candidate and number of candidates as value, used to report failure to the user 
