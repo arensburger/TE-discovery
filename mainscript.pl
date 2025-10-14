@@ -819,10 +819,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         }
 
 # need to see if the tsds_found script will work this way                      
-                         $tsds_found{"TA"} += gettsd($seqrmg{$sequence_name}, $ltrans+$i, $rtrans+$j, "TA");
-                         if (gettsd($seqrmg{$sequence_name}, $ltrans+$i, $rtrans+$j, "TA")) {
-                            #print "$sequence_name\n";
-                         }
+                        # $tsds_found{"TA"} += gettsd($seqrmg{$sequence_name}, $ltrans+$i, $rtrans+$j, "TA");
                         # $tsds_found{2} += gettsd($seqrmg{$sequence_name}, $i, $j, 2);
                         # $tsds_found{3} += gettsd($seqrmg{$sequence_name}, $i, $j, 3);
                         # $tsds_found{4} += gettsd($seqrmg{$sequence_name}, $i, $j, 4);
@@ -832,33 +829,19 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         # $tsds_found{8} += gettsd($seqrmg{$sequence_name}, $i, $j, 8);
                         # $tsds_found{9} += gettsd($seqrmg{$sequence_name}, $i, $j, 9);
                         # $tsds_found{10} += gettsd($seqrmg{$sequence_name}, $i, $j,10);
-
+# the TA number in the .tirtsd file seems too low
                         $tsds_found2{"TA"} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "TA");
-                        if (gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "TA")) {
-                           # print "$sequence_name\n";
-                         }
-                        # $tsds_found{2} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 2);
-                        # $tsds_found{3} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 3);
-                        # $tsds_found{4} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 4);
-                        # $tsds_found{5} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 5);
-                        # $tsds_found{6} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 6);
-                        # $tsds_found{7} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 7);
-                        # $tsds_found{8} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 8);
-                        # $tsds_found{9} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 9);
-                        # $tsds_found{10} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j},10);
+                        $tsds_found{2} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "2");
+                        $tsds_found{3} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "3");
+                        $tsds_found{4} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "4");
+                        $tsds_found{5} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "5");
+                        $tsds_found{6} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "6");
+                        $tsds_found{7} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "7");
+                        $tsds_found{8} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "8");
+                        $tsds_found{9} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "9");
+                        $tsds_found{10} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "10");
                     }                    
-my $ha = $ltrans+$i;
-my $ha2 = $rtrans+$j;
-my $ha3 = $left_highest_transition_position+$i;
-my $ha4 = $right_highest_transition_position+$j;
-my $ha5 = $tsds_found{"TA"};
-my $ha6 = $tsds_found2{"TA"};
-print "$ha, $ha2, $ha3, $ha4\t$ha5, $ha6\n";
- open (O, ">", "/home/peter/Desktop/seqrmg.maf") or die;
- foreach my $s (keys %aliseq) {
-     print O ">$s\n$seqrmg{$s}\n";
- }
- close O;
+
                     # for this combination of positions, what is the highest proportion of sequences that have a particular TIR (determined only by the first 3 bps.) 
                     my $most_abundant_tir_proportion=0;
                     foreach my $name (sort { $tir_first_and_last_bases{$a} <=> $tir_first_and_last_bases{$b} } keys %tir_first_and_last_bases) {
@@ -869,7 +852,9 @@ print "$ha, $ha2, $ha3, $ha4\t$ha5, $ha6\n";
                     $max_TIR_number = max($max_TIR_number, $number_of_tirs_found); # assign highest of all the TIR proportions 
                     $max_proportion_first_last_bases = max ($max_proportion_first_last_bases, $most_abundant_tir_proportion);
                     $max_TSD_number = max ($max_TSD_number, $tsds_found{"TA"}, $tsds_found{2}, $tsds_found{3}, $tsds_found{4}, $tsds_found{5}, $tsds_found{6}, $tsds_found{7}, $tsds_found{8}, $tsds_found{9}, $tsds_found{10});
-                    push @tsd_tir_combinations, "$i\t$j\t$number_of_tirs_found\t$most_abundant_tir_proportion\t$tsds_found{\"TA\"}\t$tsds_found{2}\t$tsds_found{3}\t$tsds_found{4}\t$tsds_found{5}\t$tsds_found{6}\t$tsds_found{7}\t$tsds_found{8}\t$tsds_found{9}\t$tsds_found{10}";
+                    my $lp = $left_highest_transition_position+$i;
+                    my $rp = $right_highest_transition_position+$j;
+                    push @tsd_tir_combinations, "$lp\t$rp\t$number_of_tirs_found\t$most_abundant_tir_proportion\t$tsds_found{\"TA\"}\t$tsds_found{2}\t$tsds_found{3}\t$tsds_found{4}\t$tsds_found{5}\t$tsds_found{6}\t$tsds_found{7}\t$tsds_found{8}\t$tsds_found{9}\t$tsds_found{10}";
                 }
             }
 
