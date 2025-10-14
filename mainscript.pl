@@ -800,14 +800,18 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             my $max_proportion_first_last_bases; # highest number of locations that start and end with the same bases
             my $max_TSD_number; # highest number of intact TSDs
             my @tsd_tir_combinations; # array of possible locations along with various information
-            for (my $i=$ltrans-$range; $i<=$ltrans+$range; $i++) {
-	            for (my $j=$rtrans-$range; $j<=$rtrans+$range; $j++) {
+            # for (my $i=$ltrans-$range; $i<=$ltrans+$range; $i++) {
+	        #     for (my $j=$rtrans-$range; $j<=$rtrans+$range; $j++) {
+            for (my $i=-$range; $i<=$range; $i++) {
+	            for (my $j=-$range; $j<=$range; $j++) {
+
 		            my $number_of_tirs_found=0; # nubmer of sequences that match the TIR criteria
                     my %tir_first_and_last_bases; # first and last set of bases of tir as key and abundance as value
                     my %tsds_found; # keys is TSD type "TA", "2", ... "10" and key is number of TSDs found
-                    foreach my $sequence_name (keys %seqrmg) {
-                        my ($tir1_sequence, $tir2_sequence) = gettir($seqrmg{$sequence_name}, $i, $j, $MIN_TIR_SIZE, $TIR_MISMATCHES); # figure if this sequences has a tir at these positions and if so, report first and last nucleotide
+                    my %tsds_found2; # keys is TSD type "TA", "2", ... "10" and key is number of TSDs found
 
+                    foreach my $sequence_name (keys %seqrmg) {
+                        my ($tir1_sequence, $tir2_sequence) = gettir($seqrmg{$sequence_name}, $ltrans+$i, $rtrans+$j, $MIN_TIR_SIZE, $TIR_MISMATCHES); # figure if this sequences has a tir at these positions and if so, report first and last nucleotide
                         if ($tir1_sequence) {
                             $number_of_tirs_found += 1;
                             my $bases = substr($tir1_sequence, 0, 3) . substr($tir2_sequence, -3, 3); # recording the first and last 3 bases 
@@ -815,18 +819,24 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         }
 
 # need to see if the tsds_found script will work this way                      
-                        $tsds_found{"TA"} += gettsd($seqrmg{$sequence_name}, $i, $j, "TA");
-                        $tsds_found{2} += gettsd($seqrmg{$sequence_name}, $i, $j, 2);
-                        $tsds_found{3} += gettsd($seqrmg{$sequence_name}, $i, $j, 3);
-                        $tsds_found{4} += gettsd($seqrmg{$sequence_name}, $i, $j, 4);
-                        $tsds_found{5} += gettsd($seqrmg{$sequence_name}, $i, $j, 5);
-                        $tsds_found{6} += gettsd($seqrmg{$sequence_name}, $i, $j, 6);
-                        $tsds_found{7} += gettsd($seqrmg{$sequence_name}, $i, $j, 7);
-                        $tsds_found{8} += gettsd($seqrmg{$sequence_name}, $i, $j, 8);
-                        $tsds_found{9} += gettsd($seqrmg{$sequence_name}, $i, $j, 9);
-                        $tsds_found{10} += gettsd($seqrmg{$sequence_name}, $i, $j,10);
+                         $tsds_found{"TA"} += gettsd($seqrmg{$sequence_name}, $ltrans+$i, $rtrans+$j, "TA");
+                         if (gettsd($seqrmg{$sequence_name}, $ltrans+$i, $rtrans+$j, "TA")) {
+                            #print "$sequence_name\n";
+                         }
+                        # $tsds_found{2} += gettsd($seqrmg{$sequence_name}, $i, $j, 2);
+                        # $tsds_found{3} += gettsd($seqrmg{$sequence_name}, $i, $j, 3);
+                        # $tsds_found{4} += gettsd($seqrmg{$sequence_name}, $i, $j, 4);
+                        # $tsds_found{5} += gettsd($seqrmg{$sequence_name}, $i, $j, 5);
+                        # $tsds_found{6} += gettsd($seqrmg{$sequence_name}, $i, $j, 6);
+                        # $tsds_found{7} += gettsd($seqrmg{$sequence_name}, $i, $j, 7);
+                        # $tsds_found{8} += gettsd($seqrmg{$sequence_name}, $i, $j, 8);
+                        # $tsds_found{9} += gettsd($seqrmg{$sequence_name}, $i, $j, 9);
+                        # $tsds_found{10} += gettsd($seqrmg{$sequence_name}, $i, $j,10);
 
-                        # $tsds_found{"TA"} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, "TA");
+                        $tsds_found2{"TA"} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "TA");
+                        if (gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "TA")) {
+                           # print "$sequence_name\n";
+                         }
                         # $tsds_found{2} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 2);
                         # $tsds_found{3} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 3);
                         # $tsds_found{4} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 4);
@@ -836,9 +846,19 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         # $tsds_found{8} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 8);
                         # $tsds_found{9} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j}, 9);
                         # $tsds_found{10} += gettsd($aliseq{$sequence_name}, $location_conversion{$i}, $location_conversion{$j},10);
-
                     }                    
-
+my $ha = $ltrans+$i;
+my $ha2 = $rtrans+$j;
+my $ha3 = $left_highest_transition_position+$i;
+my $ha4 = $right_highest_transition_position+$j;
+my $ha5 = $tsds_found{"TA"};
+my $ha6 = $tsds_found2{"TA"};
+print "$ha, $ha2, $ha3, $ha4\t$ha5, $ha6\n";
+ open (O, ">", "/home/peter/Desktop/seqrmg.maf") or die;
+ foreach my $s (keys %aliseq) {
+     print O ">$s\n$seqrmg{$s}\n";
+ }
+ close O;
                     # for this combination of positions, what is the highest proportion of sequences that have a particular TIR (determined only by the first 3 bps.) 
                     my $most_abundant_tir_proportion=0;
                     foreach my $name (sort { $tir_first_and_last_bases{$a} <=> $tir_first_and_last_bases{$b} } keys %tir_first_and_last_bases) {
@@ -848,8 +868,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     # record all the data for this combination of $i and $j and update maximum values accross different $i and $j's
                     $max_TIR_number = max($max_TIR_number, $number_of_tirs_found); # assign highest of all the TIR proportions 
                     $max_proportion_first_last_bases = max ($max_proportion_first_last_bases, $most_abundant_tir_proportion);
-                    # $max_TSD_number = max ($max_TSD_number, $tsds_found{"TA"}, $tsds_found{2}, $tsds_found{3}, $tsds_found{4}, $tsds_found{5}, $tsds_found{6}, $tsds_found{7}, $tsds_found{8}, $tsds_found{9}, $tsds_found{10});
-                    # push @tsd_tir_combinations, "$i\t$j\t$number_of_tirs_found\t$most_abundant_tir_proportion\t$tsds_found{\"TA\"}\t$tsds_found{2}\t$tsds_found{3}\t$tsds_found{4}\t$tsds_found{5}\t$tsds_found{6}\t$tsds_found{7}\t$tsds_found{8}\t$tsds_found{9}\t$tsds_found{10}";
+                    $max_TSD_number = max ($max_TSD_number, $tsds_found{"TA"}, $tsds_found{2}, $tsds_found{3}, $tsds_found{4}, $tsds_found{5}, $tsds_found{6}, $tsds_found{7}, $tsds_found{8}, $tsds_found{9}, $tsds_found{10});
+                    push @tsd_tir_combinations, "$i\t$j\t$number_of_tirs_found\t$most_abundant_tir_proportion\t$tsds_found{\"TA\"}\t$tsds_found{2}\t$tsds_found{3}\t$tsds_found{4}\t$tsds_found{5}\t$tsds_found{6}\t$tsds_found{7}\t$tsds_found{8}\t$tsds_found{9}\t$tsds_found{10}";
                 }
             }
 
@@ -866,7 +886,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 my $number_of_tirs = $d[2];
                 my $proportion_of_same_start_stop = $d[3];
                 my $number_tsds = max($d[4],$d[5],$d[6],$d[7],$d[8],$d[9],$d[10],$d[11],$d[12],$d[13]);
-
                 # test 1 are the number of sequences with TIR high enough?
                 if (($number_of_tirs/(keys %seqrmg)) >= $MIN_PROPORTION_SEQ_WITH_TIR) {
                     $min_prop_seq_wtir = 1;
@@ -1550,9 +1569,14 @@ sub gettsd {
 
     my $c1 = cleanup(substr($seq_left_side, -$TSD_length, $TSD_length));
 	my $c2 = cleanup(substr($seq_right_side, 0, $TSD_length));
-    
-    if (($type eq "TA") and ($c1 eq "ta") and ($c2 eq "ta")) {
-        return (1); # found a TA TSD
+
+    if ($type eq "TA") {
+        if (($c1 eq "ta") and ($c2 eq "ta")) {
+            return (1); # found a TA TSD
+        }
+        else {
+            return (0);
+        }
     }
     elsif (($type eq "2") and ($c1 and $c2) and ($c1 eq $c2)) { # check that both are equal and not 0, 0 means the sequence contained an "n" charcater
         if ($c1 eq "ta") { # this is to avoid duplication with the TA TSDs
