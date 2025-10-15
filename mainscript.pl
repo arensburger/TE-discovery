@@ -422,7 +422,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 # changing this just for the 780 element
 #        `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences_file_name`;
 #        if ($?) { die "Error executing mafft, error code $?\n"}
-        $aligned_sequences_file_name = "/home/peter/Desktop/XP_042912780.1.maf";
+        $aligned_sequences_file_name = "/home/peter/Desktop/XP_042908516.1.maf";
         my $datestring = localtime();
         print README "$datestring, Aligned extended BLAST sequences are in file $element_name.maf\n";
         
@@ -450,6 +450,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
             # decide if this position has too many N's or gaps
             my $number_of_sequences_in_alignment = keys %aliseq;
+ #           my $ha = $chars{"-"};
+            
             if ((($chars{"-"}/$number_of_sequences_in_alignment) > $MAX_GAP_N_AT_POSITION) or (($chars{"n"}/$number_of_sequences_in_alignment) > $MAX_GAP_N_AT_POSITION)){
                 $consensus_sequence .= "n";
             }
@@ -459,7 +461,10 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     push @agreement_proportion, 0;
                 }
                 else {
-                    push @agreement_proportion, ($chars{$most_abundant_character}/(keys %aliseq)); 
+
+                    #here I'm counting gaps a part of keys %aliseq, I wonder if I should remove gaps from the number here, I would need to have a counter for the number of gaps at each position
+#                    push @agreement_proportion, ($chars{$most_abundant_character}/(keys %aliseq));                   
+                    push @agreement_proportion, ($chars{$most_abundant_character}/((keys %aliseq) - $chars{"-"}));                   
                 }
                 $location_conversion{scalar @agreement_proportion} = $i+1; # update the convertion hash so the correct position can be recorded later
 
@@ -514,7 +519,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             }
         }
 
-#       print "transitions at $left_highest_transition_position and $right_highest_transition_position\n";
 #        print ">cons\n$consensus_sequence\n";
 #exit;
 
@@ -774,7 +778,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         my $ltrans; # position of the transition from "not the element" to the "element" on the left side of the alignment, using the numbering in %seqrmg
         my $rtrans; # position of the transition from "not the element" to the "element" on the right side of the alignment, using the numbering in %seqrmg
         if ($left_highest_transition_position and $right_highest_transition_position) { # only continue if a transition was found
-
             # populate %seqrmg with low agreement postions removed, using the previously determined $consensus_sequence as reference
             my $j; # counter of positions in %seqrmg
             for (my $i=0; $i < length $consensus_sequence; $i++) {
@@ -804,12 +807,10 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 	        #     for (my $j=$rtrans-$range; $j<=$rtrans+$range; $j++) {
             for (my $i=-$range; $i<=$range; $i++) {
 	            for (my $j=-$range; $j<=$range; $j++) {
-
 		            my $number_of_tirs_found=0; # nubmer of sequences that match the TIR criteria
                     my %tir_first_and_last_bases; # first and last set of bases of tir as key and abundance as value
                     my %tsds_found; # keys is TSD type "TA", "2", ... "10" and key is number of TSDs found
                     my %tsds_found2; # keys is TSD type "TA", "2", ... "10" and key is number of TSDs found
-
                     foreach my $sequence_name (keys %seqrmg) {
                         my ($tir1_sequence, $tir2_sequence) = gettir($seqrmg{$sequence_name}, $ltrans+$i, $rtrans+$j, $MIN_TIR_SIZE, $TIR_MISMATCHES); # figure if this sequences has a tir at these positions and if so, report first and last nucleotide
                         if ($tir1_sequence) {
@@ -818,19 +819,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                             $tir_first_and_last_bases{$bases} += 1;
                         }
 
-# need to see if the tsds_found script will work this way                      
-                        # $tsds_found{"TA"} += gettsd($seqrmg{$sequence_name}, $ltrans+$i, $rtrans+$j, "TA");
-                        # $tsds_found{2} += gettsd($seqrmg{$sequence_name}, $i, $j, 2);
-                        # $tsds_found{3} += gettsd($seqrmg{$sequence_name}, $i, $j, 3);
-                        # $tsds_found{4} += gettsd($seqrmg{$sequence_name}, $i, $j, 4);
-                        # $tsds_found{5} += gettsd($seqrmg{$sequence_name}, $i, $j, 5);
-                        # $tsds_found{6} += gettsd($seqrmg{$sequence_name}, $i, $j, 6);
-                        # $tsds_found{7} += gettsd($seqrmg{$sequence_name}, $i, $j, 7);
-                        # $tsds_found{8} += gettsd($seqrmg{$sequence_name}, $i, $j, 8);
-                        # $tsds_found{9} += gettsd($seqrmg{$sequence_name}, $i, $j, 9);
-                        # $tsds_found{10} += gettsd($seqrmg{$sequence_name}, $i, $j,10);
-# the TA number in the .tirtsd file seems too low
-                        $tsds_found2{"TA"} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "TA");
+                        $tsds_found{"TA"} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "TA");
                         $tsds_found{2} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "2");
                         $tsds_found{3} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "3");
                         $tsds_found{4} += gettsd($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j, "4");
