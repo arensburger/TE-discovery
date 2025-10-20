@@ -9,7 +9,6 @@ use File::Temp qw(tempfile);
 use List::UtilsBy qw(max_by);
 use List::Util qw(max);
 use Scalar::Util qw(looks_like_number);
-use Term::ANSIColor;
 
 ### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
@@ -453,6 +452,13 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             }
             
         }
+        # add the consensus sequence to the alignment
+        my $temp_consensus_file = File::Temp->new(UNLINK => 1); # hold the consensus sequence temporarily in this file
+        open (OUTPUT, ">", $temp_consensus_file) or die $!;
+        print OUTPUT ">consensus\n$consensus_sequence\n";
+        close OUTPUT;
+        `cat $aligned_sequences_file_name >> $temp_consensus_file`;
+        `mv $temp_consensus_file $aligned_sequences_file_name`;
 
         # 2.2.4 Find location with highest likelihood of being the transition. The methodology here is go through each position of the alignment and compare a
         # window of length $SEARCH_WINDOW_SIZE upstream of that position to another window of the same size downstream. For both windows determine if the alignment 
@@ -506,7 +512,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         if ($left_highest_transition_position and $right_highest_transition_position) { # only continue if a transition was found
             
             # populate %seqrmg with low agreement postions removed, using the previously determined $consensus_sequence as reference and identify the 
-            # position of the left and right transitions into the element, put those transitions into $seqrmg_ltrans and $seqrm_rtrans 
+            # position of the left and right transitions into the element, put those transitions into $seqrmg_ltrans and $seqrm_rtrans. Finally export the
+            # content of %seqrmg, it will be used in subsequent steps 
             my $j; # counter of positions in %seqrmg
             for (my $i=0; $i < length $consensus_sequence; $i++) {
                 unless ((substr $consensus_sequence, $i, 1) eq "n") {
@@ -720,9 +727,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
         $count++;
         my $review_elements = keys %files; # total number of elements to review
-        print color('bold blue');
         print "\nElement $element_name $count of $review_elements\n";
-        print color('reset');
 
         # Variables specific to this section
         my $TIR_b1; # left bound of TIR accepted by user
@@ -768,9 +773,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             my %alignment_sequences = fastatohash($files{$element_name}[1]); # load the existing alignment
 
             # Display the lines so the user can see what's available
-            print color('magenta');
             print "\nMENU 1\n";
-            print color('reset');
             print "0) Quit this element\n\n";
             print "#) code | TIR-boundaries, # sequences with TIRs, Mean TIR length | Number of TSDs, Selected TSD\n";
             my $i=1;
@@ -881,18 +884,25 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             }
             $pkey = ""; # reset the pressed key 
 
-            my $consensus_sequence; # this holds the consensus sequence and will be used to display the TIR sequence
             if ($menu1) { # only continue if the user has not elected to quit menu 1
                 # The TIRs and TSDs location have now been selected, next create an alignment to display these to the user  
+
+                # Find and record the conensus sequence, this will be necessary to properly display the TIR sequences
+                my $consensus_sequence;
+                foreach my $seq_name (keys %alignment_sequences) {
+                    if ($seq_name =~ /consensus/) { 
+                        $consensus_sequence = $alignment_sequences{$seq_name};
+                    }   
+                }
+                unless ($consensus_sequence) { die "ERROR: No conensus sequence found, need this to properly display the TIRs\n"}
+
                 my $temp_alignment_file = "/tmp/$element_name.fa"; # tried using perl temporary file system, but aliview will not open those
                 open (OUTPUT, ">", $temp_alignment_file) or die "Cannot create temporary alignment file $temp_alignment_file\n";
-
                 foreach my $seq_name (keys %alignment_sequences) {
                     if ($seq_name =~ /consensus/) { 
                         $consensus_sequence = $alignment_sequences{$seq_name};
                     }
                     else {# avoid the line with the consensus sequence
-                        print OUTPUT ">$seq_name\n";
                         ## left side sequences
                         my $left_whole_seq = substr($alignment_sequences{$seq_name}, 0, $TIR_b1);
                         $left_whole_seq =~ s/-//g; #remove gaps
@@ -903,8 +913,17 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                                 $left_whole_seq .= "s";
                             }
                         }
-                        my $left_tir_seq1 = substr($left_whole_seq, -$TSD_size-1, $TSD_size);
-                        my $left_tir_seq2 = substr($alignment_sequences{$seq_name}, $TIR_b1-1, $TIR_bp);
+                        my $left_tsd = substr($left_whole_seq, -$TSD_size-1, $TSD_size);
+                        # get the sequence of the TIR, ignoring positions with no consensus
+                        my $i=0;
+                        my $left_tir_seq;
+                        while ((length $left_tir_seq) < $TIR_bp) {
+                            unless ((substr $consensus_sequence, $TIR_b1-1+$i, 1) =~ /n/i) {
+                                $left_tir_seq .= substr($alignment_sequences{$seq_name}, $TIR_b1-1+$i, 1);
+                            }
+                            $i++;
+                            if ($i > length $alignment_sequences{$seq_name}) { die "ERROR: Cannot display TIR for sequence $seq_name\n"} # a reality check in case things go south
+                        }
 
                         ## right side sequences
                         my $right_whole_seq = substr($alignment_sequences{$seq_name}, $TIR_b2, -1);
@@ -916,12 +935,34 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                                 $right_whole_seq .= "s";
                             }
                         }
-                        my $right_tir_seq1 = substr($right_whole_seq, 0, $TSD_size);
-                        my $right_tir_seq2 = substr($alignment_sequences{$seq_name}, $TIR_b2-$TIR_bp, $TIR_bp);
+                        my $right_tsd = substr($right_whole_seq, 0, $TSD_size);
+                        my $i=0;
+                        my $right_tir_seq;
+                        while ((length $right_tir_seq) < $TIR_bp) {
+                            unless ((substr $consensus_sequence, $TIR_b2-$i, 1) =~ /n/i) {
+                                $right_tir_seq .= substr($alignment_sequences{$seq_name}, $TIR_b2-$i, 1);
+                            }
+                            $i++;
+                            if ($TIR_b2-$i < 0) { die "ERROR: Cannot display TIR for sequence $seq_name\n"} # a reality check in case things go south
+                        }
+                        $right_tir_seq = reverse $right_tir_seq; # necessary because sequences were added from the TIR end backward
 
-                        print OUTPUT $left_tir_seq1, "sss", $left_tir_seq2, "ssssssssssssssssssss", $right_tir_seq2, "sss", $right_tir_seq1, "\n";
+                        ## print the sequences after checking if there's anything to print
+                        my $test_tir1 = $left_tir_seq;
+                        my $test_tir2 = $right_tir_seq;
+                        $test_tir1 =~ s/-//g; # removing all the gaps to see if there's anything left after removal
+                        $test_tir2 =~ s/-//g;
+                        if (($test_tir1) or ($test_tir2)) { # only print if there's something in the TIR sequecences
+                            if ($left_tsd eq $right_tsd) { # if the TSDs are the same (and they are not just S's) then add it to the title
+                                unless (($left_tsd =~ /s/) or ($right_tsd =~ /s/)) {
+                                    $seq_name .= "-identicalTSDs";
+                                }
+                            }
+                            print OUTPUT ">$seq_name\n", $left_tsd, "sss", $left_tir_seq, "ssssssssssssssssssss", $right_tir_seq, "sss", $right_tsd, "\n";
+                        }
                     }
                 }
+                close OUTPUT;
 
                 # MENU 2 display the alignement to the user and ask for evaluation
                 `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
@@ -934,9 +975,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 my $TIR1_sequence = substr($consensus_sequence, ($TIR_b1-1), $TIR_size);
                 my $TIR2_sequence = substr($consensus_sequence, ($TIR_b2-$TIR_size), $TIR_size);
                 while ($menu2) { #keep displaying until the user ready to leave
-                    print color('green');
                     print "\nMENU 2 Select what to do with this element:\n";
-                    print color('reset');
                     print "0) Go back to the previous menu\n";
                     # figure out the sequences of the current TIRs
                     
@@ -947,10 +986,9 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         print "1) Update the README to say this as an element with TSDs of size $TSD_size and TIRs $TIR1_sequence and $TIR2_sequence\n";
                     }
                     print "2) Update the README to say this is not an element\n";
-                    print "3) Change the TSD size\n";
-                    print "4) Change the TIR sequence(s)\n";
-                    print "5) Make a note in the README file\n";
-                    print "6) Done reviewing this element\n";
+                    print "3) Make a note in the README file\n";
+                    print "4) Done reviewing this element\n";
+                    print "(NOTE: if the alignment needs to be changed, use 0 to go back to the previous menu and select the option to manually change the sequences)\n";
 
                     do { # read the user input until it's a number within range
                         print "Line selection: ";
@@ -979,37 +1017,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         $element_rejected = 1;
                     }
                     elsif ($pkey == 3) {
-                        my $pkey2;
-                        do { # read the user input until it's a number
-                            print "Enter TSD size or type \"TA\": ";
-                            $pkey2 = <STDIN>;
-                            chomp $pkey2;
-                            if (($pkey2 eq "TA") or ($pkey2 eq "ta")) {
-                                $TSD_type = "TA";
-                                $pkey2 = 2;
-                            }
-                            else {
-                                $TSD_type = ""; 
-                            }
-                        } until (looks_like_number($pkey2));
-                        $TSD_size = $pkey2;
-                    }
-                    elsif ($pkey == 4) {
-                        my $pkey2;
-                        print "Enter TIR1 sequence [$TIR1_sequence]: ";
-                        $pkey2 = <STDIN>;
-                        chomp $pkey2;
-                        if($pkey2) { # a new sequence has been entered
-                            $TIR1_sequence = $pkey2;
-                        }
-                        print "Enter TIR2 sequence [$TIR2_sequence]: ";
-                        $pkey2 = <STDIN>;
-                        chomp $pkey2;
-                        if($pkey2) { # a new sequence has been entered
-                            $TIR2_sequence = $pkey2;
-                        }
-                    }
-                    elsif ($pkey == 5) {
                         my $datestring = localtime(); 
                         if ($element_rejected) {
                             print "Edit the file $ANALYSIS_FOLDER/$element_name/README.txt starting with\n";
@@ -1021,7 +1028,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         print "Press enter when done: ";
                         <STDIN>;
                     }
-                    elsif ($pkey == 6) {
+                    elsif ($pkey == 4) {
                         $menu2 = 0;
                         $menu1 = 0;
                     }
