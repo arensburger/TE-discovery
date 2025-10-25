@@ -1102,7 +1102,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
     my %genome = fastatohash($INPUT_GENOME); # load the genome into memory
     foreach my $element_name (keys %file_tirs) { # go through the elements individually
-
         # open README file for writing
         open (README, ">>", "$ELEMENT_FOLDER/$element_name/README.txt") or die "ERROR: Could not open README file $ELEMENT_FOLDER/$element_name/README.txt\n";
       
@@ -1113,6 +1112,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             # also provinding the name of the chrososome and orientation so that the position of all the elements can recorded
             my $tir1_seq = lc($file_tirs{$element_name}[1]);
             my $tir2_seq = lc($file_tirs{$element_name}[2]);
+my $tir1_seq = "cagtggttcc";
+my $tir2_seq = "ggaaccactg";
             my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, "+"); # look for TIRs on the + strand
             %element_sequences = (%element_sequences, %fw_element_sequences); # add elements found on the + strand to %element_sequences
             unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
@@ -1145,7 +1146,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             my $tblastn_output = File::Temp->new(UNLINK => 1); 
             `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output -outfmt "6 sseqid evalue sstart send"`;
             if ($?) { die "ERROR executing tblastn: error code $?\n"}   
-  
+            
             # interpret the tblastn results, identify element sequences that have low e-value and report them in the same orientation 
             # as the protein 
             my %complete_elements_sequences; # this will hold the identified element sequences as value, and genomic location as value
@@ -1460,7 +1461,7 @@ sub create_consensus {
 
     # Input check, go through the hash elements and make sure they are all the same length (otherwise return a blank)
     unless (keys %sequences) {die "ERROR: no data supplied to subroutine create_consensus"} # check that data has be passed 
-    
+
     # go through the input alignment, check that lengths are all the same and parse the input names;
     foreach my $name (keys %sequences) {
 
@@ -1475,15 +1476,16 @@ sub create_consensus {
         }
 
         # parse the input names
-        if ($name =~ /^(\S+):(\d+)-(\d+)\((\S)\)/) {
+#        if ($name =~ /^(\S+):(\d+)-(\d+)\((\S)\)/) {
+        if ($name =~ /^(\S+):(\d+)-(\d+)/) {
             $alignment_sequence_names{$name}[0] = $1;
             $alignment_sequence_names{$name}[1] = $2;
             $alignment_sequence_names{$name}[2] = $3;
-            $alignment_sequence_names{$name}[3] = $4;
+ #           $alignment_sequence_names{$name}[3] = $4;
 
             #check that the start position is less than the end position, this is necessary for updating position locations later
             unless ($alignment_sequence_names{$name}[1] < $alignment_sequence_names{$name}[2]) {
-                die "ERROR: In subrouting create_consensus, the start position must be smaller than the end position, found was not the case for the sequence $name\n";
+                die "ERROR: In subroutine create_consensus, the start position must be smaller than the end position, found was not the case for the sequence $name\n";
             }
         }
         else {
