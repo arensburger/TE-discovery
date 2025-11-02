@@ -1054,9 +1054,11 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     
      ## update the analysis file with what is going on
     print ANALYSIS "Running STEP $step_number\n";
+
+    # making sure all the required information has been provided
     unless ($INPUT_GENOME and $INPUT_PROTEIN_SEQUENCES){
-        die "ERROR: for this step you need to provide two pieces of information:
-             1) a fasta formated genome file, using the -g parameter
+        die "ERROR: for this step you need to provide two pieces of information:\n
+             1) a fasta formated genome file, using the -g parameter\n
              2) the input protein file using the -p parameter\n";
     }
     print ANALYSIS "\tGenome: $INPUT_GENOME\n";
@@ -1106,14 +1108,19 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         open (README, ">>", "$ELEMENT_FOLDER/$element_name/README.txt") or die "ERROR: Could not open README file $ELEMENT_FOLDER/$element_name/README.txt\n";
       
         # identify the nucleotide sequences between TIR locations
+      
+        # get the TIR sequences
+        my $tir1_seq = lc($file_tirs{$element_name}[1]);
+        my $tir2_seq = lc($file_tirs{$element_name}[2]);
+        my 
+        if (($tir1_seq =~/n/) or ($tir2_seq =~ /n/)) { # if the tir sequences include "n" characters warn the user and stop processing
+            print STDERR "WARNING: The TIR sequences for element $element_name contain one or more n characters, this is a problem for finding this element in the genome. Ignoring this element.\n";
+        }
+
         my %element_sequences; # holds the genomic sequence with intact tirs, it's a hash to avoid duplications
         foreach my $chr (keys %genome) { # go through each genome subsection (calling it "chr" here)
             # identify all the element sequences in the forward orientation. Converting everything to lower case to avoid confusion with cases.
             # also provinding the name of the chrososome and orientation so that the position of all the elements can recorded
-            my $tir1_seq = lc($file_tirs{$element_name}[1]);
-            my $tir2_seq = lc($file_tirs{$element_name}[2]);
-my $tir1_seq = "cagtggttcc";
-my $tir2_seq = "ggaaccactg";
             my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, "+"); # look for TIRs on the + strand
             %element_sequences = (%element_sequences, %fw_element_sequences); # add elements found on the + strand to %element_sequences
             unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
