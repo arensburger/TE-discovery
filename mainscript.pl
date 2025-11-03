@@ -1190,6 +1190,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     # write sequences to the alignent input file
                     open (ALIINPUT, ">", $alignment_input_filename) or die "$!";
                     foreach my $header (keys %complete_elements_sequences) {
+## update here to add something to the header stating the the TSDs are intact or not
                         print ALIINPUT ">$header\n$complete_elements_sequences{$header}\n";
                     }
                     close (ALIINPUT);
@@ -1197,20 +1198,20 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     # run the alignment and convert result into a hash
                     `mafft $alignment_input_filename > $alignment_output_filename`;
                     if ($?) { die "ERROR executing mafft: error code $?\n"}  
-                    my ($consensus_sequence, %consensus_alignment) = create_consensus($CONSENSUS_REMOVAL_THRESHOLD, $CONSENSUS_LEVEL, fastatohash($alignment_output_filename));
+#                    my ($consensus_sequence, %consensus_alignment) = create_consensus($CONSENSUS_REMOVAL_THRESHOLD, $CONSENSUS_LEVEL, fastatohash($alignment_output_filename));
 
                     # report results
                     my $alignment_file_output_name = "$element_name" . "_complete-elements-alignment.fa";
                     `cp $alignment_output_filename $ELEMENT_FOLDER/$element_name/$alignment_file_output_name`;
                     if ($?) { die "ERROR using cp: error code $?\n"}  
-                    my $consensus_file_name = "$element_name" . "_consensus.fa";
-                    open (OUTPUT, ">", "$ELEMENT_FOLDER/$element_name/$consensus_file_name") or die "$!";
-                    print OUTPUT ">consensus-$element_name\n$consensus_sequence\n";
+#                    my $consensus_file_name = "$element_name" . "_consensus.fa";
+#                    open (OUTPUT, ">", "$ELEMENT_FOLDER/$element_name/$consensus_file_name") or die "$!";
+#                    print OUTPUT ">consensus-$element_name\n$consensus_sequence\n";
 
                     my $datestring = localtime(); 
-                    print README "$datestring, a consensus sequence of nearly-complete elements was created.\n";
+#                    print README "$datestring, a consensus sequence of nearly-complete elements was created.\n";
                     print README "$datestring, File $alignment_file_output_name contains the alignment of nearly-complete elements\n";
-                    print README "$datestring, File $consensus_file_name contains the consensus of nearly-complete elements\n"
+#                    print README "$datestring, File $consensus_file_name contains the consensus of nearly-complete elements\n"
                 }
                 else {
                     my $datestring = localtime(); 
