@@ -1112,122 +1112,125 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         # get the TIR sequences
         my $tir1_seq = lc($file_tirs{$element_name}[1]);
         my $tir2_seq = lc($file_tirs{$element_name}[2]);
-        my 
+        my $TIRs_set = 1; # boolean, set to 1 if TIR sequence are ok, or zero if not
         if (($tir1_seq =~/n/) or ($tir2_seq =~ /n/)) { # if the tir sequences include "n" characters warn the user and stop processing
             print STDERR "WARNING: The TIR sequences for element $element_name contain one or more n characters, this is a problem for finding this element in the genome. Ignoring this element.\n";
+            $TIRs_set = 0;
         }
 
-        my %element_sequences; # holds the genomic sequence with intact tirs, it's a hash to avoid duplications
-        foreach my $chr (keys %genome) { # go through each genome subsection (calling it "chr" here)
-            # identify all the element sequences in the forward orientation. Converting everything to lower case to avoid confusion with cases.
-            # also provinding the name of the chrososome and orientation so that the position of all the elements can recorded
-            my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, "+"); # look for TIRs on the + strand
-            %element_sequences = (%element_sequences, %fw_element_sequences); # add elements found on the + strand to %element_sequences
-            unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
-                my %rc_element_sequences = identify_element_sequence(lc($genome{$chr}), lc($file_tirs{$element_name}[1]), lc($file_tirs{$element_name}[2]), $MAX_ELEMENT_SIZE, $chr, "-");
-                %element_sequences = (%element_sequences, %rc_element_sequences); # add any new elements to the hash %element_sequences
-            }
-        }  
-
-        # Continue the analysis if complete elements have been found
-        if (keys %element_sequences) { 
-
-            # make a blast database using the file that contains the nucleotide sequences of the element
-            my $database_input_file = File::Temp->new(UNLINK => 1); 
-            open (OUTPUT, ">", $database_input_file) or die "$!";
-            foreach my $seq (keys %element_sequences) {
-                print OUTPUT ">$seq\n$element_sequences{$seq}\n";
-            }   
-            close OUTPUT;
-            my $tblastn_database_name = File::Temp->new(UNLINK => 1); # file name for the tblastn database name
-            `makeblastdb -in $database_input_file -dbtype nucl -out $tblastn_database_name`;
-            if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
-
-            # make a file with the sequence of the original protein used to find the the current element
-            my $protein_file = File::Temp->new(UNLINK => 1);
-            open (OUTPUT, ">", $protein_file) or die "$!";
-            print OUTPUT ">protein\n$proteins{$element_name}\n";
-            close OUTPUT;
-
-            # run tblastn
-            my $tblastn_output = File::Temp->new(UNLINK => 1); 
-            `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output -outfmt "6 sseqid evalue sstart send"`;
-            if ($?) { die "ERROR executing tblastn: error code $?\n"}   
-            
-            # interpret the tblastn results, identify element sequences that have low e-value and report them in the same orientation 
-            # as the protein 
-            my %complete_elements_sequences; # this will hold the identified element sequences as value, and genomic location as value
-            open (INPUT, $tblastn_output) or die "$!";           
-            while (my $line = <INPUT>) {
-                my @data = split " ", $line;
-                if ($data[1] < $PROTEIN_TBLASTN_CUTOFF) { # only continue if tblastn E value is low enough
-                    unless (exists $element_sequences{$data[0]}) { die "ERROR: Cannot find element $data[0]\n" } # a check to make sure the elemnent has been recorded
-                    # check the orientation of the element sequence compared to the protein, report all sequences in the same
-                    # orientation as the protein. Specifically test if the subject start position is lower than the end position or not
-                    # to determine orientation.
-                    if ($data[2] < $data[3]) {
-                        $complete_elements_sequences{$data[0]} = $element_sequences{$data[0]};
-                    }
-                    else { # this element in on the other strand so change the orientation and reverse order of the positions on the location name
-                        if ($data[0] =~ /(\S+):(\d+)-(\d+)/) {
-                            my $updated_genomic_location = "$1:$3-$2";
-                            $complete_elements_sequences{$updated_genomic_location} = rc($element_sequences{$data[0]});
-                        }
-                        else {
-                            die "ERROR: Genomic location $data[0] could not be parsed $!";
-                        }
-                    }  
+        if ($TIRs_set) { # only continue if the TIR sequence are ok
+            my %element_sequences; # holds the genomic sequence with intact tirs, it's a hash to avoid duplications
+            foreach my $chr (keys %genome) { # go through each genome subsection (calling it "chr" here)
+                # identify all the element sequences in the forward orientation. Converting everything to lower case to avoid confusion with cases.
+                # also provinding the name of the chrososome and orientation so that the position of all the elements can recorded
+                my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, "+"); # look for TIRs on the + strand
+                %element_sequences = (%element_sequences, %fw_element_sequences); # add elements found on the + strand to %element_sequences
+                unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
+                    my %rc_element_sequences = identify_element_sequence(lc($genome{$chr}), lc($file_tirs{$element_name}[1]), lc($file_tirs{$element_name}[2]), $MAX_ELEMENT_SIZE, $chr, "-");
+                    %element_sequences = (%element_sequences, %rc_element_sequences); # add any new elements to the hash %element_sequences
                 }
-            }   
+            }  
 
-            # align the sequences and create a consensus sequence
-            if (%complete_elements_sequences) { # only make the consensus if complete elements were found
-                my $alignment_input_filename = File::Temp->new(UNLINK => 1);    # alignement program input and output files
-                my $alignment_output_filename = File::Temp->new(UNLINK => 1); 
+            # Continue the analysis if complete elements have been found
+            if (keys %element_sequences) { 
 
-                # write sequences to the alignent input file
-                open (ALIINPUT, ">", $alignment_input_filename) or die "$!";
-                foreach my $header (keys %complete_elements_sequences) {
-                    print ALIINPUT ">$header\n$complete_elements_sequences{$header}\n";
-                }
-                close (ALIINPUT);
+                # make a blast database using the file that contains the nucleotide sequences of the element
+                my $database_input_file = File::Temp->new(UNLINK => 1); 
+                open (OUTPUT, ">", $database_input_file) or die "$!";
+                foreach my $seq (keys %element_sequences) {
+                    print OUTPUT ">$seq\n$element_sequences{$seq}\n";
+                }   
+                close OUTPUT;
+                my $tblastn_database_name = File::Temp->new(UNLINK => 1); # file name for the tblastn database name
+                `makeblastdb -in $database_input_file -dbtype nucl -out $tblastn_database_name`;
+                if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
+
+                # make a file with the sequence of the original protein used to find the the current element
+                my $protein_file = File::Temp->new(UNLINK => 1);
+                open (OUTPUT, ">", $protein_file) or die "$!";
+                print OUTPUT ">protein\n$proteins{$element_name}\n";
+                close OUTPUT;
+
+                # run tblastn
+                my $tblastn_output = File::Temp->new(UNLINK => 1); 
+                `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output -outfmt "6 sseqid evalue sstart send"`;
+                if ($?) { die "ERROR executing tblastn: error code $?\n"}   
                 
-                # run the alignment and convert result into a hash
-                `mafft $alignment_input_filename > $alignment_output_filename`;
-                if ($?) { die "ERROR executing mafft: error code $?\n"}  
-                my ($consensus_sequence, %consensus_alignment) = create_consensus($CONSENSUS_REMOVAL_THRESHOLD, $CONSENSUS_LEVEL, fastatohash($alignment_output_filename));
+                # interpret the tblastn results, identify element sequences that have low e-value and report them in the same orientation 
+                # as the protein 
+                my %complete_elements_sequences; # this will hold the identified element sequences as value, and genomic location as value
+                open (INPUT, $tblastn_output) or die "$!";           
+                while (my $line = <INPUT>) {
+                    my @data = split " ", $line;
+                    if ($data[1] < $PROTEIN_TBLASTN_CUTOFF) { # only continue if tblastn E value is low enough
+                        unless (exists $element_sequences{$data[0]}) { die "ERROR: Cannot find element $data[0]\n" } # a check to make sure the elemnent has been recorded
+                        # check the orientation of the element sequence compared to the protein, report all sequences in the same
+                        # orientation as the protein. Specifically test if the subject start position is lower than the end position or not
+                        # to determine orientation.
+                        if ($data[2] < $data[3]) {
+                            $complete_elements_sequences{$data[0]} = $element_sequences{$data[0]};
+                        }
+                        else { # this element in on the other strand so change the orientation and reverse order of the positions on the location name
+                            if ($data[0] =~ /(\S+):(\d+)-(\d+)/) {
+                                my $updated_genomic_location = "$1:$3-$2";
+                                $complete_elements_sequences{$updated_genomic_location} = rc($element_sequences{$data[0]});
+                            }
+                            else {
+                                die "ERROR: Genomic location $data[0] could not be parsed $!";
+                            }
+                        }  
+                    }
+                }   
 
-                # report results
-                my $alignment_file_output_name = "$element_name" . "_complete-elements-alignment.fa";
-                `cp $alignment_output_filename $ELEMENT_FOLDER/$element_name/$alignment_file_output_name`;
-                if ($?) { die "ERROR using cp: error code $?\n"}  
-                my $consensus_file_name = "$element_name" . "_consensus.fa";
-                open (OUTPUT, ">", "$ELEMENT_FOLDER/$element_name/$consensus_file_name") or die "$!";
-                print OUTPUT ">consensus-$element_name\n$consensus_sequence\n";
+                # align the sequences and create a consensus sequence
+                if (%complete_elements_sequences) { # only make the consensus if complete elements were found
+                    my $alignment_input_filename = File::Temp->new(UNLINK => 1);    # alignement program input and output files
+                    my $alignment_output_filename = File::Temp->new(UNLINK => 1); 
 
-                my $datestring = localtime(); 
-                print README "$datestring, a consensus sequence of nearly-complete elements was created.\n";
-                print README "$datestring, File $alignment_file_output_name contains the alignment of nearly-complete elements\n";
-                print README "$datestring, File $consensus_file_name contains the consensus of nearly-complete elements\n"
+                    # write sequences to the alignent input file
+                    open (ALIINPUT, ">", $alignment_input_filename) or die "$!";
+                    foreach my $header (keys %complete_elements_sequences) {
+                        print ALIINPUT ">$header\n$complete_elements_sequences{$header}\n";
+                    }
+                    close (ALIINPUT);
+                    
+                    # run the alignment and convert result into a hash
+                    `mafft $alignment_input_filename > $alignment_output_filename`;
+                    if ($?) { die "ERROR executing mafft: error code $?\n"}  
+                    my ($consensus_sequence, %consensus_alignment) = create_consensus($CONSENSUS_REMOVAL_THRESHOLD, $CONSENSUS_LEVEL, fastatohash($alignment_output_filename));
+
+                    # report results
+                    my $alignment_file_output_name = "$element_name" . "_complete-elements-alignment.fa";
+                    `cp $alignment_output_filename $ELEMENT_FOLDER/$element_name/$alignment_file_output_name`;
+                    if ($?) { die "ERROR using cp: error code $?\n"}  
+                    my $consensus_file_name = "$element_name" . "_consensus.fa";
+                    open (OUTPUT, ">", "$ELEMENT_FOLDER/$element_name/$consensus_file_name") or die "$!";
+                    print OUTPUT ">consensus-$element_name\n$consensus_sequence\n";
+
+                    my $datestring = localtime(); 
+                    print README "$datestring, a consensus sequence of nearly-complete elements was created.\n";
+                    print README "$datestring, File $alignment_file_output_name contains the alignment of nearly-complete elements\n";
+                    print README "$datestring, File $consensus_file_name contains the consensus of nearly-complete elements\n"
+                }
+                else {
+                    my $datestring = localtime(); 
+                    print README "$datestring, in STEP $step_number, while TIRs were found no sequence matched the intial protein sequence\n";
+                    print REJECT "$datestring\t$element_name\tSTEP $step_number\tNo matches to initial protein sequence with tblastn\n";
+                    `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+                    if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
+                }
             }
             else {
                 my $datestring = localtime(); 
-                print README "$datestring, in STEP $step_number, while TIRs were found no sequence matched the intial protein sequence\n";
-                print REJECT "$datestring\t$element_name\tSTEP $step_number\tNo matches to initial protein sequence with tblastn\n";
+                print README "$datestring, No genomic sequences with appropriately positioned TIRs were identified in STEP $step_number\n";
+                print REJECT "$datestring\t$element_name\tSTEP $step_number\tNo genomic sequences with appropriately positioned TIRs found\n";
                 `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
                 if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
             }
-        }
-        else {
-            my $datestring = localtime(); 
-            print README "$datestring, No genomic sequences with appropriately positioned TIRs were identified in STEP $step_number\n";
-            print REJECT "$datestring\t$element_name\tSTEP $step_number\tNo genomic sequences with appropriately positioned TIRs found\n";
-            `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
-            if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
-        }
 
-        close README;
-        print STDERR "done with $element_name\n";
+            close README;
+            print STDERR "done with $element_name\n";
+        }
     }
 }
 close ANALYSIS;
