@@ -1191,6 +1191,19 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     open (ALIINPUT, ">", $alignment_input_filename) or die "$!";
                     foreach my $header (keys %complete_elements_sequences) {
 ## update here to add something to the header stating the the TSDs are intact or not
+                        # determine if the TSDs are the same or not for these headers, do this by 1) determine
+                        # the length of the TSD, 2) use bedtools to extract those from the genome, 3) compare them
+                        
+                        # 1) figure out the length of the current tsd, storred in $file_tirs{$element_name}[0]
+                        my $tsd_length = $file_tirs{$element_name}[0]
+                        if ($tsd_length eq "ta") {
+                            $tsd_length = 2;
+                        }
+
+                        # 2) run bedtools
+
+
+
                         print ALIINPUT ">$header\n$complete_elements_sequences{$header}\n";
                     }
                     close (ALIINPUT);
