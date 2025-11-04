@@ -279,7 +279,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 ### CONSTANTS applicable only for STEP 2
 my $BLAST_EXTEND = 2000; # IDENTIFYING PROTEINS, number of bp to extend on each side of the blast hit
 my $MAX_SEQUENCE_NUMBER = 100; # ALIGNING SEQUENCES maximum number of sequences to consider, to save time
-my $CONSLEVEL=0.60; # MAKING CONSENSUS OF SEQUENCES sequence consensus levebedtoolsl for consensus
+my $CONSLEVEL=0.60; # MAKING CONSENSUS OF SEQUENCES sequence consensus level for consensus
 my $MIN_TIR_SIZE = 10; # IDENTIFYING TIR-TSDS smallest allowable size for the TIR
 my $TIR_MISMATCHES = 2; # IDENTIFYING TIR-TSDS maximum number of mismatches allowed between two TIRs
 my $MIN_PROPORTION_SEQ_WITH_TIR=0.25; #IDENTIFYING TIRs minimum proportion of total elements for a sequence that must contain proper TIRs to be considered a candidate
@@ -1194,13 +1194,14 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         # determine if the TSDs are the same or not for these headers, do this by 1) determine
                         # the length of the TSD, 2) use bedtools to extract those from the genome, 3) compare them
                         
-                        # 1) figure out the length of the current tsd, storred in $file_tirs{$element_name}[0]
+                        # 1) figure out the length of the current tsd, stored in $file_tirs{$element_name}[0]
                         my $tsd_length = $file_tirs{$element_name}[0]
                         if ($tsd_length eq "ta") {
                             $tsd_length = 2;
                         }
 
                         # 2) run bedtools
+                        #`bedtools getfasta -fi $INPUT_GENOME -fo $extended_fasta_name -bed $slopfile2 -s`;
 
 
 
