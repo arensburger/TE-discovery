@@ -1078,9 +1078,13 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 open (INPUT, "$ELEMENT_FOLDER/$_/README.txt") or die "ERROR: Cannot open file $!";
                 while (my $line = <INPUT>) {
                     if ($line =~ /This\sis\san\selement,\sTSD\s(\S+),\sTIRs\s(\S+)\sand\s(\S+)/) {
-                        $file_tirs{$_}[0] = $1; # TSD size and type
+                        $file_tirs{$_}[0] = $1; # TSD size 
                         $file_tirs{$_}[1] = $2; # first TIR sequence
                         $file_tirs{$_}[2] = $3; # second TIR sequence
+                        # adjust the size if the TSD is TA
+                        if (lc($file_tirs{$_}[0]) eq "ta") {
+                            $file_tirs{$_}[0] = 2;
+                        }
                     }
                 }
                 close INPUT; 
@@ -1119,14 +1123,14 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         }
 
         if ($TIRs_set) { # only continue if the TIR sequence are ok
-            my %element_sequences; # holds the genomic sequence with intact tirs, it's a hash to avoid duplications
+            my %element_sequences; # holds the genomic sequence with intact tirs as well as tsd sequences, it's a hash to avoid duplications
             foreach my $chr (keys %genome) { # go through each genome subsection (calling it "chr" here)
-                # identify all the element sequences in the forward orientation. Converting everything to lower case to avoid confusion with cases.
-                # also provinding the name of the chrososome and orientation so that the position of all the elements can recorded
-                my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, "+"); # look for TIRs on the + strand
+                # Identify all the element sequences (including TSDs) in the forward orientation. Converting everything to lower case to avoid confusion with cases.
+                # Also providing the name of the chrososome and orientation so that the position of all the elements can recorded.
+                my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $file_tirs{$element_name}[0], "+"); # look for TIRs on the + strand
                 %element_sequences = (%element_sequences, %fw_element_sequences); # add elements found on the + strand to %element_sequences
                 unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
-                    my %rc_element_sequences = identify_element_sequence(lc($genome{$chr}), lc($file_tirs{$element_name}[1]), lc($file_tirs{$element_name}[2]), $MAX_ELEMENT_SIZE, $chr, "-");
+                    my %rc_element_sequences = identify_element_sequence(lc($genome{$chr}), lc($file_tirs{$element_name}[1]), lc($file_tirs{$element_name}[2]), $MAX_ELEMENT_SIZE, $chr, $file_tirs{$element_name}[0], "-");
                     %element_sequences = (%element_sequences, %rc_element_sequences); # add any new elements to the hash %element_sequences
                 }
             }  
@@ -1139,8 +1143,10 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 open (OUTPUT, ">", $database_input_file) or die "$!";
                 foreach my $seq (keys %element_sequences) {
                     print OUTPUT ">$seq\n$element_sequences{$seq}\n";
+                    print ">$seq\n$element_sequences{$seq}\n";
                 }   
                 close OUTPUT;
+
                 my $tblastn_database_name = File::Temp->new(UNLINK => 1); # file name for the tblastn database name
                 `makeblastdb -in $database_input_file -dbtype nucl -out $tblastn_database_name`;
                 if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
@@ -1182,31 +1188,22 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     }
                 }   
 
-                # align the sequences and create a consensus sequence
-                if (%complete_elements_sequences) { # only make the consensus if complete elements were found
+                # align the sequences 
+                if (%complete_elements_sequences) { # only continue if complete elements were found
                     my $alignment_input_filename = File::Temp->new(UNLINK => 1);    # alignement program input and output files
                     my $alignment_output_filename = File::Temp->new(UNLINK => 1); 
 
-                    # write sequences to the alignent input file
+                    # write sequences to the alignent input file, minus the TSDs
                     open (ALIINPUT, ">", $alignment_input_filename) or die "$!";
                     foreach my $header (keys %complete_elements_sequences) {
-## update here to add something to the header stating the the TSDs are intact or not
                         # determine if the TSDs are the same or not for these headers, do this by 1) determine
                         # the length of the TSD, 2) use bedtools to extract those from the genome, 3) compare them
-                        
-                        # 1) figure out the length of the current tsd, stored in $file_tirs{$element_name}[0]
-                        my $tsd_length = $file_tirs{$element_name}[0]
-                        if ($tsd_length eq "ta") {
-                            $tsd_length = 2;
-                        }
 
-                        # 2) run bedtools
-                        #`bedtools getfasta -fi $INPUT_GENOME -fo $extended_fasta_name -bed $slopfile2 -s`;
-
-
-
-                        print ALIINPUT ">$header\n$complete_elements_sequences{$header}\n";
+# modify the header to indicate if the TIRs are the same                        
+                        my $element_sequence = substr($complete_elements_sequences{$header}, $file_tirs{$element_name}[0], length($complete_elements_sequences{$header})-(2*$file_tirs{$element_name}[0]));                       
+                        print ALIINPUT ">$header\n$element_sequence\n";
                     }
+
                     close (ALIINPUT);
                     
                     # run the alignment and convert result into a hash
@@ -1430,7 +1427,7 @@ sub rc {
 
 # identify element sequences
 sub identify_element_sequence {
-    my ($chr_seq, $tir1, $tir2, $maximum_size, $chromosome_name, $orientation) = @_; # takes as input the chromosome sequence, the TIR sequences,
+    my ($chr_seq, $tir1, $tir2, $maximum_size, $chromosome_name, $tsd_length, $orientation) = @_; # takes as input the chromosome sequence, the TIR sequences,
                                                                                      # the maximum element size of the element, the chrosome name and orienation of the input sequence
     my @tir1; # location of all TIR1 sequence
     my @tir2; # location of all TIR2 sequence 
@@ -1451,23 +1448,23 @@ sub identify_element_sequence {
     while ($chr_seq =~ m/$tir2/g) {
         push @tir2, pos($chr_seq);
     }
-    # identify any pairs that are in the correct orientation and not too far from on another
+    # identify any pairs that are in the correct orientation and not too far from one another
     for (my $i=0; $i<scalar @tir1; $i++) {
         for (my $j=0; $j<scalar @tir2; $j++) {
-            my $size = $tir2[$j] - $tir1[$i];
+            my $size = $tir2[$j] - $tir1[$i] + $tsd_length + $tsd_length;
             if (($tir1[$i] < $tir2[$j]) and ($size < $maximum_size)){
                 my $b1; # boundary of the element on the chromosome
                 my $b2; # boundary of the element on the chromosome
                 if ($orientation eq "+") {
-                    $b1 = $tir1[$i]+1; 
-                    $b2 = $tir2[$j];
+                    $b1 = $tir1[$i]+1-$tsd_length; 
+                    $b2 = $tir2[$j]+$tsd_length;
                 }
                 else {
-                    $b2 = $tir1[$i]+1;
-                    $b1 = $tir2[$j];
+                    $b2 = $tir1[$i]+1-$tsd_length;
+                    $b1 = $tir2[$j]+$tsd_length;
                 }
                 my $location_name = "$chromosome_name:$b1-$b2"; 
-                $nucleotide_sequences{$location_name} = substr($chr_seq, $tir1[$i], $size);
+                $nucleotide_sequences{$location_name} = substr($chr_seq, $tir1[$i]-$tsd_length, $size);
             }
         }
     }
