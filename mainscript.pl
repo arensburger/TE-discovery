@@ -915,6 +915,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         }
                         my $left_tsd = substr($left_whole_seq, -$TSD_size-1, $TSD_size);
                         # get the sequence of the TIR, ignoring positions with no consensus
+# figure out why TIRs still have n's
                         my $i=0;
                         my $left_tir_seq;
                         while ((length $left_tir_seq) < $TIR_bp) {
