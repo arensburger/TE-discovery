@@ -897,6 +897,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 unless ($consensus_sequence) { die "ERROR: No conensus sequence found, need this to properly display the TIRs\n"}
 
                 my $temp_alignment_file = "/tmp/$element_name.fa"; # tried using perl temporary file system, but aliview will not open those
+                my %TIR_sequences; # element name as key and [0] left TIR sequences displayed [1] right TIR sequences displayed. This will be used in the next menus to display TIR sequences
                 open (OUTPUT, ">", $temp_alignment_file) or die "Cannot create temporary alignment file $temp_alignment_file\n";
                 foreach my $seq_name (keys %alignment_sequences) {
                     if ($seq_name =~ /consensus/) { 
@@ -915,7 +916,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                         }
                         my $left_tsd = substr($left_whole_seq, -$TSD_size-1, $TSD_size);
                         # get the sequence of the TIR, ignoring positions with no consensus
-# figure out why TIRs still have n's
                         my $i=0;
                         my $left_tir_seq;
                         while ((length $left_tir_seq) < $TIR_bp) {
@@ -960,6 +960,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                                 }
                             }
                             print OUTPUT ">$seq_name\n", $left_tsd, "sss", $left_tir_seq, "ssssssssssssssssssss", $right_tir_seq, "sss", $right_tsd, "\n";
+                            $TIR_sequences{$seq_name}[0] = $left_tir_seq; # store the sequences for MENU2
+                            $TIR_sequences{$seq_name}[1] = $right_tir_seq; # store the sequences for MENU2
                         }
                     }
                 }
@@ -973,19 +975,39 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 my $menu2 = 1; # boolean, set to 1 until the user is done with menu 2
                 my $element_rejected = 0; # boolean, set to 0 unless option "this is not an element selected", used to know which README to edit
 
-                my $TIR1_sequence = substr($consensus_sequence, ($TIR_b1-1), $TIR_size);
-                my $TIR2_sequence = substr($consensus_sequence, ($TIR_b2-$TIR_size), $TIR_size);
+                # figure out the TIR sequences
+                # don't use the consensus sequence for this, because that contains n characters
+                my $TIR1_sequence;
+                my $TIR2_sequence;
+                for (my $i=0; $i <$TIR_size; $i++) {
+                    my %left_char_abundance; # holds the character as key and abundance as value
+                    my %right_char_abundance;
+                    foreach my $seqname (keys %TIR_sequences) {
+                        my $left_character = substr($TIR_sequences{$seqname}[0], $i, 1); # current left character
+                        my $right_character = substr($TIR_sequences{$seqname}[1], length($TIR_sequences{$seqname}[1])-$TIR_size+$i, 1); # current right character
+                        unless ($left_character eq "-") {
+                            $left_char_abundance{$left_character} += 1;
+                        }
+                        unless ($right_character eq "-") {
+                            $right_char_abundance{$right_character} += 1;
+                        }
+                    }
+                    $TIR1_sequence .= max_by { $left_char_abundance{$_} } keys %left_char_abundance;
+                    $TIR2_sequence .= max_by { $right_char_abundance{$_} } keys %right_char_abundance;
+                }
+
                 while ($menu2) { #keep displaying until the user ready to leave
                     print "\nMENU 2 Select what to do with this element:\n";
                     print "0) Go back to the previous menu\n";
-                    # figure out the sequences of the current TIRs
-                    
+
+                    # menu item 1, the element is complete                    
                     if ($TSD_type eq "TA") {
                         print "1) Update the README to say this is an element with TSDs of type TA and TIRs $TIR1_sequence and $TIR2_sequence\n";
                     }
                     else {
                         print "1) Update the README to say this as an element with TSDs of size $TSD_size and TIRs $TIR1_sequence and $TIR2_sequence\n";
                     }
+
                     print "2) Update the README to say this is not an element\n";
                     print "3) Make a note in the README file\n";
                     print "4) Done reviewing this element\n";
@@ -1145,7 +1167,9 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 open (OUTPUT, ">", $database_input_file) or die "$!";
                 foreach my $seq (keys %element_sequences) {
                     print OUTPUT ">$seq\n$element_sequences{$seq}\n";
+print ">$seq\n$element_sequences{$seq}\n";
                 }   
+exit;
                 close OUTPUT;
 
                 my $tblastn_database_name = File::Temp->new(UNLINK => 1); # file name for the tblastn database name
