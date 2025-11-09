@@ -1071,6 +1071,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     ## Read the README files and identify TIRs sequences and TSD
     my %file_tirs;  # holds the element name as key and information on the element ends as array of values. 
                     # specifically [0] = TSD size or type, [1] = TIR1 sequence, [2] = TIR2 sequence
+                    # This will record the information in the last line of the README file that has the right format
     opendir(my $dh, $ELEMENT_FOLDER) or die "ERROR: Cannot open element folder $ELEMENT_FOLDER, $!";
     while (readdir $dh) {
         unless ($_ =~ /^\./) {
@@ -1118,7 +1119,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         my $tir2_seq = lc($file_tirs{$element_name}[2]);
         my $TIRs_set = 1; # boolean, set to 1 if TIR sequence are ok, or zero if not
         if (($tir1_seq =~/n/) or ($tir2_seq =~ /n/)) { # if the tir sequences include "n" characters warn the user and stop processing
-            print STDERR "WARNING: The TIR sequences for element $element_name contain one or more n characters, this is a problem for finding this element in the genome. Ignoring this element.\n";
+            print STDERR "WARNING: The TIR sequences $tir1_seq and $tir2_seq for element $element_name contain one or more n characters, this is a problem for finding this element in the genome. Ignoring this element.\n";
             $TIRs_set = 0;
         }
 
@@ -1143,7 +1144,6 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 open (OUTPUT, ">", $database_input_file) or die "$!";
                 foreach my $seq (keys %element_sequences) {
                     print OUTPUT ">$seq\n$element_sequences{$seq}\n";
-                    print ">$seq\n$element_sequences{$seq}\n";
                 }   
                 close OUTPUT;
 
@@ -1196,10 +1196,14 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     # write sequences to the alignent input file, minus the TSDs
                     open (ALIINPUT, ">", $alignment_input_filename) or die "$!";
                     foreach my $header (keys %complete_elements_sequences) {
-                        # determine if the TSDs are the same or not for these headers, do this by 1) determine
-                        # the length of the TSD, 2) use bedtools to extract those from the genome, 3) compare them
 
-# modify the header to indicate if the TIRs are the same                        
+                        # modify the header to indicate if the TSDs are the same 
+                        my $left_tir = substr($complete_elements_sequences{$header}, 0, $file_tirs{$element_name}[0]); 
+                        my $right_tir = substr($complete_elements_sequences{$header}, length($complete_elements_sequences{$header}) - $file_tirs{$element_name}[0], $file_tirs{$element_name}[0]);   
+                        if ($left_tir eq $right_tir) {
+                            $header .= "-identicalTIRs($left_tir)"
+                        }                    
+                      
                         my $element_sequence = substr($complete_elements_sequences{$header}, $file_tirs{$element_name}[0], length($complete_elements_sequences{$header})-(2*$file_tirs{$element_name}[0]));                       
                         print ALIINPUT ">$header\n$element_sequence\n";
                     }
@@ -1209,20 +1213,14 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     # run the alignment and convert result into a hash
                     `mafft $alignment_input_filename > $alignment_output_filename`;
                     if ($?) { die "ERROR executing mafft: error code $?\n"}  
-#                    my ($consensus_sequence, %consensus_alignment) = create_consensus($CONSENSUS_REMOVAL_THRESHOLD, $CONSENSUS_LEVEL, fastatohash($alignment_output_filename));
 
                     # report results
                     my $alignment_file_output_name = "$element_name" . "_complete-elements-alignment.fa";
                     `cp $alignment_output_filename $ELEMENT_FOLDER/$element_name/$alignment_file_output_name`;
                     if ($?) { die "ERROR using cp: error code $?\n"}  
-#                    my $consensus_file_name = "$element_name" . "_consensus.fa";
-#                    open (OUTPUT, ">", "$ELEMENT_FOLDER/$element_name/$consensus_file_name") or die "$!";
-#                    print OUTPUT ">consensus-$element_name\n$consensus_sequence\n";
 
                     my $datestring = localtime(); 
-#                    print README "$datestring, a consensus sequence of nearly-complete elements was created.\n";
                     print README "$datestring, File $alignment_file_output_name contains the alignment of nearly-complete elements\n";
-#                    print README "$datestring, File $consensus_file_name contains the consensus of nearly-complete elements\n"
                 }
                 else {
                     my $datestring = localtime(); 
@@ -1469,128 +1467,4 @@ sub identify_element_sequence {
         }
     }
     return (%nucleotide_sequences);
-}
-
-### modify this to update the position numbers to where the consensus is and only report the part with the consensus
-# create consensus sequence using a hash as an input
-sub create_consensus {
-    my ($removal_threshold, $consensus_level, %sequences) = @_; # mininum proportion of non-gaps per alignment position, and hash with sequences
-    my $alilen; # length of the alignment
-    my @positions; # each element is a postion in the alignment, if the value is 0 then the position is not part of the consensus otherwise it has the nucleotide of the consensus
-    my %alignment_sequence_names; # as key holds the full name of the alignement squence input, as value an array with [0] chromosome, [1] start position, [2] stop position, [3] orientation
-    my $consensus_start; # position where the consensus will start
-    my $consensus_end; # position where the consensus will end
-
-    # Input check, go through the hash elements and make sure they are all the same length (otherwise return a blank)
-    unless (keys %sequences) {die "ERROR: no data supplied to subroutine create_consensus"} # check that data has be passed 
-
-    # go through the input alignment, check that lengths are all the same and parse the input names;
-    foreach my $name (keys %sequences) {
-
-        # check that the lengths of the input alignments are all the same
-        if ($alilen) { # go here if the initial length has been set
-            unless (length $sequences{$name} == $alilen) {
-                die ("ERROR: No consensus sequence created because there's a discrepancy in the input sequence lengths");
-            }
-        }
-        else { # go here if the intial length has not yet been set
-            $alilen = length $sequences{$name};
-        }
-
-        # parse the input names
-#        if ($name =~ /^(\S+):(\d+)-(\d+)\((\S)\)/) {
-        if ($name =~ /^(\S+):(\d+)-(\d+)/) {
-            $alignment_sequence_names{$name}[0] = $1;
-            $alignment_sequence_names{$name}[1] = $2;
-            $alignment_sequence_names{$name}[2] = $3;
- #           $alignment_sequence_names{$name}[3] = $4;
-
-            #check that the start position is less than the end position, this is necessary for updating position locations later
-            unless ($alignment_sequence_names{$name}[1] < $alignment_sequence_names{$name}[2]) {
-                die "ERROR: In subroutine create_consensus, the start position must be smaller than the end position, found was not the case for the sequence $name\n";
-            }
-        }
-        else {
-            die "ERROR: don't recognize alignment input name $name in sub create_consensus\n";
-        }
-    }
-
-    # go through each position in the alignment and figure out if this position should be kept for the consensus or not. Also record the position where the consensus starts and ends
-    for (my $i=0; $i < $alilen; $i++) { 
-        my %nucleotide_abundance; # holds the abundance of ever nucleotide at the current position
-        my $total_nucleotides; # total number of nucleotides in this column
-
-        # loop through all sequences and record any identified nucleotides
-        foreach my $taxon (keys %sequences) { 
-            my $character = lc(substr($sequences{$taxon}, $i, 1));
-            if (($character eq "a") or ($character eq "c") or ($character eq "g") or ($character eq "t")) {
-                $nucleotide_abundance{$character} += 1; # add the sequences
-                $total_nucleotides++; # count the number of sequences
-            }   
-        }
-
-        # decide if this is a position that will be part of the consensus or not
-        if (($total_nucleotides/(keys %sequences)) > $removal_threshold) { # figure out if there is a suffient number of nucleotides at this postion to add it to the consensus
-            my $highest = max_by { $nucleotide_abundance{$_} } keys %nucleotide_abundance; # from https://perlmaven.com/highest-hash-value           
-            if (($nucleotide_abundance{$highest}/$total_nucleotides) >= $consensus_level) { # this will be true if there's consensus sequence here
-                push @positions, $highest;
-            }
-            else {
-                push @positions, "N";
-            }
-            # update the position of the consensus start and ends of the consensus sequence
-            unless ($consensus_start) {
-                $consensus_start = $i;
-            }
-            $consensus_end = $i;
-        }
-        else {
-            push @positions, 0;
-        }
-    }
-
-    # Go through each position of the alignment, update the start and end position of the alignement sequences, create consensus sequence, 
-    # produce a hash with aligned files the length of the consensus. This will done by treating three groups of aligned sequence separately:
-    # 1) alignements before the consensus, 2) alignments in the consensus, 3) alignments after the consensus
-    
-    my $conseq; # the final consensus sequence
-    my %temp_aligned_sequences; # holds the aligned sequences that align with the consensus, but it's temporary because the sequences names will still need updating
-
-    # 1) alignments before the consensus, update the start positions of all the alignements
-    for (my $i=0; $i < $consensus_start; $i++) { 
-        foreach my $taxon (keys %sequences) { # go through each alignment taxon at this alignment position
-            my $character = lc(substr($sequences{$taxon}, $i, 1));
-            unless ($character eq "-") { # if the character is not a gap then the start position must be updated 
-                $alignment_sequence_names{$taxon}[1] += 1
-            }
-        }
-    }
-    # 2) alignments in the consensus, create the consensus sequence and add the
-    for (my $i=$consensus_start; $i <= $consensus_end; $i++) { 
-        unless ($positions[$i] eq "0") {
-            $conseq .= $positions[$i];
-            foreach my $taxon (keys %sequences) { # go through each alignemtn taxon at this alignment position
-                my $character = lc(substr($sequences{$taxon}, $i, 1));
-                $temp_aligned_sequences{$taxon} .= $character;
-            }
-        }
-        
-    }
-    # 3) update the alignment position ends
-    for (my $i=$alilen; $i > $consensus_end; $i--) {
-        foreach my $taxon (keys %sequences) {
-            my $character = lc(substr($sequences{$taxon}, $i, 1));
-            unless ($character eq "-") {
-                $alignment_sequence_names{$taxon}[2] -= 1;
-            }
-        }
-    }
-
-    # create the alignment that will will be returned, this will also make sure that any duplicates will be removed
-    my %final_aligned_sequences;
-    foreach my $taxon (keys %temp_aligned_sequences) {
-        my $name = $alignment_sequence_names{$taxon}[0] . ":" . $alignment_sequence_names{$taxon}[1] . "-" . $alignment_sequence_names{$taxon}[2] . "(" . $alignment_sequence_names{$taxon}[3] . ")";
-        $final_aligned_sequences{$name} = $temp_aligned_sequences{$taxon};
-    }
-    return ($conseq, %final_aligned_sequences);
 }
