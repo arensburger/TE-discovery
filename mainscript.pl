@@ -185,7 +185,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         }
 
         # run tblastn
-        `tblastn -query $protein_file_no_redudants -db $INPUT_GENOME -outfmt "6 qseqid sseqid sstart send pident length qlen" -out $BLAST_OUTPUT_FILE_NAME -num_threads $NUM_THREADS`;
+        `tblastn -query $protein_file_no_redudants -db $INPUT_GENOME -outfmt "6 qseqid sseqid sstart send pident length qlen" -out $BLAST_OUTPUT_FILE_NAME -num_threads $NUM_THREADS >&2`;
         if ($?) { die "ERROR executing tblastn, stopping analysis (hint: was the genome formated with makeblastdb?): error code $?\n"}
         print ANALYSIS "\ttblastn was executed, the output is in file $BLAST_OUTPUT_FILE_NAME\n";
     }
@@ -1167,9 +1167,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 open (OUTPUT, ">", $database_input_file) or die "$!";
                 foreach my $seq (keys %element_sequences) {
                     print OUTPUT ">$seq\n$element_sequences{$seq}\n";
-print ">$seq\n$element_sequences{$seq}\n";
                 }   
-exit;
                 close OUTPUT;
 
                 my $tblastn_database_name = File::Temp->new(UNLINK => 1); # file name for the tblastn database name
@@ -1225,18 +1223,18 @@ exit;
                         # modify the header to indicate if the TSDs are the same 
                         my $left_tir = substr($complete_elements_sequences{$header}, 0, $file_tirs{$element_name}[0]); 
                         my $right_tir = substr($complete_elements_sequences{$header}, length($complete_elements_sequences{$header}) - $file_tirs{$element_name}[0], $file_tirs{$element_name}[0]);   
-                        if ($left_tir eq $right_tir) {
-                            $header .= "-identicalTIRs($left_tir)"
-                        }                    
+                        # if ($left_tir eq $right_tir) {
+                        #     $header .= "-identicalTIRs($left_tir)"
+                        # }                    
                       
                         my $element_sequence = substr($complete_elements_sequences{$header}, $file_tirs{$element_name}[0], length($complete_elements_sequences{$header})-(2*$file_tirs{$element_name}[0]));                       
                         print ALIINPUT ">$header\n$element_sequence\n";
                     }
 
                     close (ALIINPUT);
-                    
+
                     # run the alignment and convert result into a hash
-                    `mafft $alignment_input_filename > $alignment_output_filename`;
+                    `mafft --quiet $alignment_input_filename > $alignment_output_filename`;
                     if ($?) { die "ERROR executing mafft: error code $?\n"}  
 
                     # report results
@@ -1486,8 +1484,16 @@ sub identify_element_sequence {
                     $b2 = $tir1[$i]+1-$tsd_length;
                     $b1 = $tir2[$j]+$tsd_length;
                 }
+
+                # write the output and check if the TSDs are the same and update the location name if they are
                 my $location_name = "$chromosome_name:$b1-$b2"; 
-                $nucleotide_sequences{$location_name} = substr($chr_seq, $tir1[$i]-$tsd_length, $size);
+                my $full_sequence = substr($chr_seq, $tir1[$i]-$tsd_length, $size);
+                my $tsd1 = substr($full_sequence, 0, $tsd_length);
+                my $tsd2 = substr($full_sequence, length($full_sequence)-$tsd_length, $tsd_length);
+                if ($tsd1 eq $tsd2) {
+                    $location_name .= "-identicalTSDs($tsd1)";
+                }
+                $nucleotide_sequences{$location_name} = $full_sequence;
             }
         }
     }
