@@ -1222,10 +1222,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
                         # modify the header to indicate if the TSDs are the same 
                         my $left_tir = substr($complete_elements_sequences{$header}, 0, $file_tirs{$element_name}[0]); 
-                        my $right_tir = substr($complete_elements_sequences{$header}, length($complete_elements_sequences{$header}) - $file_tirs{$element_name}[0], $file_tirs{$element_name}[0]);   
-                        # if ($left_tir eq $right_tir) {
-                        #     $header .= "-identicalTIRs($left_tir)"
-                        # }                    
+                        my $right_tir = substr($complete_elements_sequences{$header}, length($complete_elements_sequences{$header}) - $file_tirs{$element_name}[0], $file_tirs{$element_name}[0]);                     
                       
                         my $element_sequence = substr($complete_elements_sequences{$header}, $file_tirs{$element_name}[0], length($complete_elements_sequences{$header})-(2*$file_tirs{$element_name}[0]));                       
                         print ALIINPUT ">$header\n$element_sequence\n";
