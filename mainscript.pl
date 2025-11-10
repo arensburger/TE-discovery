@@ -535,7 +535,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
             # go up and down the length of $range from the transition locations and identify the combinations of TIRs and TSDs. The TIRs are identified 
             # using the sequences with large gaps removed (i.e. %seqrmg), while the TSD are identified on the original sequences (i.e. %seqali)
-            my $range = 5; # how many bp to search around for tirs
+            my $range = 6; # how many bp to search around for tirs
             my $max_TIR_number; # highest number of TIRs observed for one pair of start and end positions
             my $max_proportion_first_last_bases; # highest number of locations that start and end with the same bases
             my $max_TSD_number; # highest number of intact TSDs
@@ -548,6 +548,9 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     my %tsds_found2; # keys is TSD type "TA", "2", ... "10" and key is number of TSDs found
                     foreach my $sequence_name (keys %seqrmg) {
                         my ($tir1_sequence, $tir2_sequence) = gettir($seqrmg{$sequence_name}, $seqrmg_ltrans+$i, $seqrmg_rtrans+$j, $MIN_TIR_SIZE, $TIR_MISMATCHES); # figure if this sequences has a tir at these positions and if so, report first and last nucleotide
+my $ha = $seqrmg_ltrans+$i;
+my $ha2 = $seqrmg_rtrans+$j;
+print "$ha\t$ha2\n";
                         if ($tir1_sequence) {
                             $number_of_tirs_found += 1;
                             my $bases = substr($tir1_sequence, 0, 3) . substr($tir2_sequence, -3, 3); # recording the first and last 3 bases 
@@ -579,9 +582,10 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                     my $lp = $left_highest_transition_position+$i;
                     my $rp = $right_highest_transition_position+$j;
                     push @tsd_tir_combinations, "$lp\t$rp\t$number_of_tirs_found\t$most_abundant_tir_proportion\t$tsds_found{\"TA\"}\t$tsds_found{2}\t$tsds_found{3}\t$tsds_found{4}\t$tsds_found{5}\t$tsds_found{6}\t$tsds_found{7}\t$tsds_found{8}\t$tsds_found{9}\t$tsds_found{10}";
+#print "$lp\t$rp\t$number_of_tirs_found\t$most_abundant_tir_proportion\t$tsds_found{\"TA\"}\t$tsds_found{2}\t$tsds_found{3}\t$tsds_found{4}\t$tsds_found{5}\t$tsds_found{6}\t$tsds_found{7}\t$tsds_found{8}\t$tsds_found{9}\t$tsds_found{10}\n"; 
                 }
             }
-
+exit;
             # go through the element and identify those candidate locations that pass the tests for TIR-TSD combinations
             my @successful_candidates; # locations and tsd numbers of candidate locations that the analysis will continue with
             my %failed_candidates; # success codes of the failed candidate and number of candidates as value, used to report failure to the user 
@@ -804,6 +808,11 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
                 foreach my $key (keys %alignment_sequences) {
                     my ($tir1, $tir2) = gettir($alignment_sequences{$key}, $d[1], $d[2], $MIN_TIR_SIZE, $TIR_MISMATCHES);
+# if (($d[1] == 1118) and ($d[2] == 7700)) {
+#     print ">temp\n$alignment_sequences{$key}\n";
+#     exit;
+# }
+
                     if ($tir1) {
                         $total_TIR_length += length ($tir1);
                         $TIR_number += 1;
@@ -1358,7 +1367,6 @@ sub gettir {
 	### load the sequence into memory and remove gaps
 	my $sequence = substr($seq,$loc1-1,$loc2-$loc1+1); # DNA sequence of the whole element
     $sequence =~ s/-//g;
-
     ### get the ends into string Variables
     my $number_of_bp_to_scan = int((length $sequence)/2);
 	my $s1 = substr ($sequence, 0, $number_of_bp_to_scan);
