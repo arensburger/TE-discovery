@@ -14,6 +14,7 @@ use Scalar::Util qw(looks_like_number);
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
 my $TBLASTN_FILE; # name of the file containing the out put of the tblastn
 my $INPUT_GENOME; # fasta formated file with genome that input proteins
+my $ANALYSIS_NAME; # base name for the analysis the analysis folder and element folder will be created based on this
 my $ANALYSIS_FOLDER; # name of folder to store analysis files into
 my $ELEMENT_FOLDER; # directory where individual folders for each element are stored
 my $REJECTED_ELEMENTS_FOLDER = "Rejected_elements"; # name of folder that contains files for elements have been reviewed and rejected
@@ -26,8 +27,7 @@ GetOptions(
 	'p:s'   => \$INPUT_PROTEIN_SEQUENCES,
 	't:s'   => \$TBLASTN_FILE,
 	'g:s'   => \$INPUT_GENOME,
-    'n:s'   => \$ANALYSIS_FOLDER,
-    'e:s'   => \$ELEMENT_FOLDER,
+    'n:s'   => \$ANALYSIS_NAME,
     'a:i'   => \$START_STEP,
     'b:i'   => \$END_STEP,
     'h'     => \$SHOW_HELP,
@@ -40,8 +40,8 @@ if ($SHOW_HELP) {
 }
 
 ## CHECK INPUTS Validate required input files
-unless ($ANALYSIS_FOLDER and $ELEMENT_FOLDER) {
-    die "usage: perl mainscript.pl <-n folder name (full path) to store analysis files REQUIRED> <-e folder name to store elements REQUIRED> <-h for more help>\n";
+unless ($ANALYSIS_NAME) {
+    die "usage: perl mainscript.pl <-n analysis name REQUIRED> <-h for more help>\n";
 }
 
 ## CHECK INPUTS set the start and end steps
@@ -56,37 +56,53 @@ else {
 }
 
 ## CHECK INPUTS Create output directory for analysis files if necessary
+$ANALYSIS_FOLDER = $ANALYSIS_NAME . "-analysis";
+$ELEMENT_FOLDER = $ANALYSIS_NAME . "-element";
 $ANALYSIS_FOLDER = fixdirname($ANALYSIS_FOLDER);
-if (-d $ANALYSIS_FOLDER) {
-    print STDERR "WARNING: Directory $ANALYSIS_FOLDER already exists\n";
+if ((-d $ANALYSIS_FOLDER) and ($START_STEP == 1)){ 
+    print "WARNING: folder $ANALYSIS_FOLDER already exists, using this folder rather than creating a new one\n";
 }
-else {
-    print STDERR "Creating directory $ANALYSIS_FOLDER for storing files generated during the analysis\n";
+elsif ($START_STEP == 1) {
+    print STDERR "Creating directory $ANALYSIS_FOLDER for storing analysis files\n";
     `mkdir $ANALYSIS_FOLDER`;
     if ($?) { die "ERROR creating directory: error code $?\n"}
-
+}
+elsif ($START_STEP > 1) {
+    unless ((-d $ANALYSIS_FOLDER)) {
+        die "ERROR: Expecting that a folder called $ANALYSIS_FOLDER would have been created by analysis step $START_STEP\n";
+    }
 }
 
 ## CHECK INPUTS Create output directory for elements that have been rejected
 my $reject_folder_path = $ANALYSIS_FOLDER . "/" . $REJECTED_ELEMENTS_FOLDER;
-if (-d $reject_folder_path) {
-    print STDERR "WARNING: Directory $reject_folder_path already exists\n";
+if ((-d $reject_folder_path) and ($START_STEP == 1)){ 
+    print "WARNING: folder $reject_folder_path already exists, using this folder rather than creating a new one\n";
 }
-else {
-    print STDERR "Creating directory $reject_folder_path for storing rejected elements\n";
+elsif ($START_STEP == 1) {
+    print STDERR "Creating directory $reject_folder_path for rejected files\n";
     `mkdir $reject_folder_path`;
     if ($?) { die "ERROR creating directory: error code $?\n"}
+}
+elsif ($START_STEP > 1) {
+    unless ((-d $reject_folder_path)) {
+        die "ERROR: Expecting that a folder called $reject_folder_path would have been created by analysis step $START_STEP\n";
+    }
 }
 
 ## CHECK INPUTS Create output directory for individual elements if necessary
 $ELEMENT_FOLDER = fixdirname($ELEMENT_FOLDER);
-if (-d $ELEMENT_FOLDER) {
-    print STDERR "WARNING: Directory $ELEMENT_FOLDER already exists\n";
+if ((-d $ELEMENT_FOLDER) and ($START_STEP == 1)){ 
+    print "WARNING: folder $ELEMENT_FOLDER already exists, using this folder rather than creating a new one\n";
 }
-else {
-    print STDERR "Creating directory $ELEMENT_FOLDER that will have subdirectories for individual elements\n";
+elsif ($START_STEP == 1) {
+    print STDERR "Creating directory $ELEMENT_FOLDER for TE elments\n";
     `mkdir $ELEMENT_FOLDER`;
     if ($?) { die "ERROR creating directory: error code $?\n"}
+}
+elsif ($START_STEP > 1) {
+    unless ((-d $ELEMENT_FOLDER)) {
+        die "ERROR: Expecting that a folder called $ELEMENT_FOLDER would have been created by analysis step $START_STEP\n";
+    }
 }
 
 ## Create or open files to store analysis parameters, and to store rejected sequences. 
@@ -257,10 +273,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     # Create individual directories for each element
     my $i=0; # counts the number of output lines, to check if it's zero
     foreach my $prot_name (keys %protein_ids) {
-        if (-d "$ELEMENT_FOLDER/$prot_name") {
-            print STDERR "\tWARNING: Element folder $ELEMENT_FOLDER/$prot_name already exists (this should not normally happen), writing files to this folder\n";
-        }
-        else {
+        unless (-d "$ELEMENT_FOLDER/$prot_name") {
             mkdir( "$ELEMENT_FOLDER/$prot_name" ) or die "Couldn't create $ELEMENT_FOLDER/$prot_name directory, $!";
         }
         $i++;
@@ -290,6 +303,7 @@ my %EXAMINE_CODES=("1111" => 1, "1101" => 2,  "1110" => 3); # success codes to e
 my $HIGH_POSITION_CONSENSUS=0.75; # proportion of conservation at an alignment position to call it highly conserved
 my $SEARCH_WINDOW_SIZE=20; # how big a window to search on either side of a potential transition postion
 my $MAX_GAP_N_AT_POSITION=0.5; # maximum proportion of gaps or N's at an alignment position, if above the position is ignored in this analysis
+my $TIR_SEARCH_RANGE = 6; # how many bp away from the alignement transistion to search for TIRs
 
 my $step_number = 2;
 if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
@@ -309,6 +323,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     print ANALYSIS "\tMAX_TSD_PROPORTION = $MAX_TSD_PROPORTION\n";
     print ANALYSIS "\tSEARCH_WINDOW_SIZE = $SEARCH_WINDOW_SIZE\n";
     print ANALYSIS "\tMAX_GAP_N_AT_POSITION = $MAX_GAP_N_AT_POSITION\n";
+    print ANALYSIS "\tTIR_SEARCH_RANGE = $TIR_SEARCH_RANGE\n";
 
     ## check that all the necessary files have been supplied
     # checking that the genome length file is present
@@ -506,51 +521,22 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
          
         # STEP 2.2.5 
         # identify the TIR and TSD locations around the edges of transitions (if transtions were found)
-        my %seqrmg; # holds the current sequences but with postions of low agreement removed
-        my $seqrmg_ltrans; # position of the transition from "not the element" to the "element" on the left side of the alignment, using the numbering in %seqrmg
-        my $seqrmg_rtrans; # position of the transition from "not the element" to the "element" on the right side of the alignment, using the numbering in %seqrmg
         if ($left_highest_transition_position and $right_highest_transition_position) { # only continue if a transition was found
-            
-            # populate %seqrmg with low agreement postions removed, using the previously determined $consensus_sequence as reference and identify the 
-            # position of the left and right transitions into the element, put those transitions into $seqrmg_ltrans and $seqrm_rtrans. Finally export the
-            # content of %seqrmg, it will be used in subsequent steps 
-            my $j; # counter of positions in %seqrmg
-            for (my $i=0; $i < length $consensus_sequence; $i++) {
-                unless ((substr $consensus_sequence, $i, 1) eq "n") {
-                    foreach my $seq (keys %aliseq) {
-                        $seqrmg{$seq} .= substr $aliseq{$seq}, $i, 1;
-                    }
-                    $j++;
-                }
-
-                #if reached either transition position convert position numbers to $ltrans and $rtrans
-                if ($i == $left_highest_transition_position) {
-                    $seqrmg_ltrans = $j-1;
-                }
-                if ($i == $right_highest_transition_position) {
-                    $seqrmg_rtrans = $j-1;
-                }
-
-            }
-
-            # go up and down the length of $range from the transition locations and identify the combinations of TIRs and TSDs. The TIRs are identified 
+            # go up and down the length of $TIR_SEARCH_RANGE from the transition locations and identify the combinations of TIRs and TSDs. The TIRs are identified 
             # using the sequences with large gaps removed (i.e. %seqrmg), while the TSD are identified on the original sequences (i.e. %seqali)
-            my $range = 6; # how many bp to search around for tirs
             my $max_TIR_number; # highest number of TIRs observed for one pair of start and end positions
             my $max_proportion_first_last_bases; # highest number of locations that start and end with the same bases
             my $max_TSD_number; # highest number of intact TSDs
             my @tsd_tir_combinations; # array of possible locations along with various information
-            for (my $i=-$range; $i<=$range; $i++) {
-	            for (my $j=-$range; $j<=$range; $j++) {
+            for (my $i=-$TIR_SEARCH_RANGE; $i<=$TIR_SEARCH_RANGE; $i++) {
+	            for (my $j=-$TIR_SEARCH_RANGE; $j<=$TIR_SEARCH_RANGE; $j++) {
 		            my $number_of_tirs_found=0; # nubmer of sequences that match the TIR criteria
                     my %tir_first_and_last_bases; # first and last set of bases of tir as key and abundance as value
                     my %tsds_found; # keys is TSD type "TA", "2", ... "10" and key is number of TSDs found
                     my %tsds_found2; # keys is TSD type "TA", "2", ... "10" and key is number of TSDs found
-                    foreach my $sequence_name (keys %seqrmg) {
-                        my ($tir1_sequence, $tir2_sequence) = gettir($seqrmg{$sequence_name}, $seqrmg_ltrans+$i, $seqrmg_rtrans+$j, $MIN_TIR_SIZE, $TIR_MISMATCHES); # figure if this sequences has a tir at these positions and if so, report first and last nucleotide
-my $ha = $seqrmg_ltrans+$i;
-my $ha2 = $seqrmg_rtrans+$j;
-print "$ha\t$ha2\n";
+                    foreach my $sequence_name (keys %aliseq) {
+                        my ($tir1_sequence, $tir2_sequence) = gettir($aliseq{$sequence_name}, $left_highest_transition_position+$i, $right_highest_transition_position+$j,$MIN_TIR_SIZE, $TIR_MISMATCHES);
+
                         if ($tir1_sequence) {
                             $number_of_tirs_found += 1;
                             my $bases = substr($tir1_sequence, 0, 3) . substr($tir2_sequence, -3, 3); # recording the first and last 3 bases 
@@ -582,10 +568,8 @@ print "$ha\t$ha2\n";
                     my $lp = $left_highest_transition_position+$i;
                     my $rp = $right_highest_transition_position+$j;
                     push @tsd_tir_combinations, "$lp\t$rp\t$number_of_tirs_found\t$most_abundant_tir_proportion\t$tsds_found{\"TA\"}\t$tsds_found{2}\t$tsds_found{3}\t$tsds_found{4}\t$tsds_found{5}\t$tsds_found{6}\t$tsds_found{7}\t$tsds_found{8}\t$tsds_found{9}\t$tsds_found{10}";
-#print "$lp\t$rp\t$number_of_tirs_found\t$most_abundant_tir_proportion\t$tsds_found{\"TA\"}\t$tsds_found{2}\t$tsds_found{3}\t$tsds_found{4}\t$tsds_found{5}\t$tsds_found{6}\t$tsds_found{7}\t$tsds_found{8}\t$tsds_found{9}\t$tsds_found{10}\n"; 
                 }
             }
-exit;
             # go through the element and identify those candidate locations that pass the tests for TIR-TSD combinations
             my @successful_candidates; # locations and tsd numbers of candidate locations that the analysis will continue with
             my %failed_candidates; # success codes of the failed candidate and number of candidates as value, used to report failure to the user 
@@ -600,7 +584,7 @@ exit;
                 my $proportion_of_same_start_stop = $d[3];
                 my $number_tsds = max($d[4],$d[5],$d[6],$d[7],$d[8],$d[9],$d[10],$d[11],$d[12],$d[13]);
                 # test 1 are the number of sequences with TIR high enough?
-                if (($number_of_tirs/(keys %seqrmg)) >= $MIN_PROPORTION_SEQ_WITH_TIR) {
+                if (($number_of_tirs/(keys %aliseq)) >= $MIN_PROPORTION_SEQ_WITH_TIR) {
                     $min_prop_seq_wtir = 1;
                 }
 
@@ -808,18 +792,12 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 
                 foreach my $key (keys %alignment_sequences) {
                     my ($tir1, $tir2) = gettir($alignment_sequences{$key}, $d[1], $d[2], $MIN_TIR_SIZE, $TIR_MISMATCHES);
-# if (($d[1] == 1118) and ($d[2] == 7700)) {
-#     print ">temp\n$alignment_sequences{$key}\n";
-#     exit;
-# }
-
                     if ($tir1) {
                         $total_TIR_length += length ($tir1);
                         $TIR_number += 1;
                     }
                 }
-
-               
+              
                 if ($TIR_number) { # if TIRs have been found
                     $average_TIR_length = int($total_TIR_length / $TIR_number);
                 }
