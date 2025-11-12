@@ -21,6 +21,9 @@ Here, the genomic region surrounding each remaining tblastn hit is scanned for t
 ***STEP 3 Manual review of potential transposable elements***
 Grouped by the input protein sequences the TSD-TIR structure of the remaining sequences is reviewed by a human. The person determines 1) if the TSD-TIR junctions appear to be those of a genuine transposable element, 2) what the most likely length of TSDs and TIRs appears to be for the each potential transposable element. 
 
+***STEP 4 Identification of nearly complete elements***
+
+
 ## Running the scripts
 
 ### Running the pipeline 
@@ -29,14 +32,15 @@ Grouped by the input protein sequences the TSD-TIR structure of the remaining se
 
 The pipeline is written in Perl, and is executed from the command line using 
 
-	perl mainscript.pl -n <folder name> -e <folder name> <other parameters>
+	perl mainscript.pl -n <analysis name> <other parameters>
 
 Where:
 
-	-n folder name where to store analysis files (or where previous steps have already stored their files), these are input parameter lists and reports on the pipeline progress.
-	-e folder name where to store information on the most likely sequences to be genuine transposable elements and related information (or where previous steps have already stored their files).
+	-n is the name of the current analysis. 
 
-other step specific parameters may be required as well.
+This name will be used as the base to create two folders called <analysis name>-element and <analysis name>-analysis. The folder ending in *-element* will include sub-folders for each idenfied element along with supporting information about it. The folder ending in *-analysis* will contain files with information about the analysis such as parameters, and rejeced elements.
+
+Other step specific parameters will be required as well, see below.
 
 **Specify which steps to execute**
 
@@ -48,30 +52,30 @@ of consecutive steps be executed the following parameter(s) can be set:
 
 ### Step specific parameters
 
-***STEP1 parameters*** 
+***STEP 1 parameters*** 
 
 The input file(s) for this step can be either a fasta file of proteins and an associated genome file, or a tblastn output file.
 The tblastn option is available so that this time consuming tblastn analysis can be run on a separate machine (e.g. a computer cluster). If the tblastn is run on its own, the output file must be formatted in the same way as in the script. Specifically, the `tblastn` output parameter must be set to:
 
 	-outfmt "6 qseqid sseqid sstart send pident length qlen"
 
-**If STEP1 uses a list of proteins as input** specify these parameters if the script should executed the tblastn:
+**If STEP 1 uses a list of proteins as input** specify these parameters if the script should executed the tblastn:
  
 	-p fasta formatted file of proteins 
 	-g fasta formatted file genome file; this file must have been formatted with "makeblastdb" ahead of time
 
-**If STEP1 uses a tBLASTN file as input** specify this paramter if the tblastn has already been exectuted:
+**If STEP 1 uses a tBLASTN file as input** specify this paramter if the tblastn has already been exectuted:
  
     -t tblastn output in the format specified above
 
-***STEP2 parameter and file requirement*** 
+***STEP 2 parameter and file requirement*** 
 
-When running this step the `-g` parameter (described in STEP1) must be specified. In addition, the script will expect a file to be present in the same directory as the genome file. This file must have the name of the genome file followed by `.length`. Each line in this file should contain a fasta title from the genome file and the length in nucleotides of the associated sequence. This `.length` file can be generated using the following BASH commands:
+When running this step the `-g` parameter (described in STEP 1) must be specified. In addition, the script will expect a file to be present in the same directory as the genome file. This file must have the name of the genome file followed by `.length`. Each line in this file should contain a fasta title from the genome file and the length in nucleotides of the associated sequence. This `.length` file can be generated using the following BASH commands:
 
 	samtools faidx <genome fasta formatted file name>
 	awk '{OFS="\t"; print $1, $2}\' < <genome fasta formatted file name>.fai > <genome fasta formatted file name>.length
     
-***STEP3 has no step specific parameters or requirements*** 
+***STEP 3 has no step specific parameters or requirements*** 
 
 ## Understanding analysis output folders files
 
@@ -83,7 +87,7 @@ Every subfolder with an input protein name contains a `README.txt` file that rep
 1) The number of genomic locations (loci) were found when matching the input protein to the genome using tblastn
 2) The names of various files specific to this element (files described below)
 3) A statement of how the element performed on the "edge test". A true transposable element is expected to have a sharp transition in the alignment between sequences outside the element and TSD-TIR sequences inside the element. If such a sharp transition is too close the edge of the extended element, the script assumes no such transition is present and the sequences are not considered to be from transposable elements.
-4) A statement from the manual review in STEP3, including notes from the reviewer.
+4) A statement from the manual review in STEP 3, including notes from the reviewer.
 
 ### .bed files
 The output of tblastn is converted to a .bed file
@@ -92,7 +96,7 @@ The output of tblastn is converted to a .bed file
 These files are in a pipeline specific format, and contains information on element alignment locations removed because they are shared by too few copies of this element (this is the same proceedure as described in [Goubert et al. 2022](https://mobilednajournal.biomedcentral.com/articles/10.1186/s13100-021-00259-7). This file may be used to reconstruct the original alignment, prior to trimming the low copy alignment position.
 
 ### .maf files
-These files that contains the multiple sequence alignment of all the extended blast matches (see STEP2), but with alignment positions with too many gaps are removed (see .alipos file).  
+These files that contains the multiple sequence alignment of all the extended blast matches (see STEP 2), but with alignment positions with too many gaps are removed (see .alipos file).  
 
 ### .tirtsd files 
 This file is meant to be used along with the .maf file. This .tirtsd file specifies positions in the alignment that delimit the outside locations TIR positions (in the .tirtsd file these are `loc1` and `loc2`). Each line also specifies a success code (see below), the number of alignment sequences that have intact TIRs, and the number of intact TSDs (TSD categories are TA, 2bp., 3bp, ... , 10bp.).
@@ -107,7 +111,7 @@ A list of input protein sequences that are not considered to be transposable ele
 Output of the tblastn analysis
 
 ### Rejected_elements folder
-This folder contains sub folders for all the input proteins that were not filtered in STEP1, but were rejected subsequently as not being transposable elements.
+This folder contains sub folders for all the input proteins that were not filtered in STEP 1, but were rejected subsequently as not being transposable elements.
 
 ## Success codes
 The .tirtsd file includes a 4 digit success code that reports on TSD and TIR sequences in the alignment. The pipeline can be tailored to consider only certain success codes as being associated with true transposable elements. The README.txt file will report how many TIR-TSD combinations were rejected because they did not have an acceptable success code.
