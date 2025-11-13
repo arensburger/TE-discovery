@@ -18,6 +18,7 @@ my $ANALYSIS_NAME; # base name for the analysis the analysis folder and element 
 my $ANALYSIS_FOLDER; # name of folder to store analysis files into
 my $ELEMENT_FOLDER; # directory where individual folders for each element are stored
 my $REJECTED_ELEMENTS_FOLDER = "Rejected_elements"; # name of folder that contains files for elements have been reviewed and rejected
+my $STEP; # analysis step to perform
 my $START_STEP; # analysis step to start at
 my $END_STEP; # analysis step to end at,
 my $SHOW_HELP; # call for help 
@@ -28,8 +29,7 @@ GetOptions(
 	't:s'   => \$TBLASTN_FILE,
 	'g:s'   => \$INPUT_GENOME,
     'n:s'   => \$ANALYSIS_NAME,
-    'a:i'   => \$START_STEP,
-    'b:i'   => \$END_STEP,
+    's:s'   => \$STEP,
     'h'     => \$SHOW_HELP,
 );
 
@@ -40,73 +40,56 @@ if ($SHOW_HELP) {
 }
 
 ## CHECK INPUTS Validate required input files
-unless ($ANALYSIS_NAME) {
-    die "usage: perl mainscript.pl <-n analysis name REQUIRED> <-h for more help>\n";
+unless ($ANALYSIS_NAME and $STEP) {
+    die "usage: perl mainscript.pl <-n analysis name REQUIRED> <-s step number REQUIRED> <step specific parameters, use -h for more help>\n";
 }
 
-## CHECK INPUTS set the start and end steps
-if ($START_STEP) {
-    unless ($END_STEP) {
-        $END_STEP = $START_STEP;
-    }
-}
-else { 
-    $START_STEP = 1;
-    $END_STEP = 100000; # set to a very high number;
-}
-
-## CHECK INPUTS Create output directory for analysis files if necessary
+## CHECK INPUTS (NOT STEP SPECIFIC) AND CREATE DIRECTORIES IF NECESSARY
 $ANALYSIS_FOLDER = $ANALYSIS_NAME . "-analysis";
 $ELEMENT_FOLDER = $ANALYSIS_NAME . "-element";
 $ANALYSIS_FOLDER = fixdirname($ANALYSIS_FOLDER);
-if ((-d $ANALYSIS_FOLDER) and ($START_STEP == 1)){ 
-    print "WARNING: folder $ANALYSIS_FOLDER already exists, using this folder rather than creating a new one\n";
-}
-elsif ($START_STEP == 1) {
-    print STDERR "Creating directory $ANALYSIS_FOLDER for storing analysis files\n";
-    `mkdir $ANALYSIS_FOLDER`;
-    if ($?) { die "ERROR creating directory: error code $?\n"}
-}
-elsif ($START_STEP > 1) {
-    unless ((-d $ANALYSIS_FOLDER)) {
-        die "ERROR: Expecting that a folder called $ANALYSIS_FOLDER would have been created by analysis step $START_STEP\n";
-    }
-}
-
-## CHECK INPUTS Create output directory for elements that have been rejected
-my $reject_folder_path = $ANALYSIS_FOLDER . "/" . $REJECTED_ELEMENTS_FOLDER;
-if ((-d $reject_folder_path) and ($START_STEP == 1)){ 
-    print "WARNING: folder $reject_folder_path already exists, using this folder rather than creating a new one\n";
-}
-elsif ($START_STEP == 1) {
-    print STDERR "Creating directory $reject_folder_path for rejected files\n";
-    `mkdir $reject_folder_path`;
-    if ($?) { die "ERROR creating directory: error code $?\n"}
-}
-elsif ($START_STEP > 1) {
-    unless ((-d $reject_folder_path)) {
-        die "ERROR: Expecting that a folder called $reject_folder_path would have been created by analysis step $START_STEP\n";
-    }
-}
-
-## CHECK INPUTS Create output directory for individual elements if necessary
 $ELEMENT_FOLDER = fixdirname($ELEMENT_FOLDER);
-if ((-d $ELEMENT_FOLDER) and ($START_STEP == 1)){ 
-    print "WARNING: folder $ELEMENT_FOLDER already exists, using this folder rather than creating a new one\n";
-}
-elsif ($START_STEP == 1) {
-    print STDERR "Creating directory $ELEMENT_FOLDER for TE elments\n";
-    `mkdir $ELEMENT_FOLDER`;
-    if ($?) { die "ERROR creating directory: error code $?\n"}
-}
-elsif ($START_STEP > 1) {
-    unless ((-d $ELEMENT_FOLDER)) {
-        die "ERROR: Expecting that a folder called $ELEMENT_FOLDER would have been created by analysis step $START_STEP\n";
+my $reject_folder_path = $ANALYSIS_FOLDER . "/" . $REJECTED_ELEMENTS_FOLDER;
+
+if (($STEP == 1) or ($STEP == 12)) {
+    if (-d $ANALYSIS_FOLDER) { 
+        print "WARNING: folder $ANALYSIS_FOLDER already exists, using this folder rather than creating a new one\n";
     }
+    else {
+        print STDERR "Creating directory $ANALYSIS_FOLDER for storing analysis files\n";
+        `mkdir $ANALYSIS_FOLDER`;
+        if ($?) { die "ERROR creating directory: error code $?\n"}
+    }
+
+    if (-d $ELEMENT_FOLDER) { 
+        print "WARNING: folder $ELEMENT_FOLDER already exists, using this folder rather than creating a new one\n";
+    }
+    else {
+        print STDERR "Creating directory $ELEMENT_FOLDER for storing element files\n";
+        `mkdir $ELEMENT_FOLDER`;
+        if ($?) { die "ERROR creating directory: error code $?\n"}
+    }
+
+    if (-d $reject_folder_path) { 
+        print "WARNING: folder $reject_folder_path already exists, using this folder rather than creating a new one\n";
+    }
+    else {
+        print STDERR "Creating directory $reject_folder_path for reject elements\n";
+        `mkdir $reject_folder_path`;
+        if ($?) { die "ERROR creating directory: error code $?\n"}
+    }
+}
+elsif (($STEP == 2) or ($STEP == 3) or ($STEP == 4)) {
+    unless ((-d $ANALYSIS_FOLDER) and (-d $ELEMENT_FOLDER) and (-d $reject_folder_path)) {
+        die "ERROR: Expecting folders $ANALYSIS_FOLDER, $ELEMENT_FOLDER, and $reject_folder_path would have been created prior to running step $STEP\n"
+    }
+}
+else {
+    die "ERROR: don't recognize the step specified with the -s parameter. Stoping analysis.\n";
 }
 
 ## Create or open files to store analysis parameters, and to store rejected sequences. 
-my $analysis_parameters_file_name = "$ANALYSIS_FOLDER/Analysis_parameters.txt"; # file to record parameters
+my $analysis_parameters_file_name = "$ANALYSIS_FOLDER/Analysis_run_and_parameters.txt"; # file to record parameters and how the run went
 my $rejection_file_name = "$ANALYSIS_FOLDER/Rejected_sequences.txt"; # file to store rejected sequences, and why
 open (ANALYSIS,'>>', $analysis_parameters_file_name) or die "ERROR: cannot open file $analysis_parameters_file_name\n"; # create or append to file
 open (REJECT, '>>', $rejection_file_name) or die "ERROR, cannot create output file $rejection_file_name\n"; # create or append to file
@@ -114,13 +97,14 @@ open (REJECT, '>>', $rejection_file_name) or die "ERROR, cannot create output fi
 my $datestring = localtime();
 print ANALYSIS "\nSTARTING ANALYSIS on $datestring\n";
 
-my $BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FOLDER/tblastn.o"; # default name and location unless a file is provided
-my $GOOD_BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FOLDER/good_blast.o"; # blast file filtered for good elements according to Goubert
+
 
 ### PIPELINE STEP 1 identify proteins that match the genome with parameters specified above under
 ###     The output is a list of proteins for further analysis recorded in the file $output_file_name
 
 ### CONSTANTS applicable to this step only (also record these in the file)
+my $GOOD_BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FOLDER/good_blast.o"; # blast file filtered for good elements according to Goubert
+my $BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FOLDER/tblastn.o"; # default name and location unless a file is provided
 my $GENOME_IDENTITY = 80; # IDENTIFYING PROTEINS, per protein, minimum percent identity between protein and genome
 my $COVERAGE_RATIO = 0.5; # IDENTIFYING PROTEINS, per protein, minimum ratio of (blast match length) / (query length)
 my $COPY_NUMBER = 2; # IDENTIFYING PROTEINS, minimum number of copies that hit different parts of the genome 
@@ -130,9 +114,8 @@ my $NUM_THREADS = `nproc --all`;# determine the number of processors on the curr
 if ($?) { print STDERR "WARNING could not determine the number of cores automatically, defaulting to 8\n"; $NUM_THREADS=8}
 chomp $NUM_THREADS; 
 
-my $step_number = 1;
-if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
-    print STDERR "Working on STEP $step_number ...\n";
+if (($STEP == 1) or ($STEP == 12)) { # check if this step should be performed or not  
+    print STDERR "Working on STEP 1 ...\n";
 
     ## update the analysis file with what is going on
     print ANALYSIS "Running STEP 1\n";
@@ -163,7 +146,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     else {
         # check that all the necessary files have been provided
         unless ($INPUT_PROTEIN_SEQUENCES and $INPUT_GENOME) {
-            die ("ERROR, running STEP 1 requires either than both -p and -g parameters are set or that -t is set\n");
+            die ("ERROR, running STEP 1 requires that either 1) both -p and -g parameters are set or 2) that -t is set\n");
         }
 
         # update the analysis file
@@ -197,7 +180,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
         foreach my $dupseq (keys %cluster_number) { # update the Rejected file
             my $datestring = localtime();
             my $topseq = $cluster_topseq{$cluster_number{$dupseq}};
-            print REJECT "$datestring $dupseq overlaps with $topseq and was taken out of the analysis at STEP $step_number \n";
+            print REJECT "$datestring $dupseq overlaps with $topseq and was taken out of the analysis at STEP 1 \n";
         }
 
         # run tblastn
@@ -244,7 +227,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
             print OUTPUT "$line"; # add the current line to the blast file that will be used down the line
         }   
         else {
-            $rejected_ids{$data[0]} = "STEP $step_number\tError code (genome identity/coverage/minimum distance): $gi $cr $md"
+            $rejected_ids{$data[0]} = "STEP 1\tError code (genome identity/coverage/minimum distance): $gi $cr $md"
         }   
     }
     close INPUT;
@@ -264,7 +247,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
      foreach my $prot_name (keys %protein_ids) {
         unless ($protein_ids{$prot_name} >= $COPY_NUMBER) {
             my $datestring = localtime();
-            print REJECT "$datestring\t$prot_name\tSTEP $step_number\tError code (BLAST minimum copy number/observed copy number) $COPY_NUMBER $protein_ids{$prot_name}\n";
+            print REJECT "$datestring\t$prot_name\tSTEP 1\tError code (BLAST minimum copy number/observed copy number) $COPY_NUMBER $protein_ids{$prot_name}\n";
             delete $protein_ids{$prot_name};
         }
     }
@@ -280,10 +263,10 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     }
 
     if ($i) {
-        print STDERR "Finished STEP $step_number, identified $i candidates for further analysis\n";
+        print STDERR "Finished STEP 1, identified $i candidates for further analysis\n";
     }
     else {
-        print STDERR "WARNING: STEP $step_number did not result in any identified candiates, no output produced\n";
+        print STDERR "WARNING: STEP 1 did not result in any identified candiates, no output produced\n";
     }
 }
 
@@ -305,9 +288,8 @@ my $SEARCH_WINDOW_SIZE=20; # how big a window to search on either side of a pote
 my $MAX_GAP_N_AT_POSITION=0.5; # maximum proportion of gaps or N's at an alignment position, if above the position is ignored in this analysis
 my $TIR_SEARCH_RANGE = 6; # how many bp away from the alignement transistion to search for TIRs
 
-my $step_number = 2;
-if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
-    print STDERR "Working on STEP $step_number ...\n";
+if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or not  
+    print STDERR "Working on STEP 2 ...\n";
 
     ## update the analysis file with what is being done and paramter values
     print ANALYSIS "Running STEP 2\n";
@@ -664,9 +646,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 ### CONSTANTS applicable only for STEP 3
 my $TIR_bp = 30; # how many bp to display on the TIR side
 
-my $step_number = 3;
-if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
-    print STDERR "Working on STEP $step_number ...\n";
+if ($STEP == 3) { # check if this step should be performed or not  
+    print STDERR "Working on STEP 3 ...\n";
 
      ## update the analysis file with what is going on
     print ANALYSIS "Running STEP 3\n";
@@ -1052,9 +1033,8 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
 ### PIPELINE STEP 4 
 ### Identify most likely transposase ORF based on identified TIR sequences
 
-my $step_number = 4;
-if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if this step should be performed or not  
-    print STDERR "Working on STEP $step_number ...\n";
+if ($STEP == 4) { # check if this step should be performed or not  
+    print STDERR "Working on STEP 4 ...\n";
 
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
@@ -1063,7 +1043,7 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
     my $CONSENSUS_LEVEL = 0.5; # proportion of agreeing nucleotides to call a consensus 
     
      ## update the analysis file with what is going on
-    print ANALYSIS "Running STEP $step_number\n";
+    print ANALYSIS "Running STEP 4\n";
 
     # making sure all the required information has been provided
     unless ($INPUT_GENOME and $INPUT_PROTEIN_SEQUENCES){
@@ -1231,16 +1211,16 @@ if (($step_number >= $START_STEP) and ( $step_number <= $END_STEP)) { # check if
                 }
                 else {
                     my $datestring = localtime(); 
-                    print README "$datestring, in STEP $step_number, while TIRs were found no sequence matched the intial protein sequence\n";
-                    print REJECT "$datestring\t$element_name\tSTEP $step_number\tNo matches to initial protein sequence with tblastn\n";
+                    print README "$datestring, in STEP 4, while TIRs were found no sequence matched the intial protein sequence\n";
+                    print REJECT "$datestring\t$element_name\tSTEP 4\tNo matches to initial protein sequence with tblastn\n";
                     `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
                     if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
                 }
             }
             else {
                 my $datestring = localtime(); 
-                print README "$datestring, No genomic sequences with appropriately positioned TIRs were identified in STEP $step_number\n";
-                print REJECT "$datestring\t$element_name\tSTEP $step_number\tNo genomic sequences with appropriately positioned TIRs found\n";
+                print README "$datestring, No genomic sequences with appropriately positioned TIRs were identified in STEP 4\n";
+                print REJECT "$datestring\t$element_name\tSTEP 4\tNo genomic sequences with appropriately positioned TIRs found\n";
                 `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
                 if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
             }
