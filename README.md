@@ -18,37 +18,28 @@ All the input proteins are mapped to the genome using tblastn. The resulting out
 ***STEP 2 Scan around the proteins matches for TSD-TIR patterns***
 Here, the genomic region surrounding each remaining tblastn hit is scanned for the signature structure of TSDs and TIRs. Input proteins that don't have detected TSD-TIR structures in many of their genomic copies are filtered from further analysis. 
 
-***STEP 3 Manual review of potential transposable elements***
+***STEP 3 Manual review of TSD-TIR structure for potential transposable elements***
 Grouped by the input protein sequences the TSD-TIR structure of the remaining sequences is reviewed by a human. The person determines 1) if the TSD-TIR junctions appear to be those of a genuine transposable element, 2) what the most likely length of TSDs and TIRs appears to be for the each potential transposable element. 
 
 ***STEP 4 Identification of nearly complete elements***
+Identifies all the copies of the elements in the genome based on the TIRs identified in step 3. Each copy is then mapped back to the original protein that originated that element (from step 1). Sequences that largely map back to that protein are kept and reported as "nearly complete elements".
 
-
-## Running the scripts
-
-### Running the pipeline 
+## Running the pipeline 
 
 **Required of all steps**
 
 The pipeline is written in Perl, and is executed from the command line using 
 
-	perl mainscript.pl -n <analysis name> <other parameters>
+	perl mainscript.pl -n <analysis name>  -s <step(s) to execute> <other parameters>
 
 Where:
 
-	-n is the name of the current analysis. 
+	-n is the name of the current analysis
+	-s is the one of the steps to execute (step 12 can be used to execute both steps 1 and 2 consecutively)
 
 This name will be used as the base to create two folders called <analysis name>-element and <analysis name>-analysis. The folder ending in *-element* will include sub-folders for each idenfied element along with supporting information about it. The folder ending in *-analysis* will contain files with information about the analysis such as parameters, and rejeced elements.
 
 Other step specific parameters will be required as well, see below.
-
-**Specify which steps to execute**
-
-Unless otherwise specified all the analysis steps above will be executed. To specify that just one or a range
-of consecutive steps be executed the following parameter(s) can be set:
-
-    -a number of first (or only) step to execute
-    -b number of last step to execute, if not specified then only the first step will be executed
 
 ### Step specific parameters
 
@@ -77,11 +68,16 @@ When running this step the `-g` parameter (described in STEP 1) must be specifie
     
 ***STEP 3 has no step specific parameters or requirements*** 
 
+***STEP 4 parameter and file requirement*** 
+
+	-p fasta formatted file of proteins 
+	-g fasta formatted file genome file; this file must have been formatted with "makeblastdb" ahead of time
+
 ## Understanding analysis output folders files
 
-Each step will generate files that specify the outcome of the analysis. The goal of many of these files is to document exactly why each input protein was considered to be part of transposable element or not. There are two main folders produced by this pipeline. One, specified by the `-e` parameter, contains subfolders for every protein still considered to possibly be a part of transposable element. The second folder, specified by the `-n` parameter contains subfolders for all the protein sequences that were considered and rejected by the pipeline as being from transposable elements, as well as files specifying the analysis parameters used. Below the output files are described.
+Each step will generate files that specify the outcome of the analysis. The goal of many of these files is to document exactly why each input protein was considered to be part of transposable element or not. There are two main folders produced by this pipeline. One named *<analysis name from -n parameter>-element* contains subfolders for every protein still considered to possibly be a part of transposable element. The second folder, *<analysis name from -n parameter>-analysis* contains subfolders for all the protein sequences that were considered and rejected by the pipeline as being from transposable elements, as well as files specifying the analysis parameters and when steps where executed. Below, the output files are described.
 
-### README files
+### README file (in -element subfolder)
 Every subfolder with an input protein name contains a `README.txt` file that reports the analyses performed on this element. It may contain the following information (depending how long it was considered a candidate for being a transposable element).
 
 1) The number of genomic locations (loci) were found when matching the input protein to the genome using tblastn
@@ -89,28 +85,25 @@ Every subfolder with an input protein name contains a `README.txt` file that rep
 3) A statement of how the element performed on the "edge test". A true transposable element is expected to have a sharp transition in the alignment between sequences outside the element and TSD-TIR sequences inside the element. If such a sharp transition is too close the edge of the extended element, the script assumes no such transition is present and the sequences are not considered to be from transposable elements.
 4) A statement from the manual review in STEP 3, including notes from the reviewer.
 
-### .bed files
+### .bed files (in -element subfolder)
 The output of tblastn is converted to a .bed file
 
-### .alipos files
-These files are in a pipeline specific format, and contains information on element alignment locations removed because they are shared by too few copies of this element (this is the same proceedure as described in [Goubert et al. 2022](https://mobilednajournal.biomedcentral.com/articles/10.1186/s13100-021-00259-7). This file may be used to reconstruct the original alignment, prior to trimming the low copy alignment position.
-
-### .maf files
+### .maf files (in -element subfolder)
 These files that contains the multiple sequence alignment of all the extended blast matches (see STEP 2), but with alignment positions with too many gaps are removed (see .alipos file).  
 
-### .tirtsd files 
+### .tirtsd files (in -element subfolder)
 This file is meant to be used along with the .maf file. This .tirtsd file specifies positions in the alignment that delimit the outside locations TIR positions (in the .tirtsd file these are `loc1` and `loc2`). Each line also specifies a success code (see below), the number of alignment sequences that have intact TIRs, and the number of intact TSDs (TSD categories are TA, 2bp., 3bp, ... , 10bp.).
 
-### Analysis_parameters.txt file
+### Analysis_parameters.txt file (in -analysis subolder)
 This file contains a list of parameters used by the steps in the pipeline run. Most of these paramters can be modified directly in the perl script in subsequent analyses
 
-### Rejected_sequences.txt file
+### Rejected_sequences.txt file (in -analysis subolder)
 A list of input protein sequences that are not considered to be transposable elements. The step number and reason why the element was rejected are specified.
 
-### tblastn.o file
+### tblastn.o file (in -analysis subolder)
 Output of the tblastn analysis
 
-### Rejected_elements folder
+### Rejected_elements folder (in -analysis subolder)
 This folder contains sub folders for all the input proteins that were not filtered in STEP 1, but were rejected subsequently as not being transposable elements.
 
 ## Success codes
