@@ -45,6 +45,7 @@ unless ($ANALYSIS_NAME and $STEP) {
 }
 
 ## CHECK INPUTS (NOT STEP SPECIFIC) AND CREATE DIRECTORIES IF NECESSARY
+$ANALYSIS_NAME = fixdirname($ANALYSIS_NAME);
 $ANALYSIS_FOLDER = $ANALYSIS_NAME . "-analysis";
 $ELEMENT_FOLDER = $ANALYSIS_NAME . "-element";
 $ANALYSIS_FOLDER = fixdirname($ANALYSIS_FOLDER);
@@ -645,6 +646,7 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
 ### Present the elements to the user for manual review
 ### CONSTANTS applicable only for STEP 3
 my $TIR_bp = 30; # how many bp to display on the TIR side
+my $FURTHER_REVIEW_FOLDER_NAME = $ANALYSIS_NAME . "-further_review"; # if the user choose to put elements for further review they will go here
 
 if ($STEP == 3) { # check if this step should be performed or not  
     print STDERR "Working on STEP 3 ...\n";
@@ -977,7 +979,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                     }
 
                     print "2) Update the README to say this is not an element\n";
-                    print "3) Make a note in the README file\n";
+                    print "3) Make a note in the README file (you can also set this element aside using this option)\n";
                     print "4) Done reviewing this element\n";
                     print "(NOTE: if the alignment needs to be changed, use 0 to go back to the previous menu and select the option to manually change the sequences)\n";
 
@@ -1016,8 +1018,17 @@ if ($STEP == 3) { # check if this step should be performed or not
                             print "Edit the file $ELEMENT_FOLDER/$element_name/README.txt starting with\n";
                         }
                         print "$datestring, Manual Review 1 user note: \n";
-                        print "Press enter when done: ";
-                        <STDIN>;
+                        print "When done enter <f> to put this element aside further review into the folder $FURTHER_REVIEW_FOLDER_NAME, or any other key to leave it in its current folder\n";
+                        $pkey = <STDIN>;
+                        if ($pkey eq "f\n") { # user wants to store this into a folder for further review later
+                            unless (-d $FURTHER_REVIEW_FOLDER_NAME) { # create the folder if necessary
+                                `mkdir $FURTHER_REVIEW_FOLDER_NAME`;
+                            }
+                            print README "$datestring, in STEP 3 manual review 1, reviewer moved this element to the folder $FURTHER_REVIEW_FOLDER_NAME for further review\n";
+                            `mv $ELEMENT_FOLDER/$element_name $FURTHER_REVIEW_FOLDER_NAME`;
+                            $menu2 = 0; # indidcate that we're done reviewing this element
+                            $menu1 = 0;
+                        }
                     }
                     elsif ($pkey == 4) {
                         $menu2 = 0;
@@ -1042,13 +1053,13 @@ if ($STEP == 4) { # check if this step should be performed or not
     my $CONSENSUS_REMOVAL_THRESHOLD = 0.75; # minium number of taxa with a definite nucleotide at a position to make a consensus at this position
     my $CONSENSUS_LEVEL = 0.5; # proportion of agreeing nucleotides to call a consensus 
     
-     ## update the analysis file with what is going on
+    ## update the analysis file with what is going on
     print ANALYSIS "Running STEP 4\n";
 
     # making sure all the required information has been provided
     unless ($INPUT_GENOME and $INPUT_PROTEIN_SEQUENCES){
-        die "ERROR: for this step you need to provide two pieces of information:\n
-             1) a fasta formated genome file, using the -g parameter\n
+        die "ERROR: for this step you need to provide two pieces of information:
+             1) a fasta formated genome file, using the -g parameter
              2) the input protein file using the -p parameter\n";
     }
     print ANALYSIS "\tGenome: $INPUT_GENOME\n";
