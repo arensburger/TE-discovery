@@ -789,7 +789,14 @@ if ($STEP == 3) { # check if this step should be performed or not
                     $average_TIR_length = "N/A";
                 }
 
-                print "$i) $d[0] | $d[1]-$d[2], $TIR_number, $average_TIR_length | $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13], $TSD\n";
+                # print the possible lines
+                if ($TSD) { 
+                    print "$i) $d[0] | $d[1]-$d[2], $TIR_number, $average_TIR_length | $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13], $TSD\n";
+                }
+                else {
+                    print "$i) $d[0] | $d[1]-$d[2], $TIR_number, $average_TIR_length | no TSDs have been identified\n";
+                    $TSD=0;
+                }
                 push @selections, "$d[1]\t$d[2]\t$TSD\t$average_TIR_length\n";   
                 $i++;          
             }
