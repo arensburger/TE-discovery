@@ -877,13 +877,11 @@ if ($STEP == 3) { # check if this step should be performed or not
                 my %TIR_sequences; # element name as key and [0] left TIR sequences displayed [1] right TIR sequences displayed. This will be used in the next menus to display TIR sequences
                 open (OUTPUT, ">", $temp_alignment_file) or die "Cannot create temporary alignment file $temp_alignment_file\n";
                 foreach my $seq_name (keys %alignment_sequences) {
-print ">all\n$alignment_sequences{$seq_name}\n";
                     if ($seq_name =~ /consensus/) { 
                         $consensus_sequence = $alignment_sequences{$seq_name};
                     }
                     else {# avoid the line with the consensus sequence
                         ## left side sequences
-#                        my $left_whole_seq = substr($alignment_sequences{$seq_name}, 0, $TIR_b1);
                         my $left_whole_seq = substr($alignment_sequences{$seq_name}, 0, $TIR_b1-1);
 
                         $left_whole_seq =~ s/-//g; #remove gaps
@@ -894,8 +892,6 @@ print ">all\n$alignment_sequences{$seq_name}\n";
                                 $left_whole_seq .= "s";
                             }
                         }
-print ">left\n$left_whole_seq\n";
-#                        my $left_tsd = substr($left_whole_seq, -$TSD_size-1, $TSD_size);
                         my $left_tsd = substr($left_whole_seq, -$TSD_size, $TSD_size);
 
                         # get the sequence of the TIR, ignoring positions with no consensus
@@ -910,7 +906,6 @@ print ">left\n$left_whole_seq\n";
                         }
 
                         ## right side sequences
-#                        my $right_whole_seq = substr($alignment_sequences{$seq_name}, $TIR_b2, -1);
                         my $right_whole_seq = substr($alignment_sequences{$seq_name}, $TIR_b2);
                         $right_whole_seq =~ s/-//g; #remove gaps
                         # if there are no or few sequences, replace right TSD with space symbols
@@ -920,12 +915,10 @@ print ">left\n$left_whole_seq\n";
                                 $right_whole_seq .= "s";
                             }
                         }
-print ">right\n$right_whole_seq\n";
                         my $right_tsd = substr($right_whole_seq, 0, $TSD_size);
                         my $i=0;
                         my $right_tir_seq;
                         while ((length $right_tir_seq) < $TIR_bp) {
-#                            unless ((substr $consensus_sequence, $TIR_b2-$i, 1) =~ /n/i) {
                             unless ((substr $consensus_sequence, $TIR_b2-$i-1, 1) =~ /n/i) {
                                 $right_tir_seq .= substr($alignment_sequences{$seq_name}, $TIR_b2-$i-1, 1);
                             }
