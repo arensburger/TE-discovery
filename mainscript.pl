@@ -739,15 +739,17 @@ if ($STEP == 3) { # check if this step should be performed or not
         }
 
         my $menu1 = 1; # boolean, set to one until the user is done with menu 1
+        my $move_to_menu2 = 0; # boolean, set to zero until the user is ready to move on to menu 2
         while ($menu1) {
 
             my %alignment_sequences = fastatohash($files{$element_name}[1]); # load the existing alignment
 
             # Display the lines so the user can see what's available
             print "\nMENU 1\n";
-            print "0) Quit this element\n\n";
+            print "0) Quit this element\n";
+            print "1) View the whole sequence alignment\n";
             print "#) code | TIR-boundaries, # sequences with TIRs, Mean TIR length | Number of TSDs, Selected TSD\n";
-            my $i=1;
+            my $i=2;
             my @selections; # holds the information on the lines presented to the user
 
             foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) {
@@ -848,8 +850,13 @@ if ($STEP == 3) { # check if this step should be performed or not
             elsif ($pkey == 0) { # the user has decided to quit
                 $menu1 = 0;
             }
+            elsif ($pkey == 1) { # the user wants to see the original alignment
+                `aliview $ELEMENT_FOLDER/$element_name/$element_name.maf`;
+                if ($?) { die "ERROR: Could not open program aliview: error code $?\n"}
+print "aliview $ELEMENT_FOLDER/$element_name/$element_name.maf\n";
+            }
             else { # This means that the user selected a preset number
-                my @e = split " ", $selections[$pkey-1];
+                my @e = split " ", $selections[$pkey-2];
                 if ($e[2] eq "TA") { # adjust in case the TSD is "TA" rather than a number
                     $e[2] = 2;
                     $TSD_type = "TA";
@@ -858,10 +865,11 @@ if ($STEP == 3) { # check if this step should be performed or not
                 $TIR_b2 = $e[1];
                 $TSD_size = $e[2];
                 $TIR_size = $e[3];
+                $move_to_menu2 = 1;
             }
             $pkey = ""; # reset the pressed key 
 
-            if ($menu1) { # only continue if the user has not elected to quit menu 1
+            if (($menu1) and ($move_to_menu2)){ # only continue if the user has not elected to quit menu 1 and is ready to move on
                 # The TIRs and TSDs location have now been selected, next create an alignment to display these to the user  
 
                 # Find and record the conensus sequence, this will be necessary to properly display the TIR sequences
@@ -998,8 +1006,9 @@ if ($STEP == 3) { # check if this step should be performed or not
                     } until ((looks_like_number($pkey)) and ($pkey <= 6));
 
                     # process the user's choice
-                    if ($pkey == 0) {
+                    if ($pkey == 0) { # user wants to go back to menu 1 
                         $menu2 = 0;
+                        $move_to_menu2 = 0;
                     } 
                     elsif ($pkey == 1) {
                         my $datestring = localtime(); 
