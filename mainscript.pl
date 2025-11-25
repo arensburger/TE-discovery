@@ -414,7 +414,7 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
         my $alignment_length = length($aliseq{(keys %aliseq)[rand keys %aliseq]}); # pick a random sequence to get the length of the alignment (assuming all are the same length)
         my @agreement_proportion; # holds the highest percentage of sequences that agree on one nucleotide at a postion
         my %location_conversion; # holds the position of the alignment without gaps as key and corresponding alignment with gaps as value
-        my $consensus_sequence; # this will hold a consensus sequence for the whole alignment
+        my $consensus_sequence; # this will hold a consensus sequence for the whole alignment, in this consensus "n" means there's too many gaps or n sequences, "N" means there are enough nucleotides but they don't agree
 
         for (my $i=0; $i<$alignment_length; $i++) { # go through each position in the alignment
             my %chars; # holds the characters found at the current position as key, and abundance as value
@@ -445,7 +445,7 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
                     $consensus_sequence .= $most_abundant_character;
                 }
                 else {
-                    $consensus_sequence .= "n"
+                    $consensus_sequence .= "N"; 
                 }
             }
             
@@ -699,6 +699,9 @@ if ($STEP == 3) { # check if this step should be performed or not
         $count++;
         my $review_elements = keys %files; # total number of elements to review
         print "\nElement $element_name $count of $review_elements\n";
+        print ANALYSIS "\tManual review of element $ELEMENT_FOLDER/$element_name\n";
+        `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
+
 
         # Variables specific to this section
         my $TIR_b1; # left bound of TIR accepted by user
@@ -853,7 +856,6 @@ if ($STEP == 3) { # check if this step should be performed or not
             elsif ($pkey == 1) { # the user wants to see the original alignment
                 `aliview $ELEMENT_FOLDER/$element_name/$element_name.maf`;
                 if ($?) { die "ERROR: Could not open program aliview: error code $?\n"}
-print "aliview $ELEMENT_FOLDER/$element_name/$element_name.maf\n";
             }
             else { # This means that the user selected a preset number
                 my @e = split " ", $selections[$pkey-2];
@@ -884,6 +886,7 @@ print "aliview $ELEMENT_FOLDER/$element_name/$element_name.maf\n";
                 my $temp_alignment_file = "/tmp/$element_name.fa"; # tried using perl temporary file system, but aliview will not open those
                 my %TIR_sequences; # element name as key and [0] left TIR sequences displayed [1] right TIR sequences displayed. This will be used in the next menus to display TIR sequences
                 open (OUTPUT, ">", $temp_alignment_file) or die "Cannot create temporary alignment file $temp_alignment_file\n";
+
                 foreach my $seq_name (keys %alignment_sequences) {
                     if ($seq_name =~ /consensus/) { 
                         $consensus_sequence = $alignment_sequences{$seq_name};
@@ -891,7 +894,6 @@ print "aliview $ELEMENT_FOLDER/$element_name/$element_name.maf\n";
                     else {# avoid the line with the consensus sequence
                         ## left side sequences
                         my $left_whole_seq = substr($alignment_sequences{$seq_name}, 0, $TIR_b1-1);
-
                         $left_whole_seq =~ s/-//g; #remove gaps
                         # if there are no or few sequences, replace left TSD with space symbols
                         if ((length $left_whole_seq) < $TSD_size) {
@@ -906,7 +908,7 @@ print "aliview $ELEMENT_FOLDER/$element_name/$element_name.maf\n";
                         my $i=0;
                         my $left_tir_seq;
                         while ((length $left_tir_seq) < $TIR_bp) {
-                            unless ((substr $consensus_sequence, $TIR_b1-1+$i, 1) =~ /n/i) {
+                            unless ((substr $consensus_sequence, $TIR_b1-1+$i, 1) =~ /n/) {
                                 $left_tir_seq .= substr($alignment_sequences{$seq_name}, $TIR_b1-1+$i, 1);
                             }
                             $i++;
@@ -955,7 +957,6 @@ print "aliview $ELEMENT_FOLDER/$element_name/$element_name.maf\n";
                 close OUTPUT;
 
                 # MENU 2 display the alignement to the user and ask for evaluation
-                `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
                 `aliview $temp_alignment_file`;
                 if ($?) { die "Error executing: aliview $temp_alignment_file, error code $?\n"}
 
@@ -1137,7 +1138,7 @@ if ($STEP == 4) { # check if this step should be performed or not
         my $tir1_seq = lc($file_tirs{$element_name}[1]);
         my $tir2_seq = lc($file_tirs{$element_name}[2]);
         my $TIRs_set = 1; # boolean, set to 1 if TIR sequence are ok, or zero if not
-        if (($tir1_seq =~/n/) or ($tir2_seq =~ /n/)) { # if the tir sequences include "n" characters warn the user and stop processing
+        if (($tir1_seq =~/n/i) or ($tir2_seq =~ /n/i)) { # if the tir sequences include "n" characters warn the user and stop processing
             print STDERR "WARNING: The TIR sequences $tir1_seq and $tir2_seq for element $element_name contain one or more n characters, this is a problem for finding this element in the genome. Ignoring this element.\n";
             $TIRs_set = 0;
         }
@@ -1324,7 +1325,7 @@ sub gettsd {
             return (0);
         }
     }
-    elsif (($type eq "2") and ($c1 and $c2) and ($c1 eq $c2)) { # check that both are equal and not 0, 0 means the sequence contained an "n" charcater
+    elsif (($type eq "2") and ($c1 and $c2)) { # check that both are equal and not 0, 0 means the sequence contained an "n" charcater
         if ($c1 eq "ta") { # this is to avoid duplication with the TA TSDs
             return (0); # this is a TA tsd, not approriate for this category
         }
