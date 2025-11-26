@@ -751,8 +751,9 @@ if ($STEP == 3) { # check if this step should be performed or not
             print "\nMENU 1\n";
             print "0) Quit this element\n";
             print "1) View the whole sequence alignment\n";
+            print "2) Make a note in the README file (you can also set this element aside using this option)\n";
             print "#) code | TIR-boundaries, # sequences with TIRs, Mean TIR length | Number of TSDs, Selected TSD\n";
-            my $i=2;
+            my $i=3;
             my @selections; # holds the information on the lines presented to the user
 
             foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) {
@@ -760,17 +761,26 @@ if ($STEP == 3) { # check if this step should be performed or not
                 my $TSD; # identity of the TSD with maximum abundance
                 my $max_tsd; # highest number of TSDs on the line
             
-                # determine the TSD with the highest number
-                if ($d[4] > $max_tsd) { $TSD="TA"; $max_tsd =$d[4]; }
-                if ($d[5] > $max_tsd) { $TSD=2; $max_tsd =$d[5];  }
-                if ($d[6] > $max_tsd) { $TSD=3; $max_tsd =$d[6];  }
-                if ($d[7] > $max_tsd) { $TSD=4; $max_tsd =$d[7];  }
-                if ($d[8] > $max_tsd) { $TSD=5; $max_tsd =$d[8];  }
-                if ($d[9] > $max_tsd) { $TSD=6; $max_tsd =$d[9];  }
-                if ($d[10] > $max_tsd) { $TSD=7; $max_tsd =$d[10];  }
-                if ($d[11] > $max_tsd) { $TSD=8; $max_tsd =$d[11];  }
-                if ($d[12] > $max_tsd) { $TSD=9; $max_tsd =$d[12];  }
-                if ($d[13] > $max_tsd) { $TSD=10; $max_tsd =$d[13];  }
+                # Determine the most likely TSD. Favor 8bp and TA, but if those are zero then determine the TSD with the highest number
+                
+                if ($d[11] > 0) { 
+                    $TSD=8;
+                }
+                elsif ($d[4] > 0) {
+                    $TSD="TA";
+                }
+                else {
+#                    if ($d[4] > $max_tsd) { $TSD="TA"; $max_tsd =$d[4]; }
+                    if ($d[5] > $max_tsd) { $TSD=2; $max_tsd =$d[5];  }
+                    if ($d[6] > $max_tsd) { $TSD=3; $max_tsd =$d[6];  }
+                    if ($d[7] > $max_tsd) { $TSD=4; $max_tsd =$d[7];  }
+                    if ($d[8] > $max_tsd) { $TSD=5; $max_tsd =$d[8];  }
+                    if ($d[9] > $max_tsd) { $TSD=6; $max_tsd =$d[9];  }
+                    if ($d[10] > $max_tsd) { $TSD=7; $max_tsd =$d[10];  }
+#                    if ($d[11] > $max_tsd) { $TSD=8; $max_tsd =$d[11];  }
+                    if ($d[12] > $max_tsd) { $TSD=9; $max_tsd =$d[12];  }
+                    if ($d[13] > $max_tsd) { $TSD=10; $max_tsd =$d[13];  }
+                }
 
                 # determine the average TIR length for the current combination of sequences and locations";
                 my $number_of_sequences; # total sequences in this alignment
@@ -858,8 +868,25 @@ if ($STEP == 3) { # check if this step should be performed or not
                 `aliview $ELEMENT_FOLDER/$element_name/$element_name.maf`;
                 if ($?) { die "ERROR: Could not open program aliview: error code $?\n"}
             }
+            elsif ($pkey == 2) { # the user wants to update the README file or set this element aside
+                my $datestring = localtime(); 
+                print "\tEdit the file $ELEMENT_FOLDER/$element_name/README.txt starting with\n";
+                print "\t$datestring, Manual Review 1 user note: \n";
+                print "\tWhen done enter <f> to put this element aside further review into the folder $FURTHER_REVIEW_FOLDER_NAME, or any other key to leave it in its current folder\n";
+                print "\t:";
+                $pkey = <STDIN>;
+                if ($pkey eq "f\n") { # user wants to store this into a folder for further review later
+                    unless (-d $FURTHER_REVIEW_FOLDER_NAME) { # create the folder if necessary
+                        `mkdir $FURTHER_REVIEW_FOLDER_NAME`;
+                    }
+                    print README "$datestring, in STEP 3 manual review 1, reviewer moved this element to the folder $FURTHER_REVIEW_FOLDER_NAME for further review\n";
+                    `mv $ELEMENT_FOLDER/$element_name $FURTHER_REVIEW_FOLDER_NAME`;
+                    print "\tMoved the element to the folder $FURTHER_REVIEW_FOLDER_NAME\n";
+                    $menu1 = 0;
+                }
+            }
             else { # This means that the user selected a preset number
-                my @e = split " ", $selections[$pkey-2];
+                my @e = split " ", $selections[$pkey-3];
                 if ($e[2] eq "TA") { # adjust in case the TSD is "TA" rather than a number
                     $e[2] = 2;
                     $TSD_type = "TA";
@@ -930,6 +957,8 @@ if ($STEP == 3) { # check if this step should be performed or not
                         my $i=0;
                         my $right_tir_seq;
                         while ((length $right_tir_seq) < $TIR_bp) {
+   #                         my $ha = (substr $consensus_sequence, $TIR_b2-$i-1, 1);
+   #                         print "$ha\t$TIR_bp\t$TIR_b2\t$i\n";
                             unless ((substr $consensus_sequence, $TIR_b2-$i-1, 1) =~ /n/i) {
                                 $right_tir_seq .= substr($alignment_sequences{$seq_name}, $TIR_b2-$i-1, 1);
                             }
@@ -962,7 +991,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                 if ($?) { die "Error executing: aliview $temp_alignment_file, error code $?\n"}
 
                 my $menu2 = 1; # boolean, set to 1 until the user is done with menu 2
-                my $element_rejected = 0; # boolean, set to 0 unless option "this is not an element selected", used to know which README to edit
+ #               my $element_rejected = 0; # boolean, set to 0 unless option "this is not an element selected", used to know which README to edit
 
                 # figure out the TIR sequences
                 # don't use the consensus sequence for this, because that contains n characters
@@ -986,24 +1015,24 @@ if ($STEP == 3) { # check if this step should be performed or not
                 }
 
                 while ($menu2) { #keep displaying until the user ready to leave
-                    print "\nMENU 2 Select what to do with this element:\n";
-                    print "0) Go back to the previous menu\n";
+                    print "\n\tMENU 2 Select what to do with this element:\n";
+                    print "\t0) Go back to the previous menu\n";
 
                     # menu item 1, the element is complete                    
                     if ($TSD_type eq "TA") {
-                        print "1) Update the README to say this is an element with TSDs of type TA and TIRs $TIR1_sequence and $TIR2_sequence\n";
+                        print "\t1) Update the README to say this is an element with TSDs of type TA and TIRs $TIR1_sequence and $TIR2_sequence\n";
                     }
                     else {
-                        print "1) Update the README to say this as an element with TSDs of size $TSD_size and TIRs $TIR1_sequence and $TIR2_sequence\n";
+                        print "\t1) Update the README to say this as an element with TSDs of size $TSD_size and TIRs $TIR1_sequence and $TIR2_sequence\n";
                     }
 
-                    print "2) Update the README to say this is not an element\n";
-                    print "3) Make a note in the README file (you can also set this element aside using this option)\n";
-                    print "4) Done reviewing this element\n";
-                    print "(NOTE: if the alignment needs to be changed, use 0 to go back to the previous menu and select the option to manually change the sequences)\n";
+                    print "\t2) Update the README to say this is not an element\n";
+ #                   print "\t3) Make a note in the README file (you can also set this element aside using this option)\n";
+                    print "\t4) Done reviewing this element\n";
+                    print "\t(NOTE: if the alignment needs to be changed, use 0 to go back to the previous menu and select the option to manually change the sequences)\n";
 
                     do { # read the user input until it's a number within range
-                        print "Line selection: ";
+                        print "\tLine selection: ";
                         $pkey = <STDIN>;
                     } until ((looks_like_number($pkey)) and ($pkey <= 6));
 
@@ -1027,29 +1056,29 @@ if ($STEP == 3) { # check if this step should be performed or not
                         print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
                         `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
                         if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
-                        $element_rejected = 1;
+ #                       $element_rejected = 1;
                     }
-                    elsif ($pkey == 3) {
-                        my $datestring = localtime(); 
-                        if ($element_rejected) {
-                            print "Edit the file $ANALYSIS_FOLDER/$element_name/README.txt starting with\n";
-                        }
-                        else {
-                            print "Edit the file $ELEMENT_FOLDER/$element_name/README.txt starting with\n";
-                        }
-                        print "$datestring, Manual Review 1 user note: \n";
-                        print "When done enter <f> to put this element aside further review into the folder $FURTHER_REVIEW_FOLDER_NAME, or any other key to leave it in its current folder\n";
-                        $pkey = <STDIN>;
-                        if ($pkey eq "f\n") { # user wants to store this into a folder for further review later
-                            unless (-d $FURTHER_REVIEW_FOLDER_NAME) { # create the folder if necessary
-                                `mkdir $FURTHER_REVIEW_FOLDER_NAME`;
-                            }
-                            print README "$datestring, in STEP 3 manual review 1, reviewer moved this element to the folder $FURTHER_REVIEW_FOLDER_NAME for further review\n";
-                            `mv $ELEMENT_FOLDER/$element_name $FURTHER_REVIEW_FOLDER_NAME`;
-                            $menu2 = 0; # indidcate that we're done reviewing this element
-                            $menu1 = 0;
-                        }
-                    }
+                    # elsif ($pkey == 3) {
+                    #     my $datestring = localtime(); 
+                    #     if ($element_rejected) {
+                    #         print "\tEdit the file $ANALYSIS_FOLDER/$element_name/README.txt starting with\n";
+                    #     }
+                    #     else {
+                    #         print "\tEdit the file $ELEMENT_FOLDER/$element_name/README.txt starting with\n";
+                    #     }
+                    #     print "\t$datestring, Manual Review 1 user note: \n";
+                    #     print "\tWhen done enter <f> to put this element aside further review into the folder $FURTHER_REVIEW_FOLDER_NAME, or any other key to leave it in its current folder\n";
+                    #     $pkey = <STDIN>;
+                    #     if ($pkey eq "f\n") { # user wants to store this into a folder for further review later
+                    #         unless (-d $FURTHER_REVIEW_FOLDER_NAME) { # create the folder if necessary
+                    #             `mkdir $FURTHER_REVIEW_FOLDER_NAME`;
+                    #         }
+                    #         print README "$datestring, in STEP 3 manual review 1, reviewer moved this element to the folder $FURTHER_REVIEW_FOLDER_NAME for further review\n";
+                    #         `mv $ELEMENT_FOLDER/$element_name $FURTHER_REVIEW_FOLDER_NAME`;
+                    #         $menu2 = 0; # indidcate that we're done reviewing this element
+                    #         $menu1 = 0;
+                    #     }
+                    # }
                     elsif ($pkey == 4) {
                         $menu2 = 0;
                         $menu1 = 0;
