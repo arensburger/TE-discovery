@@ -849,6 +849,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                         $TIR_size = "N/A";
                     } 
                 } until ($entry_accepted);
+                $move_to_menu2 = 1;
             }
             elsif ($pkey == 0) { # the user has decided to quit
                 $menu1 = 0;
