@@ -746,8 +746,9 @@ if ($STEP == 3) { # check if this step should be performed or not
         my @menu1_items; # hold the text of menu 1 choices
         push @menu1_items, "Quit this element"; # item 1
         push @menu1_items, "View the whole sequence alignment"; # item 2
-        push @menu1_items, "Make a note in the README file\n\t(you can also set this element aside using this option)"; #item 3
-        push @menu1_items, "Update the README to say this is not an element and quit\n\t(select an option below if you do not want to quit)"; #item 4
+        push @menu1_items, "Make a note in the README file"; #item 3
+        push @menu1_items, "Update the README to say this is not an element and quit this element"; #item 4
+        push @menu1_items, "Set this element aside for later review"; #item 5
         foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) {
             my @d = split " ", $line;
             my $TSD; # identity of the TSD with maximum abundance
@@ -795,10 +796,10 @@ if ($STEP == 3) { # check if this step should be performed or not
 
             # add the possible lines to the list
             if ($TSD) { 
-                push @menu1_items, "$d[0] | $d[1]-$d[2], $TIR_number, $average_TIR_length | $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13], $TSD";
+                push @menu1_items, "$d[1]-$d[2], $TIR_number, $average_TIR_length | $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13], $TSD";
             }
             else {
-                push @menu1_items, "$d[0] | $d[1]-$d[2], $TIR_number, $average_TIR_length | no TSDs have been identified";
+                push @menu1_items, "$d[1]-$d[2], $TIR_number, $average_TIR_length | no TSDs have been identified";
                 $TSD=0;
             }
             $i++;          
@@ -818,46 +819,8 @@ if ($STEP == 3) { # check if this step should be performed or not
              separator => '[,/\s]',
             },'', 2);
  
-            if ($menu1_choice == (scalar @menu1_items)) { # This means the manual selection was entered 
-                my $entry_accepted; # used to know if user has finished selecting             
-                do {
-                    $entry_accepted = 0; # assume user will put in a correct entry, set to zero if not
-                    print "Enter left alignement coordinate: ";
-                    $pkey = <STDIN>; chomp $pkey;
-                    $TIR_b1 = $pkey;
-                    print "Enter right alignement coordinate: ";
-                    $pkey = <STDIN>; chomp $pkey;
-                    $TIR_b2 = $pkey;
-                    print "Enter TSD size (can enter TA): ";
-                    $pkey = <STDIN>; chomp $pkey;
-                    $TSD_size = $pkey;
-                    print "Enter TIR size (can enter 0 if you don't want to enter a size): ";
-                    $pkey = <STDIN>; chomp $pkey;
-                    $TIR_size = $pkey;
-                    if (looks_like_number($TIR_b1) and looks_like_number($TIR_b2) and looks_like_number($TIR_size)) {
-                        if (($TSD_size eq "TA") or ($TSD_size eq "ta")) {
-                            $TSD_size = 2;
-                            $TSD_type = "TA";
-                            $entry_accepted=1;
-                        }
-                        elsif (looks_like_number($TSD_size)) {
-                            $TSD_type = "";
-                            $entry_accepted=1;
-                        }
-                        else {
-                            print STDERR "WARNING: Your TSD coordinate entry is not valid\n";
-                        }
-                    }
-                    else {
-                        print STDERR "WARNING: Your coordinate entries don't seem to be numbers\n";
-                    }
-                    unless ($TIR_size) {
-                        $TIR_size = "N/A";
-                    } 
-                } until ($entry_accepted);
-                $move_to_menu2 = 1;
-            }
-            elsif ($menu1_choice == 1) { # the user has decided to quit
+            # process answer to menu 1
+            if ($menu1_choice == 1) { # the user has decided to quit
                 $menu1 = 0;
             }
             elsif ($menu1_choice == 2) { # the user wants to see the original alignment
@@ -865,21 +828,13 @@ if ($STEP == 3) { # check if this step should be performed or not
                 if ($?) { die "ERROR: Could not open program aliview: error code $?\n"}
             }
             elsif ($menu1_choice == 3) { # the user wants to update the README file or set this element aside
+                
+                # update the README file with a new line and open the editor
                 my $datestring = localtime(); 
-                print "\tEdit the file $ELEMENT_FOLDER/$element_name/README.txt starting with\n";
-                print "\t$datestring, Manual Review 1 user note: \n";
-                print "\tWhen done enter <f> to put this element aside further review into the folder $FURTHER_REVIEW_FOLDER_NAME, or any other key to leave it in its current folder\n";
-                print "\t:";
-                $pkey = <STDIN>;
-                if ($pkey eq "f\n") { # user wants to store this into a folder for further review later
-                    unless (-d $FURTHER_REVIEW_FOLDER_NAME) { # create the folder if necessary
-                        `mkdir $FURTHER_REVIEW_FOLDER_NAME`;
-                    }
-                    print README "$datestring, in STEP 3 manual review 1, reviewer moved this element to the folder $FURTHER_REVIEW_FOLDER_NAME for further review\n";
-                    `mv $ELEMENT_FOLDER/$element_name $FURTHER_REVIEW_FOLDER_NAME`;
-                    print "\tMoved the element to the folder $FURTHER_REVIEW_FOLDER_NAME\n";
-                    $menu1 = 0;
-                }
+                `echo $datestring, Manual Review 1 user note: >> $ELEMENT_FOLDER/$element_name/README.txt`;
+                if ($?) { die "ERROR: could not add line to README file $ELEMENT_FOLDER/$element_name/README.txt: error code $?\n"}
+                `gnome-text-editor $ELEMENT_FOLDER/$element_name/README.txt`;
+                if ($?) { die "ERROR: could not open for editing the file $ELEMENT_FOLDER/$element_name/README.txt: error code $?\n"}
             }
             elsif ($menu1_choice == 4) { # the user wants to label this an not an element
                 my $datestring = localtime(); 
@@ -888,8 +843,34 @@ if ($STEP == 3) { # check if this step should be performed or not
                 `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
                 $menu1 = 0;
             }
+            elsif ($menu1_choice == 5) { # the user wants to set this element aside
+                unless (-d $FURTHER_REVIEW_FOLDER_NAME) { # create the folder if necessary
+                    `mkdir $FURTHER_REVIEW_FOLDER_NAME`;
+                    if ($?) { die "ERROR: could make folder $FURTHER_REVIEW_FOLDER_NAME: error code $?\n"}
+                }
+                print README "$datestring, in STEP 3 manual review 1, reviewer moved this element to the folder $FURTHER_REVIEW_FOLDER_NAME for further review\n";
+                `mv $ELEMENT_FOLDER/$element_name $FURTHER_REVIEW_FOLDER_NAME`;
+                if ($?) { die "ERROR: could not move folder $ELEMENT_FOLDER/$element_name to folder $FURTHER_REVIEW_FOLDER_NAME: error code $?\n"}
+                print "\tMoved the element to the folder $FURTHER_REVIEW_FOLDER_NAME\n";
+                $menu1 = 0;
+            }
+            elsif ($menu1_choice == (scalar @menu1_items)) { # the user wants to manually enter the coordinates
+                $TIR_b1 = prompt('n', "Left alignement coordinate:", '', '' );
+                $TIR_b2 = prompt('n', "Right alignement coordinate:", '', '' );
+                $TSD_size = prompt('n', "TSD size (enter 0 for \"TA\"):", '', '' );
+                $TIR_size = prompt('n', "TIR size:", '', '' );
+                if ($TSD_size == 0) {
+                    $TSD_size = 2;
+                    $TSD_type = "TA";
+                }
+                else {
+                    $TSD_type = $TSD_size;
+                }
+                $move_to_menu2 = 1;
+            }
             else { # This means that the user selected a preset number
-                if ($menu1_items[$menu1_choice-1] =~ /^\d+\s\|\s(\d+)-(\d+),\s\d+,\s(\d+)\s\|\s\S+,\s(\S+)/) {
+                 $move_to_menu2 = 1;
+                if ($menu1_items[$menu1_choice-1] =~ /^(\d+)-(\d+),\s\d+,\s(\d+)\s\|\s\S+,\s(\S+)/) {
                     $TIR_b1 = $1; 
                     $TIR_b2 = $2; 
                     $TIR_size = $3;
@@ -903,7 +884,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                     }
                     $move_to_menu2 = 1;
                 }
-                elsif ($menu1_items[$menu1_choice-1] =~ /^\d+\s\|\s(\d+)-(\d+),\s\d+,\s(\d+)\s\|\sno\sTSDs\shave\sbeen\sidentified/) {
+                elsif ($menu1_items[$menu1_choice-1] =~ /^(\d+)-(\d+),\s\d+,\s(\d+)\s\|\sno\sTSDs\shave\sbeen\sidentified/) {
                     $TIR_b1 = $1; 
                     $TIR_b2 = $2; 
                     $TIR_size = $3;
