@@ -755,7 +755,10 @@ if ($STEP == 3) { # check if this step should be performed or not
             my $max_tsd; # highest number of TSDs on the line
         
             # Determine the most likely TSD. Favor 8bp and TA, but if those are zero then determine the TSD with the highest number 
-            if ($d[11] > 0) { 
+            if ($d[4] > (5*$d[11])) { # special case where TA tsds way outnumber 8bp. TSD, likely a case of the 8bp. tsd being TATATATATA so favoring a TA tsd
+                $TSD="TA";
+            }
+            elsif ($d[11] > 0) { 
                 $TSD=8;
             }
             elsif ($d[4] > 0) {
