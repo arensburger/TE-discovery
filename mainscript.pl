@@ -800,6 +800,8 @@ if ($STEP == 3) { # check if this step should be performed or not
             # add the possible lines to the list
             if ($TSD) { 
                 push @menu1_items, "$d[1]-$d[2], $TIR_number, $average_TIR_length | $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13], $TSD";
+#                push @menu1_items, "$d[1]-$d[2], $TIR_number, $average_TIR_length | $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13]";
+
             }
             else {
                 push @menu1_items, "$d[1]-$d[2], $TIR_number, $average_TIR_length | no TSDs have been identified";
@@ -872,13 +874,18 @@ if ($STEP == 3) { # check if this step should be performed or not
                 $move_to_menu2 = 1;
             }
             else { # This means that the user selected a preset number
-                 $move_to_menu2 = 1;
+                $move_to_menu2 = 1;
                 if ($menu1_items[$menu1_choice-1] =~ /^(\d+)-(\d+),\s\d+,\s(\d+)\s\|\s\S+,\s(\S+)/) {
                     $TIR_b1 = $1; 
                     $TIR_b2 = $2; 
                     $TIR_size = $3;
-                    $TSD_size = $4;
-                    if ($TSD_size eq "TA") {
+                    my $default_tsd = $4;
+                    if ($default_tsd eq "TA") {
+                        $default_tsd = 0;
+                    }
+                    # ask what TSD size to use
+                    $TSD_size = prompt('n', "What TSD size should be displayed? (0 for TA)", '', $default_tsd);
+                    if ($TSD_size == 0) {
                         $TSD_size = 2;
                         $TSD_type = "TA";
                     }
