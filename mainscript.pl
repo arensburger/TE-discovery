@@ -10,6 +10,7 @@ use List::UtilsBy qw(max_by);
 use List::Util qw(max);
 use Scalar::Util qw(looks_like_number);
 use Term::Prompt;
+use Term::ANSIColor;
 
 ### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
@@ -654,12 +655,14 @@ if ($STEP == 3) { # check if this step should be performed or not
 
      ## update the analysis file with what is going on
     print ANALYSIS "Running STEP 3\n";
-    print ANALYSIS "\tTIR_bp = $TIR_bp\n";
 
     my $pkey; # pressed key, used for input from user
 
     ## make a list of elements to analyze, put those element into %files along with relevant file names
+    ## also record TIRs that have been previously recorded to avoid duplicates
     my %files; # holds the element name as key and path to the .tirtsd and the .maf files as array of values
+    my %seen_tirs; # hash of arrays that holds the two tir sequences for tirs that have already been observed
+
     opendir(my $dh, $ELEMENT_FOLDER) or die "ERROR: Cannot open element folder $ELEMENT_FOLDER, $!";
     while (readdir $dh) {
         unless ($_ =~ /^\./) { # prevents reading invisible files or the . and .. files
@@ -670,6 +673,12 @@ if ($STEP == 3) { # check if this step should be performed or not
             my $grep_res = `grep "Manual Review 1 result" $specific_element_folder/README.txt`;
             if ($grep_res) {
                 print STDERR "\tElement $_ has already been manually reviewed, ignoring\n";
+                # recording any TIRs
+                if ($grep_res =~ /TSD\s(\S+),\sTIRs\s(\S+)\sand\s(\S+)/) {
+                    $seen_tirs{$_}[0]=$1;
+                    $seen_tirs{$_}[1]=$2;
+                    $seen_tirs{$_}[2]=$3;
+                }
             }
             else {
                 if (-e $tirtsd_file) {
@@ -692,6 +701,9 @@ if ($STEP == 3) { # check if this step should be performed or not
     unless (keys %files) {
         print STDERR "WARNING: No files that need manual review were found\n";
     }
+
+#    my ($tirmatch, $overlap1, $overlap2) = compare_tirs("cagtcaaacctc", "gaggtccgactg", %seen_tirs);
+
 
     my $count = 0; # used to report to the user how many elements need to be reviewed
     ## Read the .tirtsd files and process each relevant line (based on %EXAMINE_CODES)
@@ -775,16 +787,18 @@ if ($STEP == 3) { # check if this step should be performed or not
                 if ($d[13] > $max_tsd) { $TSD=10; $max_tsd =$d[13];  }
             }
 
-            # determine the average TIR length for the current combination of sequences and locations";
+            # determine the average TIR length for the current combination of sequences and locations
+            # and record all the tir sequences;
             my $number_of_sequences; # total sequences in this alignment
             my $total_TIR_length; # sum of all the TIR length, used to calculate the average
             my $TIR_number; # number of sequences with TIRs
             my $average_TIR_length;
+#            my %tir_sequences; # holds the sequence the two tirs for every sequence
 
-            foreach my $key (keys %alignment_sequences) {
-                my ($tir1, $tir2) = gettir($alignment_sequences{$key}, $d[1], $d[2], $MIN_TIR_SIZE, $TIR_MISMATCHES);
-                if ($tir1) {
-                    $total_TIR_length += length ($tir1);
+            foreach my $sequence_name (keys %alignment_sequences) {
+                my ($TIR1, $TIR2) = gettir($alignment_sequences{$sequence_name}, $d[1], $d[2], $MIN_TIR_SIZE, $TIR_MISMATCHES);
+                if ($TIR1) {
+                    $total_TIR_length += length $TIR1;
                     $TIR_number += 1;
                 }
             }
@@ -800,8 +814,6 @@ if ($STEP == 3) { # check if this step should be performed or not
             # add the possible lines to the list
             if ($TSD) { 
                 push @menu1_items, "$d[1]-$d[2], $TIR_number, $average_TIR_length | $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13], $TSD";
-#                push @menu1_items, "$d[1]-$d[2], $TIR_number, $average_TIR_length | $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13]";
-
             }
             else {
                 push @menu1_items, "$d[1]-$d[2], $TIR_number, $average_TIR_length | no TSDs have been identified";
@@ -1018,11 +1030,22 @@ if ($STEP == 3) { # check if this step should be performed or not
                     $TIR1_sequence .= max_by { $left_char_abundance{$_} } keys %left_char_abundance;
                     $TIR2_sequence .= max_by { $right_char_abundance{$_} } keys %right_char_abundance;
                 }
-
-                  # setup and display menu 2
+                
+                # setup and display menu 2, testing to see if this combination of TIRs has been seen before
                 my @menu2_items; # hold the text of menu 2 choices
                 push @menu2_items, "Go back to the previous menu";
-                push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence";
+
+                # testing for this TIR having been seen before, change the option if it has
+                my ($tirmatch, $other_element_name, $other_tir1, $other_tir2, $other_tsd) = compare_tirs($TIR1_sequence, $TIR2_sequence, %seen_tirs);
+                if (abs($tirmatch)==2) { # the exact same tirs have been seen one of the two DNA strands
+                    push @menu2_items, "WARNING: Element $other_element_name has aleady been recorded with these exact same TIRs, select this option to merge the elements";
+                }
+                elsif(abs($tirmatch)==1) { # another tir like this one, but not an exact match was found
+                    push @menu2_items, "WARNING: Element $other_element_name has aleady been recorded with similar but not he same TIRs, select this option to select how to merge them";
+                }
+                else {
+                    push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence";
+                }
                 push @menu2_items, "Update the README to say this is not an element";
                 push @menu2_items, "Done reviewing this element";
                 while ($menu2) { #keep displaying until the user ready to leave
@@ -1041,6 +1064,20 @@ if ($STEP == 3) { # check if this step should be performed or not
                         $menu2 = 0;
                         $move_to_menu2 = 0;
                     } 
+                    elsif (($menu2_choice == 2) and (abs($tirmatch)==1)) { # this element has been seen before
+                        my @menu21_items; # sub menu of menu2 to figure out how to deal with element seen before 
+                        push @menu21_items, "Go back to the previous menu";
+                        push @menu21_items, "Merge the elements, with TIRS: $TIR1_sequence $TIR2_sequence";
+                        push @menu21_items, "Merge the elements, with TIRS: $other_tir1 $other_tir2";
+                        my $menu21_choice = prompt('m', {
+                            title => "MENU2-1\ncurrent  TIRs:$TIR1_sequence\t$TIR2_sequence\nprevious TIRs:$other_tir1\t$other_tir2\n",
+                            prompt => 'What would you like to do?',
+                            return_base => 1,
+                            accept_multiple_selections => 0,
+                        items  => [@menu21_items],
+                        },'', 1);
+
+                    }
                     elsif ($menu2_choice == 2) { # user wants to report this an element as it is
                         my $datestring = localtime(); 
                         if ($TSD_type eq "TA") {
@@ -1502,4 +1539,66 @@ sub identify_element_sequence {
         }
     }
     return (%nucleotide_sequences);
+}
+
+# in-depth comparion between possible tirs and what's already been seen
+# returns 2 if it's an exact match, 1 for a partial match, and 0 for no match. Postitive numbers 
+# if the matches are in the orientation, negative for reverse orientation
+sub compare_tirs {
+    my($t1, $t2, %seen) = @_; # tirs to explore and what's been seen
+    foreach my $elementname (keys %seen) {
+        my $s1_match=0; 
+        my $s2_match=0; 
+
+        # test in the same orientation                
+        $s1_match = testmatch($t1,$seen{$elementname}[1],1); # the inputs are the two sequences to compare, and 1 to indicate it's the left tir   
+        $s2_match = testmatch($t2,$seen{$elementname}[2],2); # the inputs are the two sequences to compare, and 2 to indicate it's the right tir 
+        if ($s1_match and $s2_match) { # match found
+            if (($t1 eq $seen{$elementname}[1]) and ($t2 eq $seen{$elementname}[2])) { # true if the TIRs are exactly the same
+                return(2, $elementname, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
+            }
+            else { # the match is not exact
+                return(1, $elementname, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
+            }
+        }
+
+       # test in the reverse orientation
+       $s1_match = testmatch(rc($t2),$seen{$elementname}[1],1); 
+       $s2_match = testmatch(rc($t1),$seen{$elementname}[2],2); 
+       if ($s1_match and $s2_match) {
+            if ((rc($t1) eq $seen{$elementname}[2]) and (rc($t2) eq $seen{$elementname}[1])) { # true if the TIRs are exactly the same
+                return(-2, $elementname, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
+            }
+            else {
+                return(-1, $elementname, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
+            }
+       }
+    }
+    return (0,0,0);
+
+    # compare a pair of TIRs
+    sub testmatch {
+        my ($s1, $s2,$side) = @_; # the two input sequences and an indication of which side comparing
+        if ((length $s1) < (length $s2)) {
+            if ($s2 =~ /$s1/) {
+                if (($-[0] == 0) and ($side == 1)) { # test if the match starts at the first position of the left TIR
+                    return(1);
+                }
+                elsif (($+[0] == length($s2)) and ($side == 2)) { # test if the match starts at the first position of the right TIR
+                    return(1)
+                }
+            }
+        }
+        else {
+            if ($s1 =~ /$s2/) {
+                if (($-[0] == 0) and ($side == 1)) { # test if the match starts at the first position of the left TIR { # test if the match starts at the first position of the TIR
+                    return(1)
+                }
+                elsif (($+[0] == length($s1)) and ($side == 2)) { # test if the match starts at the first position of the right TIR
+                    return(1)
+                }
+            }
+        }
+        return(0);
+    }  
 }
