@@ -735,7 +735,6 @@ if ($STEP == 3) { # check if this step should be performed or not
 
             # record all the relevant lines from the current .tirtsd file
             my %locs; # holds the line from from the .tirtsd file as key and priority as value
-    #        my $filename_tirtsd = $ELEMENT_FOLDER . "/" . $_ . "/" . $_ . ".tirtsd";
             open (INPUT, $filename_tirtsd) or die "ERROR: Cannot open file $filename_tirtsd, $!";
             <INPUT>; # skip the header
             my $i=0;
@@ -781,30 +780,10 @@ if ($STEP == 3) { # check if this step should be performed or not
                     if ($d[12] > $max_tsd) { $TSD=9; $max_tsd =$d[12];  }
                     if ($d[13] > $max_tsd) { $TSD=10; $max_tsd =$d[13];  }
                 }
-
                 # determine the average TIR length for the current combination of sequences and locations
                 # and record all the tir sequences;
-                my $number_of_sequences; # total sequences in this alignment
-                my $total_TIR_length; # sum of all the TIR length, used to calculate the average
-                my $TIR_number; # number of sequences with TIRs
-                my $average_TIR_length;
-
-                foreach my $sequence_name (keys %alignment_sequences) {
-                    my ($TIR1, $TIR2) = gettir($alignment_sequences{$sequence_name}, $d[1], $d[2], $MIN_TIR_SIZE, $TIR_MISMATCHES);
-                    if ($TIR1) {
-                        $total_TIR_length += length $TIR1;
-                        $TIR_number += 1;
-                    }
-                }
+                my ($TIR_number, $average_TIR_length) = average_tir_number_and_length($d[1], $d[2], $MIN_TIR_SIZE, $TIR_MISMATCHES, %alignment_sequences);
                 
-                if ($TIR_number) { # if TIRs have been found
-                    $average_TIR_length = int($total_TIR_length / $TIR_number);
-                }
-                else {
-                    $TIR_number = "No TIRs found";
-                    $average_TIR_length = "N/A";
-                }
-
                 # add the possible lines to the list
                 if ($TSD) { 
                     push @menu1_items, "$d[1]-$d[2], $TIR_number, $average_TIR_length | $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13], $TSD";
@@ -869,7 +848,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                     $TIR_b1 = prompt('n', "Left alignement coordinate:", '', '' );
                     $TIR_b2 = prompt('n', "Right alignement coordinate:", '', '' );
                     $TSD_size = prompt('n', "TSD size (enter 0 for \"TA\"):", '', '' );
-                    $TIR_size = prompt('n', "TIR size:", '', '' );
+                    $TIR_size = prompt('n', "TIR size (enter 0 for the script to find the most likely size):", '', '' );
                     if ($TSD_size == 0) {
                         $TSD_size = 2;
                         $TSD_type = "TA";
@@ -926,7 +905,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                     }
                     unless ($consensus_sequence) { die "ERROR: No conensus sequence found, need this to properly display the TIRs\n"}
 
-                    my $temp_alignment_file = "/tmp/$element_name.fa"; # tried using perl temporary file system, but aliview will not open those
+                    my $temp_alignment_file = "/tmp/$element_name-$TIR_b1-$TIR_b2-$TSD_size.fa"; # tried using perl temporary file system, but aliview will not open those
                     my %TIR_sequences; # element name as key and [0] left TIR sequences displayed [1] right TIR sequences displayed. This will be used in the next menus to display TIR sequences
                     open (OUTPUT, ">", $temp_alignment_file) or die "Cannot create temporary alignment file $temp_alignment_file\n";
 
@@ -1004,10 +983,17 @@ if ($STEP == 3) { # check if this step should be performed or not
                     if ($?) { die "Error executing: aliview $temp_alignment_file, error code $?\n"}
                     my $menu2 = 1; # boolean, set to 1 until the user is done with menu 2
 
+                    # if the used asked the script to figure out the TIR size then it will be set to zero
+                    # figure out the average size here
+                    if ($TIR_size ==0) {
+                        my $TIR_number;
+                        ($TIR_number, $TIR_size) = average_tir_number_and_length($TIR_b1, $TIR_b2, $MIN_TIR_SIZE, $TIR_MISMATCHES, %alignment_sequences)
+                    }
+
                     # figure out the TIR sequences
                     # don't use the consensus sequence for this, because that contains n characters
                     my $TIR1_sequence;
-                    my $TIR2_sequence;
+                    my $TIR2_sequence; 
                     for (my $i=0; $i <$TIR_size; $i++) {
                         my %left_char_abundance; # holds the character as key and abundance as value
                         my %right_char_abundance;
@@ -1693,4 +1679,32 @@ sub merge_elements {
     print ANALYSIS "\tMerged $ele_name1 with $ele_name2, merged name is $merged_element_name\n";
 
     return($merged_element_name);
+}
+
+sub average_tir_number_and_length {
+    my ($loc1, $loc2, $min_tir_size, $max_number_mismatches, %seq) = @_; # get the bounds, size, and sequences
+    my $number_of_sequences; # total sequences in this alignment
+    my $total_TIR_length; # sum of all the TIR length, used to calculate the average
+    my $TIR_number; # number of sequences with TIRs
+    my $average_TIR_length;
+
+    foreach my $sequence_name (keys %seq) {
+        unless ($sequence_name =~ /consensus/) {
+            my ($TIR1, $TIR2) = gettir($seq{$sequence_name}, $loc1, $loc2, $min_tir_size, $max_number_mismatches);
+            if ($TIR1) {
+                $total_TIR_length += length $TIR1;
+                $TIR_number += 1;
+            }
+        }
+    }
+    
+    if ($TIR_number) { # if TIRs have been found
+        $average_TIR_length = int($total_TIR_length / $TIR_number);
+    }
+    else {
+        $TIR_number = "No TIRs found";
+        $average_TIR_length = "N/A";
+    }
+
+    return ($TIR_number, $average_TIR_length);
 }
