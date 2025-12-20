@@ -754,6 +754,7 @@ if ($STEP == 3) { # check if this step should be performed or not
             # setup and display menu 1
             my %alignment_sequences = fastatohash($filename_maf); # load the existing alignment
             my @menu1_items; # hold the text of menu 1 choices
+            push @menu1_items, "Quit the program, saving all the progress"; # item 0
             push @menu1_items, "Done reviewing this element"; # item 1
             push @menu1_items, "View the whole sequence alignment"; # item 2
             push @menu1_items, "Make a note in the README file"; #item 3
@@ -807,13 +808,21 @@ if ($STEP == 3) { # check if this step should be performed or not
                 my $menu1_choice = prompt('m', {
                     title => "MENU1 of $element_name\n",
                     prompt => 'What would you like to do?',
-                    return_base => 1,
+                    display_base => 0,
+                    return_base => 0,
                     accept_multiple_selections => 0,
                 items  => [@menu1_items],
                 separator => '[,/\s]',
                 },'', 2);
     
                 # process answer to menu 1
+
+                if ($menu1_choice == 0) {
+                    close README;
+                    close ANALYSIS;
+                    close REJECT;
+                    exit;
+                }
                 if ($menu1_choice == 1) { # the user is done with this element
                     $menu1 = 0;
                 }
@@ -848,7 +857,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                     print "\tMoved the element to the folder $FURTHER_REVIEW_FOLDER_NAME\n";
                     $menu1 = 0;
                 }
-                elsif ($menu1_choice == (scalar @menu1_items)) { # the user wants to manually enter the coordinates
+                elsif ($menu1_choice == ((scalar @menu1_items)-1)) { # the user wants to manually enter the coordinates
                     $TIR_b1 = prompt('n', "Left alignement coordinate:", '', $manual_left_tir );
                     $TIR_b2 = prompt('n', "Right alignement coordinate:", '', $manual_right_tir);
                     $TSD_size = prompt('n', "TSD size (enter 0 for \"TA\"):", '', $manual_tsd);
@@ -1021,7 +1030,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                         $TIR1_sequence .= max_by { $left_char_abundance{$_} } keys %left_char_abundance;
                         $TIR2_sequence .= max_by { $right_char_abundance{$_} } keys %right_char_abundance;
                     }
-                    
+                                        
                     # setup and display menu 2, testing to see if this combination of TIRs has been seen before
                     my @menu2_items; # hold the text of menu 2 choices
                     push @menu2_items, "Go back to the previous menu";
@@ -1035,7 +1044,13 @@ if ($STEP == 3) { # check if this step should be performed or not
                         push @menu2_items, "WARNING: Element $other_element_name has aleady been recorded with similar but not with the same TIRs\n\tselect this option to select how to merge them";
                     }
                     else {
-                        push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence";
+                        # if the TIR_size is N/A no TIR sequences will be reported, this will match the menu to that
+                        if ($TIR1_sequence and $TIR2_sequence) { 
+                            push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence";
+                        }
+                        else {
+                            push @menu2_items, "No TIRs were found, update the README to say this is not an element";
+                        }
                     }
                     push @menu2_items, "Update the README to say this is not an element";
                     while ($menu2) { #keep displaying until the user ready to leave
@@ -1086,14 +1101,23 @@ if ($STEP == 3) { # check if this step should be performed or not
                         }
                         elsif ($menu2_choice == 2) { # user wants to report this an element as it is
                             my $datestring = localtime(); 
-                            if ($TSD_type eq "TA") {
-                                print README "$datestring, Manual Review 1 result: This is an element, TSD TA, TIRs $TIR1_sequence and $TIR2_sequence\n";
+                            if ($TIR1_sequence and $TIR2_sequence) { # this prevents printing if no TIRs were found
+                                if ($TSD_type eq "TA") {
+                                    print README "$datestring, Manual Review 1 result: This is an element, TSD TA, TIRs $TIR1_sequence and $TIR2_sequence\n";
+                                }
+                                elsif ($TSD_type eq "unknown") {
+                                    print README "$datestring, Manual Review 1 result: This is an element, TSD unknown, TIRs $TIR1_sequence and $TIR2_sequence\n";               
+                                }
+                                else {
+                                    print README "$datestring, Manual Review 1 result: This is an element, TSD $TSD_size, TIRs $TIR1_sequence and $TIR2_sequence\n";
+                                }
                             }
-                            elsif ($TSD_type eq "unknown") {
-                                print README "$datestring, Manual Review 1 result: This is an element, TSD unknown, TIRs $TIR1_sequence and $TIR2_sequence\n";               
-                            }
-                            else {
-                                print README "$datestring, Manual Review 1 result: This is an element, TSD $TSD_size, TIRs $TIR1_sequence and $TIR2_sequence\n";
+                            else { # no TIRS were found
+                                print README "$datestring, Manual Review 1 result: This is not an element\n";
+                                print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
+                                `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+                                $menu2 = 0;
+                                $menu1 = 0
                             }
                             $menu2 = 0;
                         }
