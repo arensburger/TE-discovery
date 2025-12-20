@@ -716,6 +716,10 @@ if ($STEP == 3) { # check if this step should be performed or not
             my $TSD_size; # size of TSD accepted by user
             my $TSD_type; # if empty then it's a number othwise it's TA
             my $TIR_size; # size of TIR 
+            my $manual_left_tir; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
+            my $manual_right_tir; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
+            my $manual_tsd; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
+            my $manual_tir_size; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
 
             # check the README file for any previous manual review notes and display them
             open (README, "$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
@@ -845,10 +849,17 @@ if ($STEP == 3) { # check if this step should be performed or not
                     $menu1 = 0;
                 }
                 elsif ($menu1_choice == (scalar @menu1_items)) { # the user wants to manually enter the coordinates
-                    $TIR_b1 = prompt('n', "Left alignement coordinate:", '', '' );
-                    $TIR_b2 = prompt('n', "Right alignement coordinate:", '', '' );
-                    $TSD_size = prompt('n', "TSD size (enter 0 for \"TA\"):", '', '' );
-                    $TIR_size = prompt('n', "TIR size (enter 0 for the script to find the most likely size):", '', '' );
+                    $TIR_b1 = prompt('n', "Left alignement coordinate:", '', $manual_left_tir );
+                    $TIR_b2 = prompt('n', "Right alignement coordinate:", '', $manual_right_tir);
+                    $TSD_size = prompt('n', "TSD size (enter 0 for \"TA\"):", '', $manual_tsd);
+                    $TIR_size = prompt('n', "TIR size (enter 0 for the script to find the most likely size):", '', $manual_tir_size);
+
+                    # set this manual selections for next round
+                    $manual_left_tir = $TIR_b1;
+                    $manual_right_tir = $TIR_b2;
+                    $manual_tsd = $TSD_size;
+                    $manual_tir_size = $TIR_size;
+                    
                     if ($TSD_size == 0) {
                         $TSD_size = 2;
                         $TSD_type = "TA";
