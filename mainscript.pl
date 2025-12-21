@@ -706,7 +706,7 @@ if ($STEP == 3) { # check if this step should be performed or not
         }
 
         if ($elements_left_to_review) {
-            print "\nElement $element_name of $elements_left_to_review left to review\n";
+            print "\nElement $element_name , $elements_left_to_review left to review\n";
             print ANALYSIS "\tManual review of element $ELEMENT_FOLDER/$element_name\n";
             `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
 
@@ -757,9 +757,10 @@ if ($STEP == 3) { # check if this step should be performed or not
             push @menu1_items, "Save current progress and quit the program"; # item 0
             push @menu1_items, "Done reviewing this element and move on the next one"; # item 1
             push @menu1_items, "View the whole sequence alignment"; # item 2
-            push @menu1_items, "Make a note in the README file"; #item 3
-            push @menu1_items, "Update the README to say this is not an element and quit this element"; #item 4
-            push @menu1_items, "Set this element aside for later review"; #item 5
+            push @menu1_items, "Make a note in the README file"; # item 3
+            push @menu1_items, "Update the README to say this is not an element and quit this element"; # item 4
+            push @menu1_items, "Set this element aside for later review"; # item 5
+            push @menu1_items, "manually enter TIRs and TSD"; # item 6
             foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) {
                 my @d = split " ", $line;
                 my $TSD; # identity of the TSD with maximum abundance
@@ -799,7 +800,6 @@ if ($STEP == 3) { # check if this step should be performed or not
                 }
                 $i++;          
             }
-            push @menu1_items, "manually enter TIRs and TSD"; # display menu item to enter manual coordinates
 
             my $menu1 = 1; # boolean, set to one until the user is done with menu 1
             my $move_to_menu2 = 0; # boolean, set to zero until the user is ready to move on to menu 2
@@ -863,7 +863,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                     print "\tMoved the element to the folder $FURTHER_REVIEW_FOLDER_NAME\n";
                     $menu1 = 0;
                 }
-                elsif ($menu1_choice == ((scalar @menu1_items)-1)) { # the user wants to manually enter the coordinates
+                elsif ($menu1_choice == 6) { # the user wants to manually enter the coordinates
                     $TIR_b1 = prompt('n', "Left alignement coordinate:", '', $manual_left_tir );
                     $TIR_b2 = prompt('n', "Right alignement coordinate:", '', $manual_right_tir);
                     $TSD_size = prompt('n', "TSD size (enter 0 for \"TA\"):", '', $manual_tsd);
