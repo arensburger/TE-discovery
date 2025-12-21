@@ -112,7 +112,7 @@ my $GOOD_BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FOLDER/good_blast.o"; # blast file 
 my $BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FOLDER/tblastn.o"; # default name and location unless a file is provided
 my $GENOME_IDENTITY = 80; # IDENTIFYING PROTEINS, per protein, minimum percent identity between protein and genome
 my $COVERAGE_RATIO = 0.5; # IDENTIFYING PROTEINS, per protein, minimum ratio of (blast match length) / (query length)
-my $COPY_NUMBER = 2; # IDENTIFYING PROTEINS, minimum number of copies that hit different parts of the genome 
+my $COPY_NUMBER = 3; # IDENTIFYING PROTEINS, minimum number of copies that hit different parts of the genome 
 my $MIN_DISTANCE = 10000;   # IDENTIFYING PROTEINS, if two elements are on the same chromosome, how far they have to be, to be considered different elements
                             # NOTE: the minimum distance should bigger than the $BLAST_EXTEND variable, to avoid having the same element recorded twice    
 my $NUM_THREADS = `nproc --all`;# determine the number of processors on the current machine
