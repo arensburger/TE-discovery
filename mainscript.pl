@@ -508,7 +508,7 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
          
         # STEP 2.2.5 
         # identify the TIR and TSD locations around the edges of transitions (if transtions were found)
-        if ($left_highest_transition_position and $right_highest_transition_position) { # only continue if a transition was found
+        if (($left_highest_transition_position and $right_highest_transition_position) and ($left_highest_transition_position < $right_highest_transition_position)) { # only continue if transitions were found positioned correctly
             # go up and down the length of $TIR_SEARCH_RANGE from the transition locations and identify the combinations of TIRs and TSDs. The TIRs are identified 
             # using the sequences with large gaps removed (i.e. %seqrmg), while the TSD are identified on the original sequences (i.e. %seqali)
             my $max_TIR_number; # highest number of TIRs observed for one pair of start and end positions
@@ -720,7 +720,7 @@ if ($STEP == 3) { # check if this step should be performed or not
             my $manual_right_tir; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
             my $manual_tsd; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
             my $manual_tir_size; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
-
+            my $prior_review=0; # if the element has been reviewed in this round, this variable will set to 1
             # check the README file for any previous manual review notes and display them
             open (README, "$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
             my $prior_notes; 
@@ -804,6 +804,12 @@ if ($STEP == 3) { # check if this step should be performed or not
             my $menu1 = 1; # boolean, set to one until the user is done with menu 1
             my $move_to_menu2 = 0; # boolean, set to zero until the user is ready to move on to menu 2
             while ($menu1) {
+                # if there was a prior review publish let user know here
+                if ($prior_review) {
+                    print color('bold blue');
+                    print "These sequences have been identified as likely being from a transposable element\n";
+                    print color('reset'); 
+                }
                 # diplay menu 1
                 my $menu1_choice = prompt('m', {
                     title => "MENU1 of $element_name\n",
@@ -816,8 +822,8 @@ if ($STEP == 3) { # check if this step should be performed or not
                 },'', 2);
     
                 # process answer to menu 1
-
                 if ($menu1_choice == 0) {
+                    `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
                     close README;
                     close ANALYSIS;
                     close REJECT;
@@ -880,7 +886,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                 }
                 else { # This means that the user selected a preset number
                     $move_to_menu2 = 1;
-                    if ($menu1_items[$menu1_choice-1] =~ /^(\d+)-(\d+),\s\d+,\s(\d+)\s\|\s\S+,\s(\S+)/) {
+                    if ($menu1_items[$menu1_choice] =~ /^(\d+)-(\d+),\s\d+,\s(\d+)\s\|\s\S+,\s(\S+)/) {
                         $TIR_b1 = $1; 
                         $TIR_b2 = $2; 
                         $TIR_size = $3;
@@ -899,7 +905,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                         }
                         $move_to_menu2 = 1;
                     }
-                    elsif ($menu1_items[$menu1_choice-1] =~ /^(\d+)-(\d+),\s\d+,\s(\d+)\s\|\sno\sTSDs\shave\sbeen\sidentified/) {
+                    elsif ($menu1_items[$menu1_choice] =~ /^(\d+)-(\d+),\s\d+,\s(\d+)\s\|\sno\sTSDs\shave\sbeen\sidentified/) {
                         $TIR_b1 = $1; 
                         $TIR_b2 = $2; 
                         $TIR_size = $3;
@@ -908,7 +914,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                         $move_to_menu2 = 1;
                     }
                     else {
-                        die "ERROR: Cannot parse selection $menu1_items[$menu1_choice-1]\n";
+                        die "ERROR: Cannot parse selection $menu1_items[$menu1_choice]\n";
                     }
                 }
 
@@ -1059,17 +1065,18 @@ if ($STEP == 3) { # check if this step should be performed or not
                         my $menu2_choice = prompt('m', {
                             title => "MENU2 of $element_name\n",
                             prompt => 'What would you like to do?',
-                            return_base => 1,
+                            display_base => 0,
+                            return_base => 0,
                             accept_multiple_selections => 0,
                         items  => [@menu2_items],
-                        },'', 1);
+                        },'', 0);
 
                         # process the user's choice1
-                        if ($menu2_choice == 1) { # user wants to go back to menu 1 
+                        if ($menu2_choice == 0) { # user wants to go back to menu 1 
                             $menu2 = 0;
                             $move_to_menu2 = 0;
                         } 
-                        elsif (($menu2_choice == 2) and (abs($tirmatch)==1)) { # a partial TIR match as been seen before
+                        elsif (($menu2_choice == 1) and (abs($tirmatch)==1)) { # a partial TIR match as been seen before
                             my @menu21_items; # sub menu of menu2 to figure out how to deal with element seen before 
                             printf "CURRENT TIRs : %-35s%35s\n", $TIR1_sequence, $TIR2_sequence;
                             printf "PREVIOUS TIRs: %-35s%35s\n", $other_tir1, $other_tir2;
@@ -1079,27 +1086,31 @@ if ($STEP == 3) { # check if this step should be performed or not
                             my $menu21_choice = prompt('m', {
                                 title => "",
                                 prompt => 'What would you like to do?',
-                                return_base => 1,
+                                display_base => 0,
+                                return_base => 0,
                                 accept_multiple_selections => 0,
                             items  => [@menu21_items],
                             },'', 1);
-                            if ($menu21_choice == 1) { # user wants to go back to menu 2
+                            if ($menu21_choice == 0) { # user wants to go back to menu 2
                             }
-                            elsif ($menu21_choice == 2) {
+                            elsif ($menu21_choice == 1) {
                                 $element_name = merge_elements($element_name, $other_element_name, $TSD_type, $TIR1_sequence, $TIR2_sequence, %seen_tirs);
+                                $prior_review = 1;
                                 $menu2 = 0;
                             }
-                            elsif ($menu21_choice == 3) {
+                            elsif ($menu21_choice == 2) {
                                 $element_name = merge_elements($other_element_name, $element_name, $TSD_type, $other_tir1, $other_tir2, %seen_tirs);
+                                $prior_review = 1;
                                 $menu2 = 0;
                             }
 
                         }
-                        elsif (($menu2_choice == 2) and (abs($tirmatch)==2)) { # a full TIR match has been seen before
+                        elsif (($menu2_choice == 1) and (abs($tirmatch)==2)) { # a full TIR match has been seen before
                             $element_name = merge_elements($element_name, $other_element_name, $TSD_type, $TIR1_sequence, $TIR2_sequence, %seen_tirs);
+                            $prior_review = 1;
                             $menu2 = 0;
                         }
-                        elsif ($menu2_choice == 2) { # user wants to report this an element as it is
+                        elsif ($menu2_choice == 1) { # user wants to report this an element as it is
                             my $datestring = localtime(); 
                             if ($TIR1_sequence and $TIR2_sequence) { # this prevents printing if no TIRs were found
                                 if ($TSD_type eq "TA") {
@@ -1111,6 +1122,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                                 else {
                                     print README "$datestring, Manual Review 1 result: This is an element, TSD $TSD_size, TIRs $TIR1_sequence and $TIR2_sequence\n";
                                 }
+                                $prior_review = 1;
                             }
                             else { # no TIRS were found
                                 print README "$datestring, Manual Review 1 result: This is not an element\n";
@@ -1121,7 +1133,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                             }
                             $menu2 = 0;
                         }
-                        elsif ($menu2_choice == 3) {  # user wants to report this as not an element
+                        elsif ($menu2_choice == 2) {  # user wants to report this as not an element
                             my $datestring = localtime(); 
                             print README "$datestring, Manual Review 1 result: This is not an element\n";
                             print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
