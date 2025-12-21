@@ -754,8 +754,8 @@ if ($STEP == 3) { # check if this step should be performed or not
             # setup and display menu 1
             my %alignment_sequences = fastatohash($filename_maf); # load the existing alignment
             my @menu1_items; # hold the text of menu 1 choices
-            push @menu1_items, "Quit the program, saving all the progress"; # item 0
-            push @menu1_items, "Done reviewing this element"; # item 1
+            push @menu1_items, "Save current progress and quit the program"; # item 0
+            push @menu1_items, "Done reviewing this element and move on the next one"; # item 1
             push @menu1_items, "View the whole sequence alignment"; # item 2
             push @menu1_items, "Make a note in the README file"; #item 3
             push @menu1_items, "Update the README to say this is not an element and quit this element"; #item 4
