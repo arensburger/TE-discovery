@@ -658,13 +658,22 @@ if ($STEP == 3) { # check if this step should be performed or not
      ## update the analysis file with what is going on
     print ANALYSIS "Running STEP 3\n";
 
+    ## read or create the file tsdtir.txt that contains the names and sequences of oberserved tsd-tir combinations
+    my @tsdtir; # array that will contain the information on all the observed 
+    my $tsdtir_file_name = "$ANALYSIS_FOLDER/tsdtir.txt"; # name of the file containing all the tsd and tir observed
+    open (TSDTIR, ">>", $tsdtir_file_name) or die "ERROR, cannot open or create file $tsdtir_file_name\n";
+    while (my $line = <TSDTIR>) {
+        chomp $line;
+        push @tsdtir, $line;
+    }
+
     my $pkey; # pressed key, used for input from user
     my $elements_left_to_review=1; # number of elements left to review, set to a non-zero value initially so that an initial evaluation will be done
     while ($elements_left_to_review) {
 
         # determine how many elements are left to review, record a name of an element to review, and
         # record details about what's already been reviewed
-        $elements_left_to_review = 0; # set it to zero each time, to recheck that there are still elements to review
+        $elements_left_to_review = 0; # recheck that there are still elements to review
         opendir(my $dh, $ELEMENT_FOLDER) or die "ERROR: Cannot open element folder $ELEMENT_FOLDER, $!";
         my %seen_tirs; # hash of arrays that holds the two tir sequences for tirs that have already been observed
         my $element_name; # if there is an element to review, holds the name of the next element to work on
@@ -706,7 +715,7 @@ if ($STEP == 3) { # check if this step should be performed or not
         }
 
         if ($elements_left_to_review) {
-            print "\nElement $element_name , $elements_left_to_review left to review\n";
+            print "\nElement $element_name, $elements_left_to_review left to review\n";
             print ANALYSIS "\tManual review of element $ELEMENT_FOLDER/$element_name\n";
             `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
 
@@ -729,9 +738,11 @@ if ($STEP == 3) { # check if this step should be performed or not
                     $prior_notes .= $line;
                 }
             } 
+            print color('bold blue');
             if ($prior_notes) {
                 print "\nPRIOR REVIEW NOTES FOR ELEMENT $element_name\n$prior_notes";
             }
+            print color('reset');
             close README;
 
             # open the README file for writing
@@ -827,6 +838,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                     close README;
                     close ANALYSIS;
                     close REJECT;
+                    close TSDTIR;
                     exit;
                 }
                 if ($menu1_choice == 1) { # the user is done with this element
@@ -1114,13 +1126,17 @@ if ($STEP == 3) { # check if this step should be performed or not
                             my $datestring = localtime(); 
                             if ($TIR1_sequence and $TIR2_sequence) { # this prevents printing if no TIRs were found
                                 if ($TSD_type eq "TA") {
+                                    print TSDTIR "TA\t$TIR1_sequence\t$TIR2_sequence\n";
+                                    push @tsdtir, "TA\t$TIR1_sequence\t$TIR2_sequence\n";
                                     print README "$datestring, Manual Review 1 result: This is an element, TSD TA, TIRs $TIR1_sequence and $TIR2_sequence\n";
                                 }
                                 elsif ($TSD_type eq "unknown") {
-                                    print README "$datestring, Manual Review 1 result: This is an element, TSD unknown, TIRs $TIR1_sequence and $TIR2_sequence\n";               
+                                    print README "$datestring, Manual Review 1 result: TSD unknown, TIRs $TIR1_sequence and $TIR2_sequence\n";               
                                 }
                                 else {
-                                    print README "$datestring, Manual Review 1 result: This is an element, TSD $TSD_size, TIRs $TIR1_sequence and $TIR2_sequence\n";
+                                    print TSDTIR "$TSD_type\t$TIR1_sequence\t$TIR2_sequence\n";
+                                    push @tsdtir, "$TSD_type\t$TIR1_sequence\t$TIR2_sequence\n";
+                                    print README "$datestring, Manual Review 1 result: This is an element, TSD $TSD_type, TIRs $TIR1_sequence and $TIR2_sequence\n";
                                 }
                                 $prior_review = 1;
                             }
@@ -1143,13 +1159,14 @@ if ($STEP == 3) { # check if this step should be performed or not
                         }
                     }
                 }            
-            }
-            close README;
+            }  
+            close README;         
         }
         else {
             print "No elements left that need review\n";
         }
     }
+    close TSDTIR;
 }
 
 ### PIPELINE STEP 4 
