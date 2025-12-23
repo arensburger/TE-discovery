@@ -871,7 +871,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                 elsif ($menu1_choice == 6) { # the user wants to manually enter the coordinates
                     $TIR_b1 = prompt('n', "Left alignement coordinate:", '', $manual_left_tir );
                     $TIR_b2 = prompt('n', "Right alignement coordinate:", '', $manual_right_tir);
-                    $TSD_size = prompt('n', "TSD size (enter 0 for \"TA\" or 100 for no TSDs):", '', $manual_tsd);
+                    $TSD_size = prompt('n', "TSD size (enter 1 for \"TA\" or 0 for no TSDs):", '', $manual_tsd);
                     $TIR_size = prompt('n', "TIR size (enter 0 for the script to find the most likely size):", '', $manual_tir_size);
 
                     # set this manual selections for next round
@@ -880,11 +880,11 @@ if ($STEP == 3) { # check if this step should be performed or not
                     $manual_tsd = $TSD_size;
                     $manual_tir_size = $TIR_size;
                     
-                    if ($TSD_size == 0) {
+                    if ($TSD_size == 1) {
                         $TSD_size = 2;
                         $TSD_type = "TA";
                     }
-                    elsif ($TSD_size == 100) {
+                    elsif ($TSD_size == 0) {
                         $TSD_size = 0;
                         $TSD_type = "NA";
                     }
@@ -904,8 +904,8 @@ if ($STEP == 3) { # check if this step should be performed or not
                             $default_tsd = 0;
                         }
                         # ask what TSD size to use
-                        $TSD_size = prompt('n', "What TSD size should be displayed? (0 for TA)", '', $default_tsd);
-                        if ($TSD_size == 0) {
+                        $TSD_size = prompt('n', "What TSD size should be displayed? (1 for TA)", '', $default_tsd);
+                        if ($TSD_size == 1) {
                             $TSD_size = 2;
                             $TSD_type = "TA";
                         }
@@ -1593,17 +1593,17 @@ sub compare_tirs {
             }
         }
 
-    #    # test in the reverse orientation
-    #    $s1_match = testmatch(rc($t2),$seen{$elementname}[1],1); 
-    #    $s2_match = testmatch(rc($t1),$seen{$elementname}[2],2); 
-    #    if ($s1_match and $s2_match) {
-    #         if ((rc($t1) eq $seen{$elementname}[2]) and (rc($t2) eq $seen{$elementname}[1])) { # true if the TIRs are exactly the same
-    #             return(-2, $elementname, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
-    #         }
-    #         else {
-    #             return(-1, $elementname, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
-    #         }
-    #    }
+       # test in the reverse orientation
+       $s1_match = testmatch(rc($t2),$seen{$elementname}[1],1); 
+       $s2_match = testmatch(rc($t1),$seen{$elementname}[2],2); 
+       if ($s1_match and $s2_match) {
+            if ((rc($t1) eq $seen{$elementname}[2]) and (rc($t2) eq $seen{$elementname}[1])) { # true if the TIRs are exactly the same
+                return(-2, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
+            }
+            else {
+                return(-1, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
+            }
+       }
     }
     return (0,0,0);
 
@@ -1633,85 +1633,6 @@ sub compare_tirs {
         return(0);
     }  
 }
-
-# # takes two elements names as key and merges them into a single element with TIRs of the first element as the reference TIRs
-# # returns the name of the new merged element
-# sub merge_elements {
-#     my($ele_name1, $ele_name2, $tsd, $tir1, $tir2, %files) = @_;   # name and details of the elements to merge and a list of previous used element names 
-#                                                 # so that a new merged name can be identified
-#     my $merged_element_name = $ele_name1; # name to use for the merged element
-
-#     # identify name to use for the merged elements
-#     unless ($ele_name1 =~ /merged\d+/) { # only search if the reference element has not already been merged 
-#         my $i=0;
-#         my $name_found=0; # boolean, 0 until a name has been found
-#         while ($name_found==0) {
-#             if (exists $files{"merged$i"}) {
-#                 $i++;
-#             }
-#             else {
-#                 $merged_element_name = "merged$i";
-#                 $name_found = 1;
-#             }
-#         }
-#     }
-
-#     # create a temporary directory that will hold all merged elements
-#     my $temp_dir = tempdir();
-#     `mkdir $temp_dir/prior_to_merge_files`;
-
-#     # create the new README file
-#     open(RM, ">", "$temp_dir/$merged_element_name-README.txt") or die "ERROR: Cannot create temporary README file\n";
-#     my $datestring = localtime(); 
-#     print RM "$datestring, Manual Review 1 result: This is an element, TSD $tsd, TIRs $tir1 and $tir2\n";
-#     print RM "$datestring, Merged elements $ele_name1 and $ele_name2 keeping the first element TIRs as the reference\n";
-#     close (RM);
-
-#     # copying the files
-#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.bed $temp_dir/$merged_element_name.bed`;
-#     if ($?) { die "ERROR copying file: error code $?\n"}
-#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.maf $temp_dir/$merged_element_name.maf`;
-#     if ($?) { die "ERROR copying file: error code $?\n"}
-#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.tirtsd $temp_dir/$merged_element_name.tirtsd`;
-#     if ($?) { die "ERROR copying file: error code $?\n"}
-#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1-README.txt $temp_dir/prior_to_merge_files`;
-#     if ($?) { die "ERROR copying file: error code $?\n"}
-#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.bed $temp_dir/prior_to_merge_files`;
-#     if ($?) { die "ERROR copying file: error code $?\n"}
-#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.maf $temp_dir/prior_to_merge_files`;
-#     if ($?) { die "ERROR copying file: error code $?\n"}
-#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.tirtsd $temp_dir/prior_to_merge_files`;
-#     if ($?) { die "ERROR copying file: error code $?\n"}
-#     `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2-README.txt $temp_dir/prior_to_merge_files`;
-#     if ($?) { die "ERROR copying file: error code $?\n"}
-#     `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.bed $temp_dir/prior_to_merge_files`;
-#     if ($?) { die "ERROR copying file: error code $?\n"}
-#     `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.maf $temp_dir/prior_to_merge_files`;
-#     if ($?) { die "ERROR copying file: error code $?\n"}
-#     `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.tirtsd $temp_dir/prior_to_merge_files`;
-#     if ($?) { die "ERROR copying file: error code $?\n"}
-#     `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.tirtsd $temp_dir/prior_to_merge_files`;
-#     if ($?) { die "ERROR copying file: error code $?\n"}
-#     `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.tirtsd $temp_dir/prior_to_merge_files`;
-#     if ($?) { die "ERROR copying file: error code $?\n"}
-
-#     # remove the old folder
-#     `rm -r $ELEMENT_FOLDER/$ele_name1`;
-#     if ($?) { die "ERROR removing directory: error code $?\n"}
-#     `rm -r $ELEMENT_FOLDER/$ele_name2`;
-#     if ($?) { die "ERROR removing directory: error code $?\n"}
-
-#     # create the new folder and copy temporary directoring into it
-#     `mkdir $ELEMENT_FOLDER/$merged_element_name`;
-#     if ($?) { die "ERROR making directory: error code $?\n"}
-#     `cp -r $temp_dir/* $ELEMENT_FOLDER/$merged_element_name/`;  
-
-#     # update the anlysis record
-#     my $datestring = localtime(); 
-#     print ANALYSIS "\tMerged $ele_name1 with $ele_name2, merged name is $merged_element_name\n";
-
-#     return($merged_element_name);
-# }
 
 sub average_tir_number_and_length {
     my ($loc1, $loc2, $min_tir_size, $max_number_mismatches, %seq) = @_; # get the bounds, size, and sequences
