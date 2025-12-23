@@ -658,15 +658,6 @@ if ($STEP == 3) { # check if this step should be performed or not
      ## update the analysis file with what is going on
     print ANALYSIS "Running STEP 3\n";
 
-    ## read or create the file tsdtir.txt that contains the names and sequences of oberserved tsd-tir combinations
-    my @tsdtir; # array that will contain the information on all the observed 
-    my $tsdtir_file_name = "$ANALYSIS_FOLDER/tsdtir.txt"; # name of the file containing all the tsd and tir observed
-    open (TSDTIR, ">>", $tsdtir_file_name) or die "ERROR, cannot open or create file $tsdtir_file_name\n";
-    while (my $line = <TSDTIR>) {
-        chomp $line;
-        push @tsdtir, $line;
-    }
-
     my $pkey; # pressed key, used for input from user
     my $elements_left_to_review=1; # number of elements left to review, set to a non-zero value initially so that an initial evaluation will be done
     while ($elements_left_to_review) {
@@ -675,10 +666,11 @@ if ($STEP == 3) { # check if this step should be performed or not
         # record details about what's already been reviewed
         $elements_left_to_review = 0; # recheck that there are still elements to review
         opendir(my $dh, $ELEMENT_FOLDER) or die "ERROR: Cannot open element folder $ELEMENT_FOLDER, $!";
-        my %seen_tirs; # hash of arrays that holds the two tir sequences for tirs that have already been observed
+        my %seen_tirs; # hash of arrays that has the unique tsd-tir1-tir2 string as key, and array of with data on this combination
         my $element_name; # if there is an element to review, holds the name of the next element to work on
         my $filename_tirtsd; # name of the current .tirtsd file
-        my $filename_maf; # name fo the current .maf file
+        my $filename_maf; # name fo the current .maf 
+        
         while (readdir $dh) {
             unless ($_ =~ /^\./) { # prevents reading invisible files or the . and .. files     
                 # check if a manual review is already present in the README file for this element
@@ -687,9 +679,11 @@ if ($STEP == 3) { # check if this step should be performed or not
                 if ($grep_res) { # yes, this element has already been reviewed
                     # recording any TIRs
                     if ($grep_res =~ /TSD\s(\S+),\sTIRs\s(\S+)\sand\s(\S+)/) {
-                        $seen_tirs{$_}[0]=$1;
-                        $seen_tirs{$_}[1]=$2;
-                        $seen_tirs{$_}[2]=$3;
+                        my $unique_tsdtir_string = $1 . $2 . $3;
+                        $seen_tirs{$unique_tsdtir_string}[0]=$1;
+                        $seen_tirs{$unique_tsdtir_string}[1]=$2;
+                        $seen_tirs{$unique_tsdtir_string}[2]=$3;
+                        $seen_tirs{$unique_tsdtir_string}[3]+=1; # records how many times this combination has been seen
                     }
                 }
                 else { # no, this element has not been reviewed yet
@@ -838,7 +832,6 @@ if ($STEP == 3) { # check if this step should be performed or not
                     close README;
                     close ANALYSIS;
                     close REJECT;
-                    close TSDTIR;
                     exit;
                 }
                 if ($menu1_choice == 1) { # the user is done with this element
@@ -878,7 +871,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                 elsif ($menu1_choice == 6) { # the user wants to manually enter the coordinates
                     $TIR_b1 = prompt('n', "Left alignement coordinate:", '', $manual_left_tir );
                     $TIR_b2 = prompt('n', "Right alignement coordinate:", '', $manual_right_tir);
-                    $TSD_size = prompt('n', "TSD size (enter 0 for \"TA\"):", '', $manual_tsd);
+                    $TSD_size = prompt('n', "TSD size (enter 0 for \"TA\" or 100 for no TSDs):", '', $manual_tsd);
                     $TIR_size = prompt('n', "TIR size (enter 0 for the script to find the most likely size):", '', $manual_tir_size);
 
                     # set this manual selections for next round
@@ -890,6 +883,10 @@ if ($STEP == 3) { # check if this step should be performed or not
                     if ($TSD_size == 0) {
                         $TSD_size = 2;
                         $TSD_type = "TA";
+                    }
+                    elsif ($TSD_size == 100) {
+                        $TSD_size = 0;
+                        $TSD_type = "NA";
                     }
                     else {
                         $TSD_type = $TSD_size;
@@ -922,7 +919,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                         $TIR_b2 = $2; 
                         $TIR_size = $3;
                         $TSD_size = 0;
-                        $TSD_type = "unknown";
+                        $TSD_type = "NA";
                         $move_to_menu2 = 1;
                     }
                     else {
@@ -1054,24 +1051,33 @@ if ($STEP == 3) { # check if this step should be performed or not
                     push @menu2_items, "Go back to the previous menu";
 
                     # testing for this TIR having been seen before, change the option if it has
-                    my ($tirmatch, $other_element_name, $other_tir1, $other_tir2, $other_tsd) = compare_tirs($TIR1_sequence, $TIR2_sequence, %seen_tirs);
-                    if (abs($tirmatch)==2) { # the exact same tirs have been seen on one of the two DNA strands
-                        push @menu2_items, "WARNING: Element $other_element_name has aleady been recorded with these exact same TIRs\n\tselect this option to merge the elements";
+ #                   my ($tirmatch, $other_element_name, $other_tir1, $other_tir2, $other_tsd) = compare_tirs($TIR1_sequence, $TIR2_sequence, %seen_tirs);
+                    my ($tirmatch, $other_tir1, $other_tir2, $other_tsd) = compare_tirs($TIR1_sequence, $TIR2_sequence, %seen_tirs);
+
+                    # if the TIR_size is N/A no TIR sequences will be reported, this will match the menu to that
+                    if ($TIR1_sequence and $TIR2_sequence and ($TSD_type eq "NA")) { 
+                        push @menu2_items, "Update the README to record TIRs $TIR1_sequence and $TIR2_sequence";
                     }
-                    elsif(abs($tirmatch)==1) { # another tir like this one, but not an exact match, was found
-                        push @menu2_items, "WARNING: Element $other_element_name has aleady been recorded with similar but not with the same TIRs\n\tselect this option to select how to merge them";
+                    elsif ($TIR1_sequence and $TIR2_sequence) {
+                        push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence";
                     }
                     else {
-                        # if the TIR_size is N/A no TIR sequences will be reported, this will match the menu to that
-                        if ($TIR1_sequence and $TIR2_sequence) { 
-                            push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence";
-                        }
-                        else {
-                            push @menu2_items, "No TIRs were found, update the README to say this is not an element";
-                        }
+                        push @menu2_items, "No TIRs were found, update the README to say this is not an element";
                     }
+                    
                     push @menu2_items, "Update the README to say this is not an element";
                     while ($menu2) { #keep displaying until the user ready to leave
+
+                        # if applicable tell the user this TIRs been seen before
+                        print color('bold blue');
+                        if (abs($tirmatch)==2) {
+                            print "\nNOTE: These exact TIRs have been recorded before\n";
+                        }
+                        if (abs($tirmatch)==1) {
+                            print "\nNOTE: Very similar TIRs have been recorded before\n";
+                            print "PRIOR TIRs: $other_tir1  $other_tir2\n";
+                        }
+                        print color('reset');
                         
                         # display menu 2
                         my $menu2_choice = prompt('m', {
@@ -1088,54 +1094,16 @@ if ($STEP == 3) { # check if this step should be performed or not
                             $menu2 = 0;
                             $move_to_menu2 = 0;
                         } 
-                        elsif (($menu2_choice == 1) and (abs($tirmatch)==1)) { # a partial TIR match as been seen before
-                            my @menu21_items; # sub menu of menu2 to figure out how to deal with element seen before 
-                            printf "CURRENT TIRs : %-35s%35s\n", $TIR1_sequence, $TIR2_sequence;
-                            printf "PREVIOUS TIRs: %-35s%35s\n", $other_tir1, $other_tir2;
-                            push @menu21_items, "Go back to the previous menu";
-                            push @menu21_items, "Merge the elements, using CURRENT TIRs";
-                            push @menu21_items, "Merge the elements, using PREVIOUS TIRs";
-                            my $menu21_choice = prompt('m', {
-                                title => "",
-                                prompt => 'What would you like to do?',
-                                display_base => 0,
-                                return_base => 0,
-                                accept_multiple_selections => 0,
-                            items  => [@menu21_items],
-                            },'', 1);
-                            if ($menu21_choice == 0) { # user wants to go back to menu 2
-                            }
-                            elsif ($menu21_choice == 1) {
-                                $element_name = merge_elements($element_name, $other_element_name, $TSD_type, $TIR1_sequence, $TIR2_sequence, %seen_tirs);
-                                $prior_review = 1;
-                                $menu2 = 0;
-                            }
-                            elsif ($menu21_choice == 2) {
-                                $element_name = merge_elements($other_element_name, $element_name, $TSD_type, $other_tir1, $other_tir2, %seen_tirs);
-                                $prior_review = 1;
-                                $menu2 = 0;
-                            }
-
-                        }
-                        elsif (($menu2_choice == 1) and (abs($tirmatch)==2)) { # a full TIR match has been seen before
-                            $element_name = merge_elements($element_name, $other_element_name, $TSD_type, $TIR1_sequence, $TIR2_sequence, %seen_tirs);
-                            $prior_review = 1;
-                            $menu2 = 0;
-                        }
                         elsif ($menu2_choice == 1) { # user wants to report this an element as it is
                             my $datestring = localtime(); 
                             if ($TIR1_sequence and $TIR2_sequence) { # this prevents printing if no TIRs were found
                                 if ($TSD_type eq "TA") {
-                                    print TSDTIR "TA\t$TIR1_sequence\t$TIR2_sequence\n";
-                                    push @tsdtir, "TA\t$TIR1_sequence\t$TIR2_sequence\n";
                                     print README "$datestring, Manual Review 1 result: This is an element, TSD TA, TIRs $TIR1_sequence and $TIR2_sequence\n";
                                 }
-                                elsif ($TSD_type eq "unknown") {
-                                    print README "$datestring, Manual Review 1 result: TSD unknown, TIRs $TIR1_sequence and $TIR2_sequence\n";               
+                                elsif ($TSD_type eq "NA") {
+                                    print README "$datestring, Manual Review 1 result: TSD NA, TIRs $TIR1_sequence and $TIR2_sequence\n";               
                                 }
                                 else {
-                                    print TSDTIR "$TSD_type\t$TIR1_sequence\t$TIR2_sequence\n";
-                                    push @tsdtir, "$TSD_type\t$TIR1_sequence\t$TIR2_sequence\n";
                                     print README "$datestring, Manual Review 1 result: This is an element, TSD $TSD_type, TIRs $TIR1_sequence and $TIR2_sequence\n";
                                 }
                                 $prior_review = 1;
@@ -1166,7 +1134,6 @@ if ($STEP == 3) { # check if this step should be performed or not
             print "No elements left that need review\n";
         }
     }
-    close TSDTIR;
 }
 
 ### PIPELINE STEP 4 
@@ -1618,24 +1585,25 @@ sub compare_tirs {
         $s2_match = testmatch($t2,$seen{$elementname}[2],2); # the inputs are the two sequences to compare, and 2 to indicate it's the right tir 
         if ($s1_match and $s2_match) { # match found
             if (($t1 eq $seen{$elementname}[1]) and ($t2 eq $seen{$elementname}[2])) { # true if the TIRs are exactly the same
-                return(2, $elementname, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
+                return(2, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
+
             }
             else { # the match is not exact
-                return(1, $elementname, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
+                return(1, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
             }
         }
 
-       # test in the reverse orientation
-       $s1_match = testmatch(rc($t2),$seen{$elementname}[1],1); 
-       $s2_match = testmatch(rc($t1),$seen{$elementname}[2],2); 
-       if ($s1_match and $s2_match) {
-            if ((rc($t1) eq $seen{$elementname}[2]) and (rc($t2) eq $seen{$elementname}[1])) { # true if the TIRs are exactly the same
-                return(-2, $elementname, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
-            }
-            else {
-                return(-1, $elementname, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
-            }
-       }
+    #    # test in the reverse orientation
+    #    $s1_match = testmatch(rc($t2),$seen{$elementname}[1],1); 
+    #    $s2_match = testmatch(rc($t1),$seen{$elementname}[2],2); 
+    #    if ($s1_match and $s2_match) {
+    #         if ((rc($t1) eq $seen{$elementname}[2]) and (rc($t2) eq $seen{$elementname}[1])) { # true if the TIRs are exactly the same
+    #             return(-2, $elementname, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
+    #         }
+    #         else {
+    #             return(-1, $elementname, $seen{$elementname}[1], $seen{$elementname}[2], $seen{$elementname}[0]);
+    #         }
+    #    }
     }
     return (0,0,0);
 
@@ -1666,84 +1634,84 @@ sub compare_tirs {
     }  
 }
 
-# takes two elements names as key and merges them into a single element with TIRs of the first element as the reference TIRs
-# returns the name of the new merged element
-sub merge_elements {
-    my($ele_name1, $ele_name2, $tsd, $tir1, $tir2, %files) = @_;   # name and details of the elements to merge and a list of previous used element names 
-                                                # so that a new merged name can be identified
-    my $merged_element_name = $ele_name1; # name to use for the merged element
+# # takes two elements names as key and merges them into a single element with TIRs of the first element as the reference TIRs
+# # returns the name of the new merged element
+# sub merge_elements {
+#     my($ele_name1, $ele_name2, $tsd, $tir1, $tir2, %files) = @_;   # name and details of the elements to merge and a list of previous used element names 
+#                                                 # so that a new merged name can be identified
+#     my $merged_element_name = $ele_name1; # name to use for the merged element
 
-    # identify name to use for the merged elements
-    unless ($ele_name1 =~ /merged\d+/) { # only search if the reference element has not already been merged 
-        my $i=0;
-        my $name_found=0; # boolean, 0 until a name has been found
-        while ($name_found==0) {
-            if (exists $files{"merged$i"}) {
-                $i++;
-            }
-            else {
-                $merged_element_name = "merged$i";
-                $name_found = 1;
-            }
-        }
-    }
+#     # identify name to use for the merged elements
+#     unless ($ele_name1 =~ /merged\d+/) { # only search if the reference element has not already been merged 
+#         my $i=0;
+#         my $name_found=0; # boolean, 0 until a name has been found
+#         while ($name_found==0) {
+#             if (exists $files{"merged$i"}) {
+#                 $i++;
+#             }
+#             else {
+#                 $merged_element_name = "merged$i";
+#                 $name_found = 1;
+#             }
+#         }
+#     }
 
-    # create a temporary directory that will hold all merged elements
-    my $temp_dir = tempdir();
-    `mkdir $temp_dir/prior_to_merge_files`;
+#     # create a temporary directory that will hold all merged elements
+#     my $temp_dir = tempdir();
+#     `mkdir $temp_dir/prior_to_merge_files`;
 
-    # create the new README file
-    open(RM, ">", "$temp_dir/$merged_element_name-README.txt") or die "ERROR: Cannot create temporary README file\n";
-    my $datestring = localtime(); 
-    print RM "$datestring, Manual Review 1 result: This is an element, TSD $tsd, TIRs $tir1 and $tir2\n";
-    print RM "$datestring, Merged elements $ele_name1 and $ele_name2 keeping the first element TIRs as the reference\n";
-    close (RM);
+#     # create the new README file
+#     open(RM, ">", "$temp_dir/$merged_element_name-README.txt") or die "ERROR: Cannot create temporary README file\n";
+#     my $datestring = localtime(); 
+#     print RM "$datestring, Manual Review 1 result: This is an element, TSD $tsd, TIRs $tir1 and $tir2\n";
+#     print RM "$datestring, Merged elements $ele_name1 and $ele_name2 keeping the first element TIRs as the reference\n";
+#     close (RM);
 
-    # copying the files
-    `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.bed $temp_dir/$merged_element_name.bed`;
-    if ($?) { die "ERROR copying file: error code $?\n"}
-    `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.maf $temp_dir/$merged_element_name.maf`;
-    if ($?) { die "ERROR copying file: error code $?\n"}
-    `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.tirtsd $temp_dir/$merged_element_name.tirtsd`;
-    if ($?) { die "ERROR copying file: error code $?\n"}
-    `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1-README.txt $temp_dir/prior_to_merge_files`;
-    if ($?) { die "ERROR copying file: error code $?\n"}
-    `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.bed $temp_dir/prior_to_merge_files`;
-    if ($?) { die "ERROR copying file: error code $?\n"}
-    `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.maf $temp_dir/prior_to_merge_files`;
-    if ($?) { die "ERROR copying file: error code $?\n"}
-    `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.tirtsd $temp_dir/prior_to_merge_files`;
-    if ($?) { die "ERROR copying file: error code $?\n"}
-    `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2-README.txt $temp_dir/prior_to_merge_files`;
-    if ($?) { die "ERROR copying file: error code $?\n"}
-    `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.bed $temp_dir/prior_to_merge_files`;
-    if ($?) { die "ERROR copying file: error code $?\n"}
-    `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.maf $temp_dir/prior_to_merge_files`;
-    if ($?) { die "ERROR copying file: error code $?\n"}
-    `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.tirtsd $temp_dir/prior_to_merge_files`;
-    if ($?) { die "ERROR copying file: error code $?\n"}
-    `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.tirtsd $temp_dir/prior_to_merge_files`;
-    if ($?) { die "ERROR copying file: error code $?\n"}
-    `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.tirtsd $temp_dir/prior_to_merge_files`;
-    if ($?) { die "ERROR copying file: error code $?\n"}
+#     # copying the files
+#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.bed $temp_dir/$merged_element_name.bed`;
+#     if ($?) { die "ERROR copying file: error code $?\n"}
+#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.maf $temp_dir/$merged_element_name.maf`;
+#     if ($?) { die "ERROR copying file: error code $?\n"}
+#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.tirtsd $temp_dir/$merged_element_name.tirtsd`;
+#     if ($?) { die "ERROR copying file: error code $?\n"}
+#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1-README.txt $temp_dir/prior_to_merge_files`;
+#     if ($?) { die "ERROR copying file: error code $?\n"}
+#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.bed $temp_dir/prior_to_merge_files`;
+#     if ($?) { die "ERROR copying file: error code $?\n"}
+#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.maf $temp_dir/prior_to_merge_files`;
+#     if ($?) { die "ERROR copying file: error code $?\n"}
+#     `cp $ELEMENT_FOLDER/$ele_name1/$ele_name1.tirtsd $temp_dir/prior_to_merge_files`;
+#     if ($?) { die "ERROR copying file: error code $?\n"}
+#     `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2-README.txt $temp_dir/prior_to_merge_files`;
+#     if ($?) { die "ERROR copying file: error code $?\n"}
+#     `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.bed $temp_dir/prior_to_merge_files`;
+#     if ($?) { die "ERROR copying file: error code $?\n"}
+#     `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.maf $temp_dir/prior_to_merge_files`;
+#     if ($?) { die "ERROR copying file: error code $?\n"}
+#     `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.tirtsd $temp_dir/prior_to_merge_files`;
+#     if ($?) { die "ERROR copying file: error code $?\n"}
+#     `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.tirtsd $temp_dir/prior_to_merge_files`;
+#     if ($?) { die "ERROR copying file: error code $?\n"}
+#     `cp $ELEMENT_FOLDER/$ele_name2/$ele_name2.tirtsd $temp_dir/prior_to_merge_files`;
+#     if ($?) { die "ERROR copying file: error code $?\n"}
 
-    # remove the old folder
-    `rm -r $ELEMENT_FOLDER/$ele_name1`;
-    if ($?) { die "ERROR removing directory: error code $?\n"}
-    `rm -r $ELEMENT_FOLDER/$ele_name2`;
-    if ($?) { die "ERROR removing directory: error code $?\n"}
+#     # remove the old folder
+#     `rm -r $ELEMENT_FOLDER/$ele_name1`;
+#     if ($?) { die "ERROR removing directory: error code $?\n"}
+#     `rm -r $ELEMENT_FOLDER/$ele_name2`;
+#     if ($?) { die "ERROR removing directory: error code $?\n"}
 
-    # create the new folder and copy temporary directoring into it
-    `mkdir $ELEMENT_FOLDER/$merged_element_name`;
-    if ($?) { die "ERROR making directory: error code $?\n"}
-    `cp -r $temp_dir/* $ELEMENT_FOLDER/$merged_element_name/`;  
+#     # create the new folder and copy temporary directoring into it
+#     `mkdir $ELEMENT_FOLDER/$merged_element_name`;
+#     if ($?) { die "ERROR making directory: error code $?\n"}
+#     `cp -r $temp_dir/* $ELEMENT_FOLDER/$merged_element_name/`;  
 
-    # update the anlysis record
-    my $datestring = localtime(); 
-    print ANALYSIS "\tMerged $ele_name1 with $ele_name2, merged name is $merged_element_name\n";
+#     # update the anlysis record
+#     my $datestring = localtime(); 
+#     print ANALYSIS "\tMerged $ele_name1 with $ele_name2, merged name is $merged_element_name\n";
 
-    return($merged_element_name);
-}
+#     return($merged_element_name);
+# }
 
 sub average_tir_number_and_length {
     my ($loc1, $loc2, $min_tir_size, $max_number_mismatches, %seq) = @_; # get the bounds, size, and sequences
