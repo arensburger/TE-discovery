@@ -906,7 +906,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                         $TIR_size = $3;
                         my $default_tsd = $4;
                         if ($default_tsd eq "TA") {
-                            $default_tsd = 0;
+                            $default_tsd = 1;
                         }
                         # ask what TSD size to use
                         $TSD_size = prompt('n', "What TSD size should be displayed? (1 for TA)", '', $default_tsd);
