@@ -90,7 +90,7 @@ elsif (($STEP == 2) or ($STEP == 3) or ($STEP == 4)) {
     }
 }
 else {
-    die "ERROR: don't recognize the step specified with the -s parameter. Stoping analysis.\n";
+    die "ERROR: don't recognize the step specified with the -s parameter. Stopping analysis.\n";
 }
 
 ## Create or open files to store analysis parameters, and to store rejected sequences. 
@@ -633,14 +633,19 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
         else {
             my $datestring = localtime();
             if ($left_highest_transition_position) {
-                print README "$datestring, A left element edge was identified at aligment position $left_highest_transition_position but none on the right, stoping analysis here\n";
+                print README "$datestring, A left element edge was identified at aligment position $left_highest_transition_position but none on the right, stopping analysis here\n";
+                print REJECT "$datestring\t$element_name\tSTEP 2\tA left element edge was identified at aligment position $left_highest_transition_position but none on the right\n";
             }
             elsif ($right_highest_transition_position) {
-                print README "$datestring, A right element edge was identified at aligment position $right_highest_transition_position but none on the right, stoping analysis here\n";
+                print README "$datestring, A right element edge was identified at aligment position $right_highest_transition_position but none on the left, stopping analysis here\n";
+                print REJECT "$datestring\t$element_name\tSTEP 2\tA right element edge was identified at aligment position $right_highest_transition_position but none on the left\n";
             }
             else {
-                print README "$datestring, No element edge was identified on either left or right, stoping analysis here\n";
+                print README "$datestring, No element edge was identified on either left or right, stopping analysis here\n";
+                print REJECT "$datestring\t$element_name\tSTEP 2\tNo element edge was identified on either left or right\n";
             }
+            `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+            if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
         }    
         close README; 
     }    
