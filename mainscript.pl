@@ -680,7 +680,7 @@ if ($STEP == 3) { # check if this step should be performed or not
             unless ($_ =~ /^\./) { # prevents reading invisible files or the . and .. files     
                 # check if a manual review is already present in the README file for this element
                 my $current_element_folder = $ELEMENT_FOLDER . "/" . $_ ; # folder with specific element of interest   
-                my $grep_res = `grep "Manual Review 1 result" $current_element_folder/*README.txt`;
+                my $grep_res = `grep "Review 1 result" $current_element_folder/*README.txt`;
                 if ($grep_res) { # yes, this element has already been reviewed
                     # recording any TIRs
                     if ($grep_res =~ /TSD\s(\S+),\sTIRs\s(\S+)\sand\s(\S+)/) {
@@ -688,7 +688,6 @@ if ($STEP == 3) { # check if this step should be performed or not
                         $seen_tirs{$unique_tsdtir_string}[0]=$1;
                         $seen_tirs{$unique_tsdtir_string}[1]=$2;
                         $seen_tirs{$unique_tsdtir_string}[2]=$3;
-                        $seen_tirs{$unique_tsdtir_string}[3]+=1; # records how many times this combination has been seen
                     }
                 }
                 else { # no, this element has not been reviewed yet
@@ -714,8 +713,11 @@ if ($STEP == 3) { # check if this step should be performed or not
         }
 
         if ($elements_left_to_review) {
+            
+            print color('blue');
             print "\nElement $element_name, $elements_left_to_review left to review\n";
-            print ANALYSIS "\tManual review of element $ELEMENT_FOLDER/$element_name\n";
+            print color('reset');
+            print ANALYSIS "\tReview of element $ELEMENT_FOLDER/$element_name\n";
             `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
 
             # Variables specific to this section
@@ -728,9 +730,9 @@ if ($STEP == 3) { # check if this step should be performed or not
             my $manual_right_tir; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
             my $manual_tsd; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
             my $manual_tir_size; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
-            my $prior_review=0; # if the element has been reviewed in this round, this variable will set to 1
+            
             # check the README file for any previous manual review notes and display them
-            open (README, "$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
+            open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
             my $prior_notes; 
             while (my $line = <README>) {
                 if ($line =~ /Manual\sReview\s1\suser\snote/) {
@@ -742,397 +744,426 @@ if ($STEP == 3) { # check if this step should be performed or not
                 print "\nPRIOR REVIEW NOTES FOR ELEMENT $element_name\n$prior_notes";
             }
             print color('reset');
-            close README;
 
-            # open the README file for writing
-            open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
+            # Check if the consensus sequence of this element has a TSD-TIR combination that has been seen before.
+            # If such a combination has been seen (and only one) then automatically record this as an element
+            # without asking the user. In all other cases let the user decide what to do.
+            my %nonaligned_to_aligned; # holds the non-aligned position as key and aligned as value, used for reporting positions
+            my %alignment = fastatohash("$ELEMENT_FOLDER/$element_name/$element_name.maf");
+            my $consensus_sequence = $alignment{"consensus"};
+            my $nogap_consensus; # consensus sequence without gaps
+            my %known_tsdtirs; # holds the alignment location of known tirs as key, as value holds array [0] tsd, [1] tir length
+            for (my $i=0; $i < length $consensus_sequence; $i++) { # create convertion hash
+                my $letter = substr $consensus_sequence, $i, 1; # current letter in the alignment
+                unless ($letter =~ /N/i) {
+                    $nogap_consensus .= $letter;
+                    $nonaligned_to_aligned{length $nogap_consensus} = $i+1;
+                }
+            }
+            foreach my $uniquestring (keys %seen_tirs) { # run through all the previously oberved tirs
+                my $tir1 = $seen_tirs{$uniquestring}[1];
+                my $tir2 = $seen_tirs{$uniquestring}[2];
+                if ($nogap_consensus =~ /$tir1.+$tir2/) {
+                    my $l1 = $nonaligned_to_aligned{$-[0] + 1}; # left-most match
+                    my $l2 = $nonaligned_to_aligned{$+[0]}; # right-most match
+                    $known_tsdtirs{"$l1-$l2"}[0] = $seen_tirs{$uniquestring}[0]; # seen TSD
+                    $known_tsdtirs{"$l1-$l2"}[1] = length($tir1); # seen TIR length
+                    $known_tsdtirs{"$l1-$l2"}[2] = $tir1; # 
+                    $known_tsdtirs{"$l1-$l2"}[3] = $tir2; # 
+                }
+            }
 
-            # record all the relevant lines from the current .tirtsd file
-            my %locs; # holds the line from from the .tirtsd file as key and priority as value
+            # record all the relevant information from the .tirtsd file and check if one or more
+            # of the proposed locations match a known tisdtir
+            my %locs;   # holds base pair locations as key and array of with all the other values
+                        # [0-9] number of found TSDs for sizes TA through 10 
+            my %observed_locs;  # just like the %locs but holds the information for previously seen TIRs, this will
+            my %TA8_locs; # just like above but with only lines that 8bp or TA tsds, the more common ones
+            my $TSDmatch=0; # boolean, only goes to 1 at least one TSD-TIR combination matches an observed one
+
             open (INPUT, $filename_tirtsd) or die "ERROR: Cannot open file $filename_tirtsd, $!";
             <INPUT>; # skip the header
-            my $i=0;
             while (my $line = <INPUT>) { # reading the individual .tirtsd file
                 my @d = split " ", $line;
-                $locs{$line} = $EXAMINE_CODES{$d[0]}; # store the line along with priority
-                $i++;
-            }
-            unless ($i) { # check that at least one line was added
-                die "ERROR: file $filename_tirtsd is empty, cannot continue the analysis\n";
-            }
-
-            # setup and display menu 1
-            my %alignment_sequences = fastatohash($filename_maf); # load the existing alignment
-            my @menu1_items; # hold the text of menu 1 choices
-            push @menu1_items, "Save current progress and quit the program"; # item 0
-            push @menu1_items, "Done reviewing this element and move on the next one"; # item 1
-            push @menu1_items, "View the whole sequence alignment"; # item 2
-            push @menu1_items, "Make a note in the README file"; # item 3
-            push @menu1_items, "Update the README to say this is not an element and quit this element"; # item 4
-            push @menu1_items, "Set this element aside for later review"; # item 5
-            push @menu1_items, "manually enter TIRs and TSD"; # item 6
-            foreach my $line (sort { $locs{$a} <=> $locs{$b} } keys %locs) {
-                my @d = split " ", $line;
-                my $TSD; # identity of the TSD with maximum abundance
-                my $max_tsd; # highest number of TSDs on the line
-            
-                # Determine the most likely TSD. Favor 8bp and TA, but if those are zero then determine the TSD with the highest number 
-                if ($d[4] > (5*$d[11])) { # special case where TA tsds way outnumber 8bp. TSD, likely a case of the 8bp. tsd being TATATATATA so favoring a TA tsd
-                    $TSD="TA";
+                if (exists $known_tsdtirs{"$d[1]-$d[2]"}) { # if line match a known tsd tir combination
+                    for (my $j=0; $j <= 9; $j++) { # record observed TSD numbers
+                        $observed_locs{"$d[1]-$d[2]"}[$j] = $d[$j+4];
+                    }
+                    # check if there's a non-zero number of TSD with size of the observed TSD
+                    if (($known_tsdtirs{"$d[1]-$d[2]"}[0] eq "TA") and ($observed_locs{"$d[1]-$d[2]"}[0] > 0)) {
+                        $TSDmatch = 1;
+                    }
+                    elsif ($observed_locs{"$d[1]-$d[2]"}[$known_tsdtirs{"$d[1]-$d[2]"}[0]-1] > 0) {
+                        $TSDmatch = 1;
+                    }
                 }
-                elsif ($d[11] > 0) { 
-                    $TSD=8;
+                elsif (($d[4] > 0) or ($d[11] > 0)) { # this line has a TA or 8 bps TSD
+                    for (my $j=0; $j <= 9; $j++) { # record observed TSD numbers
+                        $TA8_locs{"$d[1]-$d[2]"}[$j] = $d[$j+4];
+                    }
                 }
-                elsif ($d[4] > 0) {
-                    $TSD="TA";
+                else { # all other lines
+                    for (my $j=0; $j <= 9; $j++) { # record observed TSD numbers
+                        $locs{"$d[1]-$d[2]"}[$j] = $d[$j+4];
+                    }
                 }
-                else {
-                    if ($d[5] > $max_tsd) { $TSD=2; $max_tsd =$d[5];  }
-                    if ($d[6] > $max_tsd) { $TSD=3; $max_tsd =$d[6];  }
-                    if ($d[7] > $max_tsd) { $TSD=4; $max_tsd =$d[7];  }
-                    if ($d[8] > $max_tsd) { $TSD=5; $max_tsd =$d[8];  }
-                    if ($d[9] > $max_tsd) { $TSD=6; $max_tsd =$d[9];  }
-                    if ($d[10] > $max_tsd) { $TSD=7; $max_tsd =$d[10];  }
-                    if ($d[12] > $max_tsd) { $TSD=9; $max_tsd =$d[12];  }
-                    if ($d[13] > $max_tsd) { $TSD=10; $max_tsd =$d[13];  }
-                }
-                # determine the average TIR length for the current combination of sequences and locations
-                # and record all the tir sequences;
-                my ($TIR_number, $average_TIR_length) = average_tir_number_and_length($d[1], $d[2], $MIN_TIR_SIZE, $TIR_MISMATCHES, %alignment_sequences);
-                
-                # add the possible lines to the list
-                if ($TSD) { 
-                    push @menu1_items, "$d[1]-$d[2], $TIR_number, $average_TIR_length | $d[4]-$d[5]-$d[6]-$d[7]-$d[8]-$d[9]-$d[10]-$d[11]-$d[12]-$d[13], $TSD";
-                }
-                else {
-                    push @menu1_items, "$d[1]-$d[2], $TIR_number, $average_TIR_length | no TSDs have been identified";
-                    $TSD=0;
-                }
-                $i++;          
             }
 
-            my $menu1 = 1; # boolean, set to one until the user is done with menu 1
-            my $move_to_menu2 = 0; # boolean, set to zero until the user is ready to move on to menu 2
-            while ($menu1) {
-                # if there was a prior review publish let user know here
-                if ($prior_review) {
-                    print color('bold blue');
-                    print "These sequences have been identified as likely being from a transposable element\n";
-                    print color('reset'); 
+            # Decide if the element can be processed automatically or needs to be reviewed by the user
+            if (((keys %known_tsdtirs) == 1) and ($TSDmatch)) { # this element can be recorded automatically
+                print "\tThis element has a TSD and TIR combination that has been recorded previously, recording and moving to the next element\n";
+                foreach my $l (keys %known_tsdtirs) { # there's only one line, but this allows me not to have to look up the name of the key
+                    my $tsd = $known_tsdtirs{$l}[0];
+                    my $tir1 = $known_tsdtirs{$l}[2];
+                    my $tir2 = $known_tsdtirs{$l}[3];
+                    print README "$datestring, Automated Review 1 result: This is an element, TSD $tsd, TIRs $tir1 and $tir2\n";
                 }
-                # diplay menu 1
-                my $menu1_choice = prompt('m', {
-                    title => "MENU1 of $element_name\n",
-                    prompt => 'What would you like to do?',
-                    display_base => 0,
-                    return_base => 0,
-                    accept_multiple_selections => 0,
-                items  => [@menu1_items],
-                separator => '[,/\s]',
-                },'', 2);
-    
-                # process answer to menu 1
-                if ($menu1_choice == 0) {
-                    `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
-                    close README;
-                    close ANALYSIS;
-                    close REJECT;
-                    exit;
+            }
+            else { # this element need manual review
+                # setup and display menu 1
+                my %alignment_sequences = fastatohash($filename_maf); # load the existing alignment
+                my @menu1_items; # hold the text of menu 1 choices
+                push @menu1_items, "Save current progress and quit the program"; # item 0
+                push @menu1_items, "Done reviewing this element and move on the next one"; # item 1
+                push @menu1_items, "View the whole sequence alignment"; # item 2
+                push @menu1_items, "Make a note in the README file"; # item 3
+                push @menu1_items, "Update the README to say this is not an element and quit this element"; # item 4
+                push @menu1_items, "Set this element aside for later review"; # item 5
+                push @menu1_items, "Manually enter TIRs and TSD"; # item 6
+                foreach my $loc (keys %observed_locs) {
+                    my @pos = split "-", $loc; # get the TIR end positions
+                    my ($TIR_number, $average_TIR_length) = average_tir_number_and_length($pos[0], $pos[1], $MIN_TIR_SIZE, $TIR_MISMATCHES, %alignment_sequences);
+                    push @menu1_items, "$loc, $average_TIR_length, $observed_locs{$loc}[0]-$observed_locs{$loc}[1]-$observed_locs{$loc}[2]-$observed_locs{$loc}[3]-$observed_locs{$loc}[4]-$observed_locs{$loc}[5]-$observed_locs{$loc}[6]-$observed_locs{$loc}[7]-$observed_locs{$loc}[8]-$observed_locs{$loc}[9] Seen TIRs with $known_tsdtirs{$loc}[0] TSDs"; 
                 }
-                if ($menu1_choice == 1) { # the user is done with this element
-                    $menu1 = 0;
+                foreach my $loc (keys %TA8_locs) {
+                    my @pos = split "-", $loc; # get the TIR end positions
+                    my ($TIR_number, $average_TIR_length) = average_tir_number_and_length($pos[0], $pos[1], $MIN_TIR_SIZE, $TIR_MISMATCHES, %alignment_sequences);
+                    push @menu1_items, "$loc, $average_TIR_length, $TA8_locs{$loc}[0]-$TA8_locs{$loc}[1]-$TA8_locs{$loc}[2]-$TA8_locs{$loc}[3]-$TA8_locs{$loc}[4]-$TA8_locs{$loc}[5]-$TA8_locs{$loc}[6]-$TA8_locs{$loc}[7]-$TA8_locs{$loc}[8]-$TA8_locs{$loc}[9]"; 
                 }
-                elsif ($menu1_choice == 2) { # the user wants to see the original alignment
-                    `aliview $ELEMENT_FOLDER/$element_name/$element_name.maf`;
-                    if ($?) { die "ERROR: Could not open program aliview: error code $?\n"}
+                foreach my $loc (keys %locs) {
+                    my @pos = split "-", $loc; # get the TIR end positions
+                    my ($TIR_number, $average_TIR_length) = average_tir_number_and_length($pos[0], $pos[1], $MIN_TIR_SIZE, $TIR_MISMATCHES, %alignment_sequences);
+                    push @menu1_items, "$loc, $average_TIR_length, $locs{$loc}[0]-$locs{$loc}[1]-$locs{$loc}[2]-$locs{$loc}[3]-$locs{$loc}[4]-$locs{$loc}[5]-$locs{$loc}[6]-$locs{$loc}[7]-$locs{$loc}[8]-$locs{$loc}[9]"; 
                 }
-                elsif ($menu1_choice == 3) { # the user wants to update the README file or set this element aside
-                    
-                    # update the README file with a new line and open the editor
-                    my $datestring = localtime(); 
-                    `echo $datestring, Manual Review 1 user note: >> $ELEMENT_FOLDER/$element_name/$element_name-README.txt`;
-                    if ($?) { die "ERROR: could not add line to README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt: error code $?\n"}
-                    `gnome-text-editor $ELEMENT_FOLDER/$element_name/$element_name-README.txt`;
-                    if ($?) { die "ERROR: could not open for editing the file $ELEMENT_FOLDER/$element_name/$element_name-README.txt: error code $?\n"}
-                }
-                elsif ($menu1_choice == 4) { # the user wants to label this an not an element
-                    my $datestring = localtime(); 
-                    print README "$datestring, Manual Review 1 result: This is not an element\n";
-                    print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
-                    `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
-                    $menu1 = 0;
-                }
-                elsif ($menu1_choice == 5) { # the user wants to set this element aside
-                    unless (-d $FURTHER_REVIEW_FOLDER_NAME) { # create the folder if necessary
-                        `mkdir $FURTHER_REVIEW_FOLDER_NAME`;
-                        if ($?) { die "ERROR: could make folder $FURTHER_REVIEW_FOLDER_NAME: error code $?\n"}
-                    }
-                    print README "$datestring, in STEP 3 manual review 1, reviewer moved this element to the folder $FURTHER_REVIEW_FOLDER_NAME for further review\n";
-                    `mv $ELEMENT_FOLDER/$element_name $FURTHER_REVIEW_FOLDER_NAME`;
-                    if ($?) { die "ERROR: could not move folder $ELEMENT_FOLDER/$element_name to folder $FURTHER_REVIEW_FOLDER_NAME: error code $?\n"}
-                    print "\tMoved the element to the folder $FURTHER_REVIEW_FOLDER_NAME\n";
-                    $menu1 = 0;
-                }
-                elsif ($menu1_choice == 6) { # the user wants to manually enter the coordinates
-                    $TIR_b1 = prompt('n', "Left alignement coordinate:", '', $manual_left_tir );
-                    $TIR_b2 = prompt('n', "Right alignement coordinate:", '', $manual_right_tir);
-                    $TSD_size = prompt('n', "TSD size (enter 1 for \"TA\" or 0 for no TSDs):", '', $manual_tsd);
-                    $TIR_size = prompt('n', "TIR size (enter 0 for the script to find the most likely size):", '', $manual_tir_size);
 
-                    # set this manual selections for next round
-                    $manual_left_tir = $TIR_b1;
-                    $manual_right_tir = $TIR_b2;
-                    $manual_tsd = $TSD_size;
-                    $manual_tir_size = $TIR_size;
-                    
-                    if ($TSD_size == 1) {
-                        $TSD_size = 2;
-                        $TSD_type = "TA";
+                my $menu1 = 1; # boolean, set to one until the user is done with menu 1
+                my $move_to_menu2 = 0; # boolean, set to zero until the user is ready to move on to menu 2
+                while ($menu1) {
+                    my $menu1_choice = prompt('m', {
+                        title => "MENU1 of $element_name\n",
+                        prompt => 'What would you like to do?',
+                        display_base => 0,
+                        return_base => 0,
+                        accept_multiple_selections => 0,
+                    items  => [@menu1_items],
+                    separator => '[,/\s]',
+                    },'', 2);
+        
+                    # process answer to menu 1
+                    if ($menu1_choice == 0) {
+                        `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
+                        close README;
+                        close ANALYSIS;
+                        close REJECT;
+                        exit;
                     }
-                    elsif ($TSD_size == 0) {
-                        $TSD_size = 0;
-                        $TSD_type = "NA";
+                    if ($menu1_choice == 1) { # the user is done with this element
+                        $menu1 = 0;
                     }
-                    else {
-                        $TSD_type = $TSD_size;
+                    elsif ($menu1_choice == 2) { # the user wants to see the original alignment
+                        `aliview $ELEMENT_FOLDER/$element_name/$element_name.maf`;
+                        if ($?) { die "ERROR: Could not open program aliview: error code $?\n"}
                     }
-                    $move_to_menu2 = 1;
-                }
-                else { # This means that the user selected a preset number
-                    $move_to_menu2 = 1;
-                    if ($menu1_items[$menu1_choice] =~ /^(\d+)-(\d+),\s\d+,\s(\d+)\s\|\s\S+,\s(\S+)/) {
-                        $TIR_b1 = $1; 
-                        $TIR_b2 = $2; 
-                        $TIR_size = $3;
-                        my $default_tsd = $4;
-                        if ($default_tsd eq "TA") {
-                            $default_tsd = 1;
+                    elsif ($menu1_choice == 3) { # the user wants to update the README file or set this element aside
+                        
+                        # update the README file with a new line and open the editor
+                        my $datestring = localtime(); 
+                        `echo $datestring, Manual Review 1 user note: >> $ELEMENT_FOLDER/$element_name/$element_name-README.txt`;
+                        if ($?) { die "ERROR: could not add line to README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt: error code $?\n"}
+                        `gnome-text-editor $ELEMENT_FOLDER/$element_name/$element_name-README.txt`;
+                        if ($?) { die "ERROR: could not open for editing the file $ELEMENT_FOLDER/$element_name/$element_name-README.txt: error code $?\n"}
+                    }
+                    elsif ($menu1_choice == 4) { # the user wants to label this an not an element
+                        my $datestring = localtime(); 
+                        print README "$datestring, Manual Review 1 result: This is not an element\n";
+                        print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
+                        `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+                        $menu1 = 0;
+                    }
+                    elsif ($menu1_choice == 5) { # the user wants to set this element aside
+                        unless (-d $FURTHER_REVIEW_FOLDER_NAME) { # create the folder if necessary
+                            `mkdir $FURTHER_REVIEW_FOLDER_NAME`;
+                            if ($?) { die "ERROR: could make folder $FURTHER_REVIEW_FOLDER_NAME: error code $?\n"}
                         }
-                        # ask what TSD size to use
-                        $TSD_size = prompt('n', "What TSD size should be displayed? (1 for TA)", '', $default_tsd);
+                        print README "$datestring, in STEP 3 manual review 1, reviewer moved this element to the folder $FURTHER_REVIEW_FOLDER_NAME for further review\n";
+                        `mv $ELEMENT_FOLDER/$element_name $FURTHER_REVIEW_FOLDER_NAME`;
+                        if ($?) { die "ERROR: could not move folder $ELEMENT_FOLDER/$element_name to folder $FURTHER_REVIEW_FOLDER_NAME: error code $?\n"}
+                        print "\tMoved the element to the folder $FURTHER_REVIEW_FOLDER_NAME\n";
+                        $menu1 = 0;
+                    }
+                    elsif ($menu1_choice == 6) { # the user wants to manually enter the coordinates
+                        $TIR_b1 = prompt('n', "Left alignement coordinate:", '', $manual_left_tir );
+                        $TIR_b2 = prompt('n', "Right alignement coordinate:", '', $manual_right_tir);
+                        $TSD_size = prompt('n', "TSD size (enter 1 for \"TA\" or 0 for no TSDs):", '', $manual_tsd);
+                        $TIR_size = prompt('n', "TIR size (enter 0 for the script to find the most likely size):", '', $manual_tir_size);
+
+                        # set this manual selections for next round
+                        $manual_left_tir = $TIR_b1;
+                        $manual_right_tir = $TIR_b2;
+                        $manual_tsd = $TSD_size;
+                        $manual_tir_size = $TIR_size;
+                        
                         if ($TSD_size == 1) {
                             $TSD_size = 2;
                             $TSD_type = "TA";
                         }
+                        elsif ($TSD_size == 0) {
+                            $TSD_size = 0;
+                            $TSD_type = "NA";
+                        }
                         else {
-                        $TSD_type = $TSD_size; 
+                            $TSD_type = $TSD_size;
                         }
                         $move_to_menu2 = 1;
                     }
-                    elsif ($menu1_items[$menu1_choice] =~ /^(\d+)-(\d+),\s\d+,\s(\d+)\s\|\sno\sTSDs\shave\sbeen\sidentified/) {
-                        $TIR_b1 = $1; 
-                        $TIR_b2 = $2; 
-                        $TIR_size = $3;
-                        $TSD_size = 0;
-                        $TSD_type = "NA";
+                    else { # This means that the user selected a preset number
                         $move_to_menu2 = 1;
-                    }
-                    else {
-                        die "ERROR: Cannot parse selection $menu1_items[$menu1_choice]\n";
-                    }
-                }
-
-                if (($menu1) and ($move_to_menu2)){ # only continue if the user has not elected to quit menu 1 and is ready to move on
-                
-                    # The TIRs and TSDs location have now been selected, next create an alignment to display these to the user  
-
-                    # Find and record the conensus sequence, this will be necessary to properly display the TIR sequences
-                    my $consensus_sequence;
-                    foreach my $seq_name (keys %alignment_sequences) {
-                        if ($seq_name =~ /consensus/) { 
-                            $consensus_sequence = $alignment_sequences{$seq_name};
-                        }   
-                    }
-                    unless ($consensus_sequence) { die "ERROR: No conensus sequence found, need this to properly display the TIRs\n"}
-
-                    my $temp_alignment_file = "/tmp/$element_name-$TIR_b1-$TIR_b2-$TSD_size.fa"; # tried using perl temporary file system, but aliview will not open those
-                    my %TIR_sequences; # element name as key and [0] left TIR sequences displayed [1] right TIR sequences displayed. This will be used in the next menus to display TIR sequences
-                    open (OUTPUT, ">", $temp_alignment_file) or die "Cannot create temporary alignment file $temp_alignment_file\n";
-
-                    foreach my $seq_name (keys %alignment_sequences) {
-                        if ($seq_name =~ /consensus/) { 
-                            $consensus_sequence = $alignment_sequences{$seq_name};
+                        if ($menu1_items[$menu1_choice] =~ /^(\d+)-(\d+),\s(\d+),\s(\S+)/) {
+                            $TIR_b1 = $1; 
+                            $TIR_b2 = $2; 
+                            $TIR_size = $3;
+                            
+                            # get the sizes of the TSDs and their position in the list to decide the best TSD size to default to
+                            my @d = split "-", $4;
+                            my @sorted_indices = sort { $d[$b] <=> $d[$a] } 0 .. $#d;
+                            my $default_tsd = $sorted_indices[0] + 1;
+                            if (($default_tsd == 8) and ($d[0] > (5*$d[7]))) { # special case where TA tsds way outnumber 8bp. TSD, likely a case of the 8bp. tsd being TATATATATA so favoring a TA tsd
+                                $default_tsd = 1;
+                            }
+                            elsif ($d[7] > 0.5*($d[$sorted_indices[0]])) { # special case where the 8bp. tsds are larger than half the largest TSD, then go with 8bp.
+                                $default_tsd = 8;
+                            }
+                            # ask what TSD size to use
+                            $TSD_size = prompt('n', "What TSD size should be displayed? (enter 1 for \"TA\" or 0 for no TSDs)", '', $default_tsd);
+                            if ($TSD_size == 1) {
+                                $TSD_size = 2;
+                                $TSD_type = "TA";
+                            }
+                            elsif ($TSD_size == 0) {
+                                $TSD_size = 0;
+                                $TSD_type = "NA";
+                            }
+                            else {
+                            $TSD_type = $TSD_size; 
+                            }
+                            $move_to_menu2 = 1;
                         }
-                        else {# avoid the line with the consensus sequence
-                            ## left side sequences
-                            my $left_whole_seq = substr($alignment_sequences{$seq_name}, 0, $TIR_b1-1);
-                            $left_whole_seq =~ s/-//g; #remove gaps
-                            # if there are no or few sequences, replace left TSD with space symbols
-                            if ((length $left_whole_seq) < $TSD_size) {
-                                $left_whole_seq = "";
-                                for (my $i=0; $i<=$TSD_size; $i++) {
-                                    $left_whole_seq .= "s";
-                                }
-                            }
-                            my $left_tsd = substr($left_whole_seq, -$TSD_size, $TSD_size);
+                        else {
+                            die "ERROR: Cannot parse selection $menu1_items[$menu1_choice]\n";
+                        }
+                    }
 
-                            # get the sequence of the TIR, ignoring positions with no consensus
-                            my $i=0;
-                            my $left_tir_seq;
-                            while ((length $left_tir_seq) < $TIR_bp) {
-                                unless ((substr $consensus_sequence, $TIR_b1-1+$i, 1) =~ /n/) {
-                                    $left_tir_seq .= substr($alignment_sequences{$seq_name}, $TIR_b1-1+$i, 1);
-                                }
-                                $i++;
-                                if ($i > length $alignment_sequences{$seq_name}) { die "ERROR: Cannot display TIR for sequence $seq_name\n"} # a reality check in case things go south
-                            }
+                    if (($menu1) and ($move_to_menu2)){ # only continue if the user has not elected to quit menu 1 and is ready to move on
+                    
+                        # The TIRs and TSDs location have now been selected, next create an alignment to display these to the user  
 
-                            ## right side sequences
-                            my $right_whole_seq = substr($alignment_sequences{$seq_name}, $TIR_b2);
-                            $right_whole_seq =~ s/-//g; #remove gaps
-                            # if there are no or few sequences, replace right TSD with space symbols
-                            if ((length $right_whole_seq) < $TSD_size) {
-                                $right_whole_seq = "";
-                                for (my $i=0; $i<=$TSD_size; $i++) {
-                                    $right_whole_seq .= "s";
-                                }
-                            }
-                            my $right_tsd = substr($right_whole_seq, 0, $TSD_size);
-                            my $i=0;
-                            my $right_tir_seq;
-                            while ((length $right_tir_seq) < $TIR_bp) {
-                                unless ((substr $consensus_sequence, $TIR_b2-$i-1, 1) =~ /n/i) {
-                                    $right_tir_seq .= substr($alignment_sequences{$seq_name}, $TIR_b2-$i-1, 1);
-                                }
-                                $i++;
-                                if ($TIR_b2-$i < 0) { die "ERROR: Cannot display TIR for sequence $seq_name\n"} # a reality check in case things go south
-                            }
-                            $right_tir_seq = reverse $right_tir_seq; # necessary because sequences were added from the TIR end backward
+                        # Find and record the conensus sequence, this will be necessary to properly display the TIR sequences
+                        my $consensus_sequence;
+                        foreach my $seq_name (keys %alignment_sequences) {
+                            if ($seq_name =~ /consensus/) { 
+                                $consensus_sequence = $alignment_sequences{$seq_name};
+                            }   
+                        }
+                        unless ($consensus_sequence) { die "ERROR: No conensus sequence found, need this to properly display the TIRs\n"}
 
-                            ## print the sequences after checking if there's anything to print
-                            my $test_tir1 = $left_tir_seq;
-                            my $test_tir2 = $right_tir_seq;
-                            $test_tir1 =~ s/-//g; # removing all the gaps to see if there's anything left after removal
-                            $test_tir2 =~ s/-//g;
-                            if (($test_tir1) or ($test_tir2)) { # only print if there's something in the TIR sequecences
-                                if ($left_tsd eq $right_tsd) { # if the TSDs are the same (and they are not just S's) then add it to the title
-                                    unless (($left_tsd =~ /s/) or ($right_tsd =~ /s/)) {
-                                        $seq_name .= "-identicalTSDs";
+                        my $temp_alignment_file = "/tmp/$element_name-$TIR_b1-$TIR_b2-$TSD_size.fa"; # tried using perl temporary file system, but aliview will not open those
+                        my %TIR_sequences; # element name as key and [0] left TIR sequences displayed [1] right TIR sequences displayed. This will be used in the next menus to display TIR sequences
+                        open (OUTPUT, ">", $temp_alignment_file) or die "Cannot create temporary alignment file $temp_alignment_file\n";
+
+                        foreach my $seq_name (keys %alignment_sequences) {
+                            if ($seq_name =~ /consensus/) { 
+                                $consensus_sequence = $alignment_sequences{$seq_name};
+                            }
+                            else {# avoid the line with the consensus sequence
+                                ## left side sequences
+                                my $left_whole_seq = substr($alignment_sequences{$seq_name}, 0, $TIR_b1-1);
+                                $left_whole_seq =~ s/-//g; #remove gaps
+                                # if there are no or few sequences, replace left TSD with space symbols
+                                if ((length $left_whole_seq) < $TSD_size) {
+                                    $left_whole_seq = "";
+                                    for (my $i=0; $i<=$TSD_size; $i++) {
+                                        $left_whole_seq .= "s";
                                     }
                                 }
-                                print OUTPUT ">$seq_name\n", $left_tsd, "sss", $left_tir_seq, "ssssssssssssssssssss", $right_tir_seq, "sss", $right_tsd, "\n";
-                                $TIR_sequences{$seq_name}[0] = $left_tir_seq; # store the sequences for MENU2
-                                $TIR_sequences{$seq_name}[1] = $right_tir_seq; # store the sequences for MENU2
+                                my $left_tsd = substr($left_whole_seq, -$TSD_size, $TSD_size);
+
+                                # get the sequence of the TIR, ignoring positions with no consensus
+                                my $i=0;
+                                my $left_tir_seq;
+                                while ((length $left_tir_seq) < $TIR_bp) {
+                                    unless ((substr $consensus_sequence, $TIR_b1-1+$i, 1) =~ /n/) {
+                                        $left_tir_seq .= substr($alignment_sequences{$seq_name}, $TIR_b1-1+$i, 1);
+                                    }
+                                    $i++;
+                                    if ($i > length $alignment_sequences{$seq_name}) { die "ERROR: Cannot display TIR for sequence $seq_name\n"} # a reality check in case things go south
+                                }
+
+                                ## right side sequences
+                                my $right_whole_seq = substr($alignment_sequences{$seq_name}, $TIR_b2);
+                                $right_whole_seq =~ s/-//g; #remove gaps
+                                # if there are no or few sequences, replace right TSD with space symbols
+                                if ((length $right_whole_seq) < $TSD_size) {
+                                    $right_whole_seq = "";
+                                    for (my $i=0; $i<=$TSD_size; $i++) {
+                                        $right_whole_seq .= "s";
+                                    }
+                                }
+                                my $right_tsd = substr($right_whole_seq, 0, $TSD_size);
+                                my $i=0;
+                                my $right_tir_seq;
+                                while ((length $right_tir_seq) < $TIR_bp) {
+                                    unless ((substr $consensus_sequence, $TIR_b2-$i-1, 1) =~ /n/i) {
+                                        $right_tir_seq .= substr($alignment_sequences{$seq_name}, $TIR_b2-$i-1, 1);
+                                    }
+                                    $i++;
+                                    if ($TIR_b2-$i < 0) { die "ERROR: Cannot display TIR for sequence $seq_name\n"} # a reality check in case things go south
+                                }
+                                $right_tir_seq = reverse $right_tir_seq; # necessary because sequences were added from the TIR end backward
+
+                                ## print the sequences after checking if there's anything to print
+                                my $test_tir1 = $left_tir_seq;
+                                my $test_tir2 = $right_tir_seq;
+                                $test_tir1 =~ s/-//g; # removing all the gaps to see if there's anything left after removal
+                                $test_tir2 =~ s/-//g;
+                                if (($test_tir1) or ($test_tir2)) { # only print if there's something in the TIR sequecences
+                                    if ($left_tsd eq $right_tsd) { # if the TSDs are the same (and they are not just S's) then add it to the title
+                                        unless (($left_tsd =~ /s/) or ($right_tsd =~ /s/)) {
+                                            $seq_name .= "-identicalTSDs";
+                                        }
+                                    }
+                                    print OUTPUT ">$seq_name\n", $left_tsd, "sss", $left_tir_seq, "ssssssssssssssssssss", $right_tir_seq, "sss", $right_tsd, "\n";
+                                    $TIR_sequences{$seq_name}[0] = $left_tir_seq; # store the sequences for MENU2
+                                    $TIR_sequences{$seq_name}[1] = $right_tir_seq; # store the sequences for MENU2
+                                }
                             }
                         }
-                    }
-                    close OUTPUT;
+                        close OUTPUT;
 
-                    # MENU 2 display the alignement to the user and ask for evaluation
-                    `aliview $temp_alignment_file`;
-                    if ($?) { die "Error executing: aliview $temp_alignment_file, error code $?\n"}
-                    my $menu2 = 1; # boolean, set to 1 until the user is done with menu 2
+                        # MENU 2 display the alignement to the user and ask for evaluation
+                        `aliview $temp_alignment_file`;
+                        if ($?) { die "Error executing: aliview $temp_alignment_file, error code $?\n"}
+                        my $menu2 = 1; # boolean, set to 1 until the user is done with menu 2
 
-                    # if the used asked the script to figure out the TIR size then it will be set to zero
-                    # figure out the average size here
-                    if ($TIR_size ==0) {
-                        my $TIR_number;
-                        ($TIR_number, $TIR_size) = average_tir_number_and_length($TIR_b1, $TIR_b2, $MIN_TIR_SIZE, $TIR_MISMATCHES, %alignment_sequences)
-                    }
+                        # if the used asked the script to figure out the TIR size then it will be set to zero
+                        # figure out the average size here
+                        if ($TIR_size ==0) {
+                            my $TIR_number;
+                            ($TIR_number, $TIR_size) = average_tir_number_and_length($TIR_b1, $TIR_b2, $MIN_TIR_SIZE, $TIR_MISMATCHES, %alignment_sequences)
+                        }
 
-                    # figure out the TIR sequences
-                    # don't use the consensus sequence for this, because that contains n characters
-                    my $TIR1_sequence;
-                    my $TIR2_sequence; 
-                    for (my $i=0; $i <$TIR_size; $i++) {
-                        my %left_char_abundance; # holds the character as key and abundance as value
-                        my %right_char_abundance;
-                        foreach my $seqname (keys %TIR_sequences) {
-                            my $left_character = substr($TIR_sequences{$seqname}[0], $i, 1); # current left character
-                            my $right_character = substr($TIR_sequences{$seqname}[1], length($TIR_sequences{$seqname}[1])-$TIR_size+$i, 1); # current right character
-                            unless ($left_character eq "-") {
-                                $left_char_abundance{$left_character} += 1;
+                        # figure out the TIR sequences
+                        # don't use the consensus sequence for this, because that contains n characters
+                        my $TIR1_sequence;
+                        my $TIR2_sequence; 
+                        for (my $i=0; $i <$TIR_size; $i++) {
+                            my %left_char_abundance; # holds the character as key and abundance as value
+                            my %right_char_abundance;
+                            foreach my $seqname (keys %TIR_sequences) {
+                                my $left_character = substr($TIR_sequences{$seqname}[0], $i, 1); # current left character
+                                my $right_character = substr($TIR_sequences{$seqname}[1], length($TIR_sequences{$seqname}[1])-$TIR_size+$i, 1); # current right character
+                                unless ($left_character eq "-") {
+                                    $left_char_abundance{$left_character} += 1;
+                                }
+                                unless ($right_character eq "-") {
+                                    $right_char_abundance{$right_character} += 1;
+                                }
                             }
-                            unless ($right_character eq "-") {
-                                $right_char_abundance{$right_character} += 1;
-                            }
+                            $TIR1_sequence .= max_by { $left_char_abundance{$_} } keys %left_char_abundance;
+                            $TIR2_sequence .= max_by { $right_char_abundance{$_} } keys %right_char_abundance;
                         }
-                        $TIR1_sequence .= max_by { $left_char_abundance{$_} } keys %left_char_abundance;
-                        $TIR2_sequence .= max_by { $right_char_abundance{$_} } keys %right_char_abundance;
-                    }
-                                        
-                    # setup and display menu 2, testing to see if this combination of TIRs has been seen before
-                    my @menu2_items; # hold the text of menu 2 choices
-                    push @menu2_items, "Go back to the previous menu";
+                                            
+                        # setup and display menu 2, testing to see if this combination of TIRs has been seen before
+                        my @menu2_items; # hold the text of menu 2 choices
+                        push @menu2_items, "Go back to the previous menu";
 
-                    # testing for this TIR having been seen before, change the option if it has
- #                   my ($tirmatch, $other_element_name, $other_tir1, $other_tir2, $other_tsd) = compare_tirs($TIR1_sequence, $TIR2_sequence, %seen_tirs);
-                    my ($tirmatch, $other_tir1, $other_tir2, $other_tsd) = compare_tirs($TIR1_sequence, $TIR2_sequence, %seen_tirs);
+                        # testing for this TIR having been seen before, change the option if it has
+                        my ($tirmatch, $other_tir1, $other_tir2, $other_tsd) = compare_tirs($TIR1_sequence, $TIR2_sequence, %seen_tirs);
 
-                    # if the TIR_size is N/A no TIR sequences will be reported, this will match the menu to that
-                    if ($TIR1_sequence and $TIR2_sequence and ($TSD_type eq "NA")) { 
-                        push @menu2_items, "Update the README to record TIRs $TIR1_sequence and $TIR2_sequence";
-                    }
-                    elsif ($TIR1_sequence and $TIR2_sequence) {
-                        push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence";
-                    }
-                    else {
-                        push @menu2_items, "No TIRs were found, update the README to say this is not an element";
-                    }
-                    
-                    push @menu2_items, "Update the README to say this is not an element";
-                    while ($menu2) { #keep displaying until the user ready to leave
-
-                        # if applicable tell the user this TIRs been seen before
-                        print color('bold blue');
-                        if (abs($tirmatch)==2) {
-                            print "\nNOTE: These exact TIRs have been recorded before\n";
+                        # if the TIR_size is N/A no TIR sequences will be reported, this will match the menu to that
+                        if ($TIR1_sequence and $TIR2_sequence and ($TSD_type eq "NA")) { 
+                            push @menu2_items, "Update the README to record TIRs $TIR1_sequence and $TIR2_sequence";
                         }
-                        if (abs($tirmatch)==1) {
-                            print "\nNOTE: Very similar TIRs have been recorded before\n";
-                            print "PRIOR TIRs: $other_tir1  $other_tir2\n";
+                        elsif ($TIR1_sequence and $TIR2_sequence) {
+                            push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence";
                         }
-                        print color('reset');
+                        else {
+                            push @menu2_items, "No TIRs were found, update the README to say this is not an element";
+                        }
                         
-                        # display menu 2
-                        my $menu2_choice = prompt('m', {
-                            title => "MENU2 of $element_name\n",
-                            prompt => 'What would you like to do?',
-                            display_base => 0,
-                            return_base => 0,
-                            accept_multiple_selections => 0,
-                        items  => [@menu2_items],
-                        },'', 0);
+                        push @menu2_items, "Update the README to say this is not an element";
+                        while ($menu2) {  #keep displaying until the user ready to leave
 
-                        # process the user's choice1
-                        if ($menu2_choice == 0) { # user wants to go back to menu 1 
-                            $menu2 = 0;
-                            $move_to_menu2 = 0;
-                        } 
-                        elsif ($menu2_choice == 1) { # user wants to report this an element as it is
-                            my $datestring = localtime(); 
-                            if ($TIR1_sequence and $TIR2_sequence) { # this prevents printing if no TIRs were found
-                                if ($TSD_type eq "TA") {
-                                    print README "$datestring, Manual Review 1 result: This is an element, TSD TA, TIRs $TIR1_sequence and $TIR2_sequence\n";
-                                }
-                                elsif ($TSD_type eq "NA") {
-                                    print README "$datestring, Manual Review 1 result: TSD NA, TIRs $TIR1_sequence and $TIR2_sequence\n";               
-                                }
-                                else {
-                                    print README "$datestring, Manual Review 1 result: This is an element, TSD $TSD_type, TIRs $TIR1_sequence and $TIR2_sequence\n";
-                                }
-                                $prior_review = 1;
+                            # if applicable tell the user this TIRs been seen before
+                            print color('bold blue');
+                            if (abs($tirmatch)==2) {
+                                print "\nNOTE: These exact TIRs have been recorded before\n";
                             }
-                            else { # no TIRS were found
+                            if (abs($tirmatch)==1) {
+                                print "\nNOTE: Very similar TIRs have been recorded before\n";
+                                print "PRIOR TIRs: $other_tir1  $other_tir2\n";
+                            }
+                            print color('reset');
+                            
+                            # display menu 2
+                            my $menu2_choice = prompt('m', {
+                                title => "MENU2 of $element_name\n",
+                                prompt => 'What would you like to do?',
+                                display_base => 0,
+                                return_base => 0,
+                                accept_multiple_selections => 0,
+                            items  => [@menu2_items],
+                            },'', 0);
+
+                            # process the user's choice1
+                            if ($menu2_choice == 0) { # user wants to go back to menu 1 
+                                $menu2 = 0;
+                                $move_to_menu2 = 0;
+                            } 
+                            elsif ($menu2_choice == 1) { # user wants to report this an element as it is
+                                my $datestring = localtime(); 
+                                if ($TIR1_sequence and $TIR2_sequence) { # this prevents printing if no TIRs were found
+                                    if ($TSD_type eq "TA") {
+                                        print README "$datestring, Manual Review 1 result: This is an element, TSD TA, TIRs $TIR1_sequence and $TIR2_sequence\n";
+                                    }
+                                    elsif ($TSD_type eq "NA") {
+                                        print README "$datestring, Manual Review 1 result: TSD NA, TIRs $TIR1_sequence and $TIR2_sequence\n";               
+                                    }
+                                    else {
+                                        print README "$datestring, Manual Review 1 result: This is an element, TSD $TSD_type, TIRs $TIR1_sequence and $TIR2_sequence\n";
+                                    }
+#                                    $prior_review = 1;
+                                }
+                                else { # no TIRS were found
+                                    print README "$datestring, Manual Review 1 result: This is not an element\n";
+                                    print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
+                                    `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+                                    $menu2 = 0;
+                                    $menu1 = 0
+                                }
+                                $menu2 = 0;
+                            }
+                            elsif ($menu2_choice == 2) {  # user wants to report this as not an element
+                                my $datestring = localtime(); 
                                 print README "$datestring, Manual Review 1 result: This is not an element\n";
                                 print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
                                 `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+                                if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
                                 $menu2 = 0;
-                                $menu1 = 0
                             }
-                            $menu2 = 0;
                         }
-                        elsif ($menu2_choice == 2) {  # user wants to report this as not an element
-                            my $datestring = localtime(); 
-                            print README "$datestring, Manual Review 1 result: This is not an element\n";
-                            print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
-                            `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
-                            if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
-                            $menu2 = 0;
-                        }
-                    }
-                }            
-            }  
+                    }            
+                }  
+            }
             close README;         
         }
         else {
