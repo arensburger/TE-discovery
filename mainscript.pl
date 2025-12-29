@@ -729,7 +729,7 @@ if ($STEP == 3) { # check if this step should be performed or not
             my $manual_left_tir; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
             my $manual_right_tir; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
             my $manual_tsd; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
-            my $manual_tir_size; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
+            my $manual_tir_size=0; # if the user does more than one round of manual selection, this will save the coordinate from the previous round, otherwise it's empty
             
             # check the README file for any previous manual review notes and display them
             open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
@@ -791,6 +791,9 @@ if ($STEP == 3) { # check if this step should be performed or not
                     }
                     # check if there's a non-zero number of TSD with size of the observed TSD
                     if (($known_tsdtirs{"$d[1]-$d[2]"}[0] eq "TA") and ($observed_locs{"$d[1]-$d[2]"}[0] > 0)) {
+                        $TSDmatch = 1;
+                    }
+                    elsif (($known_tsdtirs{"$d[1]-$d[2]"}[0] eq "TTAA") and ($observed_locs{"$d[1]-$d[2]"}[3] > 0)) {
                         $TSDmatch = 1;
                     }
                     elsif ($observed_locs{"$d[1]-$d[2]"}[$known_tsdtirs{"$d[1]-$d[2]"}[0]-1] > 0) {
