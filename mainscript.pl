@@ -1206,38 +1206,99 @@ if ($STEP == 4) { # check if this step should be performed or not
     print ANALYSIS "\tCONSENSUS_LEVEL = $CONSENSUS_LEVEL\n";
 
     ## Read the README files and identify TIRs sequences and TSD
-    my %file_tirs;  # holds the element name as key and information on the element ends as array of values. 
+    
+    # load the element information from the README files
+    my %reviewed_tsdtirs;  # holds the element name as key and information on the element ends as array of values. 
                     # specifically [0] = TSD size or type, [1] = TIR1 sequence, [2] = TIR2 sequence
                     # This will record the information in the last line of the README file that has the right format
     opendir(my $dh, $ELEMENT_FOLDER) or die "ERROR: Cannot open element folder $ELEMENT_FOLDER, $!";
     while (readdir $dh) {
         unless ($_ =~ /^\./) {
-            if (-e "$ELEMENT_FOLDER/$_/README.txt") {
-                open (INPUT, "$ELEMENT_FOLDER/$_/README.txt") or die "ERROR: Cannot open file $!";
+            if (-e "$ELEMENT_FOLDER/$_/$_-README.txt") {
+                open (INPUT, "$ELEMENT_FOLDER/$_/$_-README.txt") or die "ERROR: Cannot open file $!";
                 while (my $line = <INPUT>) {
                     if ($line =~ /This\sis\san\selement,\sTSD\s(\S+),\sTIRs\s(\S+)\sand\s(\S+)/) {
-                        $file_tirs{$_}[0] = $1; # TSD size 
-                        $file_tirs{$_}[1] = $2; # first TIR sequence
-                        $file_tirs{$_}[2] = $3; # second TIR sequence
-                        # adjust the size if the TSD is TA
-                        if (lc($file_tirs{$_}[0]) eq "ta") {
-                            $file_tirs{$_}[0] = 2;
-                        }
+                        $reviewed_tsdtirs{$_}[0] = $1; # TSD 
+                        $reviewed_tsdtirs{$_}[1] = $2; # first TIR sequence
+                        $reviewed_tsdtirs{$_}[2] = $3; # second TIR sequence
                     }
                 }
                 close INPUT; 
             }
             else {
-                print STDERR "WARNING: No README.txt file was found in folder $ELEMENT_FOLDER/$_";
+                print STDERR "WARNING: No README.txt file was found in folder $ELEMENT_FOLDER/$_\n";
             }
-            unless (exists $file_tirs{$_}) {
+            unless (exists $reviewed_tsdtirs{$_}) {
                 print STDERR "WARNING: No appropriate line with TIR sequences were found in the README file for element $_\n";
             }
         }
     }
-    unless (keys %file_tirs) {
+    unless (keys %reviewed_tsdtirs) {
         print STDERR "WARNING: No elements where found for processing in this dataset\n";
     }
+
+    # Cluster the TIR sequences
+    my %clustering_info;   # holds a unique cluster name (i.e. cluster1, cluster2, etc.) as key and as value
+                    # an array with [0] string with names of all proteins in this cluster
+                    # [1] name of the protein with the shortest TIRs [2] length of shortest TIR [3] last TSD observed [4] 0 if all
+                    # TSDs are the same 1 if they are not
+    my $tircluster_input_file = File::Temp->new(UNLINK => 1); # clustering program input file
+    my $tircluster_output_file = File::Temp->new(UNLINK => 1); # clustering program output file
+    open (TIRCLUSTER, ">", $tircluster_input_file) or die "Cannot create temporary file $tircluster_input_file\n";
+    foreach my $protein_name (keys %reviewed_tsdtirs) {
+        my $seq = "$reviewed_tsdtirs{$protein_name}[1]$reviewed_tsdtirs{$protein_name}[2]";
+        print TIRCLUSTER ">$protein_name\n$seq\n";
+    }
+    close TIRCLUSTER;
+    `cd-hit-est -i $tircluster_input_file -o $tircluster_output_file`; # run clustering
+    if ($?) { die "ERROR executing cd-hit-est: error code $?\n" }
+
+    # interpret the clustering .clstr file and populate the %clustering_info hash 
+    my $element_name; # current element name;
+    open (INPUT, "$tircluster_output_file.clstr") or die "Cannot open cd-hit output file $tircluster_output_file.clstr\n";
+    while (my $line = <INPUT>) {
+        if ($line =~ />Cluster\s(\d+)/) {
+            $element_name = "element$1";
+        }
+        elsif ($line =~ /^\d+\s+(\d+)nt,\s>(\S+)\.\.\./) {
+            my $length = $1;
+            my $protein_name = $2;
+
+            # add the protein name to the list 
+            $clustering_info{$element_name}[0] .= $protein_name . " ";
+
+            # record the name of the shortest TIRs in each cluster
+            if ((exists $clustering_info{$element_name}[2]) and ($length < $clustering_info{$element_name}[2])) {
+                $clustering_info{$element_name}[1] = $protein_name;
+                $clustering_info{$element_name}[2] = $length;
+            }
+            unless (exists $clustering_info{$element_name}[2]) {
+                $clustering_info{$element_name}[1] = $protein_name;
+                $clustering_info{$element_name}[2] = $length;
+            }
+
+            # check that the TSDs are the same
+            if (exists $clustering_info{$element_name}[3]) { # a TSD has been observed previously
+                if ($clustering_info{$element_name}[3] ne $reviewed_tsdtirs{$protein_name}[0]) {
+                    $clustering_info{$element_name}[4] = 1;
+                }
+            }
+            else {
+                $clustering_info{$element_name}[3] = $reviewed_tsdtirs{$protein_name}[0];
+                $clustering_info{$element_name}[4] = 0;
+            }
+        }    
+        else {
+            die "ERROR: Unexpected line in file $tircluster_output_file.clstr\n$line\n";
+        }
+    }
+    # Warn the user of any elements where the TSD sizes do not all agree
+    foreach my $key (keys %clustering_info) {
+        if ($clustering_info{$key}[4] == 1) {
+        warn "WARNING: Clustered elements $clustering_info{$key}[0] do not all have the same TSDs, these will be ignored\n";   
+        }
+    }
+exit;
 
     my %proteins = fastatohash($INPUT_PROTEIN_SEQUENCES); # this holds the sequence of all the original protein sequences
 
@@ -1245,15 +1306,15 @@ if ($STEP == 4) { # check if this step should be performed or not
     ## Report potential complete elements.
 
     my %genome = fastatohash($INPUT_GENOME); # load the genome into memory
-    foreach my $element_name (keys %file_tirs) { # go through the elements individually
+    foreach my $element_name (keys %reviewed_tsdtirs) { # go through the elements individually
         # open README file for writing
         open (README, ">>", "$ELEMENT_FOLDER/$element_name/README.txt") or die "ERROR: Could not open README file $ELEMENT_FOLDER/$element_name/README.txt\n";
       
         # identify the nucleotide sequences between TIR locations
       
         # get the TIR sequences
-        my $tir1_seq = lc($file_tirs{$element_name}[1]);
-        my $tir2_seq = lc($file_tirs{$element_name}[2]);
+        my $tir1_seq = lc($reviewed_tsdtirs{$element_name}[1]);
+        my $tir2_seq = lc($reviewed_tsdtirs{$element_name}[2]);
         my $TIRs_set = 1; # boolean, set to 1 if TIR sequence are ok, or zero if not
         if (($tir1_seq =~/n/i) or ($tir2_seq =~ /n/i)) { # if the tir sequences include "n" characters warn the user and stop processing
             print STDERR "WARNING: The TIR sequences $tir1_seq and $tir2_seq for element $element_name contain one or more n characters, this is a problem for finding this element in the genome. Ignoring this element.\n";
@@ -1265,10 +1326,10 @@ if ($STEP == 4) { # check if this step should be performed or not
             foreach my $chr (keys %genome) { # go through each genome subsection (calling it "chr" here)
                 # Identify all the element sequences (including TSDs) in the forward orientation. Converting everything to lower case to avoid confusion with cases.
                 # Also providing the name of the chrososome and orientation so that the position of all the elements can recorded.
-                my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $file_tirs{$element_name}[0], "+"); # look for TIRs on the + strand
+                my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $reviewed_tsdtirs{$element_name}[0], "+"); # look for TIRs on the + strand
                 %element_sequences = (%element_sequences, %fw_element_sequences); # add elements found on the + strand to %element_sequences
                 unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
-                    my %rc_element_sequences = identify_element_sequence(lc($genome{$chr}), lc($file_tirs{$element_name}[1]), lc($file_tirs{$element_name}[2]), $MAX_ELEMENT_SIZE, $chr, $file_tirs{$element_name}[0], "-");
+                    my %rc_element_sequences = identify_element_sequence(lc($genome{$chr}), lc($reviewed_tsdtirs{$element_name}[1]), lc($reviewed_tsdtirs{$element_name}[2]), $MAX_ELEMENT_SIZE, $chr, $reviewed_tsdtirs{$element_name}[0], "-");
                     %element_sequences = (%element_sequences, %rc_element_sequences); # add any new elements to the hash %element_sequences
                 }
             }  
@@ -1335,10 +1396,10 @@ if ($STEP == 4) { # check if this step should be performed or not
                     foreach my $header (keys %complete_elements_sequences) {
 
                         # modify the header to indicate if the TSDs are the same 
-                        my $left_tir = substr($complete_elements_sequences{$header}, 0, $file_tirs{$element_name}[0]); 
-                        my $right_tir = substr($complete_elements_sequences{$header}, length($complete_elements_sequences{$header}) - $file_tirs{$element_name}[0], $file_tirs{$element_name}[0]);                     
+                        my $left_tir = substr($complete_elements_sequences{$header}, 0, $reviewed_tsdtirs{$element_name}[0]); 
+                        my $right_tir = substr($complete_elements_sequences{$header}, length($complete_elements_sequences{$header}) - $reviewed_tsdtirs{$element_name}[0], $reviewed_tsdtirs{$element_name}[0]);                     
                       
-                        my $element_sequence = substr($complete_elements_sequences{$header}, $file_tirs{$element_name}[0], length($complete_elements_sequences{$header})-(2*$file_tirs{$element_name}[0]));                       
+                        my $element_sequence = substr($complete_elements_sequences{$header}, $reviewed_tsdtirs{$element_name}[0], length($complete_elements_sequences{$header})-(2*$reviewed_tsdtirs{$element_name}[0]));                       
                         print ALIINPUT ">$header\n$element_sequence\n";
                     }
 
