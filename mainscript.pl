@@ -1254,38 +1254,38 @@ if ($STEP == 4) { # check if this step should be performed or not
     if ($?) { die "ERROR executing cd-hit-est: error code $?\n" }
 
     # interpret the clustering .clstr file and populate the %clustering_info hash 
-    my $element_name; # current element name;
+    my $cluster_name; # current element name;
     open (INPUT, "$tircluster_output_file.clstr") or die "Cannot open cd-hit output file $tircluster_output_file.clstr\n";
     while (my $line = <INPUT>) {
         if ($line =~ />Cluster\s(\d+)/) {
-            $element_name = "element$1";
+            $cluster_name = "element$1";
         }
         elsif ($line =~ /^\d+\s+(\d+)nt,\s>(\S+)\.\.\./) {
             my $length = $1;
             my $protein_name = $2;
 
             # add the protein name to the list 
-            $clustering_info{$element_name}[0] .= $protein_name . " ";
+            $clustering_info{$cluster_name}[0] .= $protein_name . " ";
 
             # record the name of the shortest TIRs in each cluster
-            if ((exists $clustering_info{$element_name}[2]) and ($length < $clustering_info{$element_name}[2])) {
-                $clustering_info{$element_name}[1] = $protein_name;
-                $clustering_info{$element_name}[2] = $length;
+            if ((exists $clustering_info{$cluster_name}[2]) and ($length < $clustering_info{$cluster_name}[2])) {
+                $clustering_info{$cluster_name}[1] = $protein_name;
+                $clustering_info{$cluster_name}[2] = $length;
             }
-            unless (exists $clustering_info{$element_name}[2]) {
-                $clustering_info{$element_name}[1] = $protein_name;
-                $clustering_info{$element_name}[2] = $length;
+            unless (exists $clustering_info{$cluster_name}[2]) {
+                $clustering_info{$cluster_name}[1] = $protein_name;
+                $clustering_info{$cluster_name}[2] = $length;
             }
 
             # check that the TSDs are the same
-            if (exists $clustering_info{$element_name}[3]) { # a TSD has been observed previously
-                if ($clustering_info{$element_name}[3] ne $reviewed_tsdtirs{$protein_name}[0]) {
-                    $clustering_info{$element_name}[4] = 1;
+            if (exists $clustering_info{$cluster_name}[3]) { # a TSD has been observed previously
+                if ($clustering_info{$cluster_name}[3] ne $reviewed_tsdtirs{$protein_name}[0]) {
+                    $clustering_info{$cluster_name}[4] = 1;
                 }
             }
             else {
-                $clustering_info{$element_name}[3] = $reviewed_tsdtirs{$protein_name}[0];
-                $clustering_info{$element_name}[4] = 0;
+                $clustering_info{$cluster_name}[3] = $reviewed_tsdtirs{$protein_name}[0];
+                $clustering_info{$cluster_name}[4] = 0;
             }
         }    
         else {
@@ -1295,48 +1295,52 @@ if ($STEP == 4) { # check if this step should be performed or not
     # Warn the user of any elements where the TSD sizes do not all agree
     foreach my $key (keys %clustering_info) {
         if ($clustering_info{$key}[4] == 1) {
-        warn "WARNING: Clustered elements $clustering_info{$key}[0] do not all have the same TSDs, these will be ignored\n";   
+        warn "WARNING: Clustered elements $clustering_info{$key}[0] do not all have the same TSDs, these elements will be ignored\n";   
         }
     }
-exit;
 
-    my %proteins = fastatohash($INPUT_PROTEIN_SEQUENCES); # this holds the sequence of all the original protein sequences
 
-    ## Using the provided TIR sequences for this element, identify possible element sequences, then match these to the original protein sequence.
+    ## Using tTIR sequences for each cluster, identify possible element sequences, then match these to the original protein sequence.
     ## Report potential complete elements.
-
+    my %proteins = fastatohash($INPUT_PROTEIN_SEQUENCES); # this holds the sequence of all the original protein sequences
     my %genome = fastatohash($INPUT_GENOME); # load the genome into memory
-    foreach my $element_name (keys %reviewed_tsdtirs) { # go through the elements individually
-        # open README file for writing
-        open (README, ">>", "$ELEMENT_FOLDER/$element_name/README.txt") or die "ERROR: Could not open README file $ELEMENT_FOLDER/$element_name/README.txt\n";
+    foreach my $cluster_name (keys %clustering_info) { # go through the clusters individually
       
-        # identify the nucleotide sequences between TIR locations
-      
-        # get the TIR sequences
-        my $tir1_seq = lc($reviewed_tsdtirs{$element_name}[1]);
-        my $tir2_seq = lc($reviewed_tsdtirs{$element_name}[2]);
+        # get the TIR sequences for this cluster
+        my $tir1_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_name}[1]}[1]);
+        my $tir2_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_name}[1]}[2]);
         my $TIRs_set = 1; # boolean, set to 1 if TIR sequence are ok, or zero if not
         if (($tir1_seq =~/n/i) or ($tir2_seq =~ /n/i)) { # if the tir sequences include "n" characters warn the user and stop processing
-            print STDERR "WARNING: The TIR sequences $tir1_seq and $tir2_seq for element $element_name contain one or more n characters, this is a problem for finding this element in the genome. Ignoring this element.\n";
+            print STDERR "WARNING: The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_name}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n";
             $TIRs_set = 0;
         }
 
+        # get the TSD length for this cluster
+        my $TSD_length = lc($reviewed_tsdtirs{$clustering_info{$cluster_name}[1]}[0]); # all lower case to avoid confusion
+        if ($TSD_length eq "ta") {
+            $TSD_length = 2;
+        }
+        elsif ($TSD_length eq "tata") {
+            $TSD_length = 4;
+        }
+print "$cluster_name, $TSD_length\n";
+        # identify the nucleotide sequences between TIR locations
         if ($TIRs_set) { # only continue if the TIR sequence are ok
             my %element_sequences; # holds the genomic sequence with intact tirs as well as tsd sequences, it's a hash to avoid duplications
             foreach my $chr (keys %genome) { # go through each genome subsection (calling it "chr" here)
                 # Identify all the element sequences (including TSDs) in the forward orientation. Converting everything to lower case to avoid confusion with cases.
                 # Also providing the name of the chrososome and orientation so that the position of all the elements can recorded.
-                my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $reviewed_tsdtirs{$element_name}[0], "+"); # look for TIRs on the + strand
+                my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_length, "+"); # look for TIRs on the + strand
                 %element_sequences = (%element_sequences, %fw_element_sequences); # add elements found on the + strand to %element_sequences
+print "ha\n";
                 unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
-                    my %rc_element_sequences = identify_element_sequence(lc($genome{$chr}), lc($reviewed_tsdtirs{$element_name}[1]), lc($reviewed_tsdtirs{$element_name}[2]), $MAX_ELEMENT_SIZE, $chr, $reviewed_tsdtirs{$element_name}[0], "-");
+                    my %rc_element_sequences = identify_element_sequence(lc($genome{$chr}), lc($reviewed_tsdtirs{$cluster_name}[1]), lc($reviewed_tsdtirs{$cluster_name}[2]), $MAX_ELEMENT_SIZE, $chr, $TSD_length, "-");
                     %element_sequences = (%element_sequences, %rc_element_sequences); # add any new elements to the hash %element_sequences
                 }
             }  
 
             # Continue the analysis if complete elements have been found
             if (keys %element_sequences) { 
-
                 # make a blast database using the file that contains the nucleotide sequences of the element
                 my $database_input_file = File::Temp->new(UNLINK => 1); 
                 open (OUTPUT, ">", $database_input_file) or die "$!";
@@ -1352,7 +1356,7 @@ exit;
                 # make a file with the sequence of the original protein used to find the the current element
                 my $protein_file = File::Temp->new(UNLINK => 1);
                 open (OUTPUT, ">", $protein_file) or die "$!";
-                print OUTPUT ">protein\n$proteins{$element_name}\n";
+                print OUTPUT ">protein\n$proteins{$cluster_name}\n";
                 close OUTPUT;
 
                 # run tblastn
@@ -1396,10 +1400,10 @@ exit;
                     foreach my $header (keys %complete_elements_sequences) {
 
                         # modify the header to indicate if the TSDs are the same 
-                        my $left_tir = substr($complete_elements_sequences{$header}, 0, $reviewed_tsdtirs{$element_name}[0]); 
-                        my $right_tir = substr($complete_elements_sequences{$header}, length($complete_elements_sequences{$header}) - $reviewed_tsdtirs{$element_name}[0], $reviewed_tsdtirs{$element_name}[0]);                     
+                        my $left_tir = substr($complete_elements_sequences{$header}, 0, $reviewed_tsdtirs{$cluster_name}[0]); 
+                        my $right_tir = substr($complete_elements_sequences{$header}, length($complete_elements_sequences{$header}) - $reviewed_tsdtirs{$cluster_name}[0], $reviewed_tsdtirs{$cluster_name}[0]);                     
                       
-                        my $element_sequence = substr($complete_elements_sequences{$header}, $reviewed_tsdtirs{$element_name}[0], length($complete_elements_sequences{$header})-(2*$reviewed_tsdtirs{$element_name}[0]));                       
+                        my $element_sequence = substr($complete_elements_sequences{$header}, $reviewed_tsdtirs{$cluster_name}[0], length($complete_elements_sequences{$header})-(2*$reviewed_tsdtirs{$cluster_name}[0]));                       
                         print ALIINPUT ">$header\n$element_sequence\n";
                     }
 
@@ -1410,8 +1414,8 @@ exit;
                     if ($?) { die "ERROR executing mafft: error code $?\n"}  
 
                     # report results
-                    my $alignment_file_output_name = "$element_name" . "_complete-elements-alignment.fa";
-                    `cp $alignment_output_filename $ELEMENT_FOLDER/$element_name/$alignment_file_output_name`;
+                    my $alignment_file_output_name = "$cluster_name" . "_complete-elements-alignment.fa";
+                    `cp $alignment_output_filename $ELEMENT_FOLDER/$cluster_name/$alignment_file_output_name`;
                     if ($?) { die "ERROR using cp: error code $?\n"}  
 
                     my $datestring = localtime(); 
@@ -1420,21 +1424,21 @@ exit;
                 else {
                     my $datestring = localtime(); 
                     print README "$datestring, in STEP 4, while TIRs were found no sequence matched the intial protein sequence\n";
-                    print REJECT "$datestring\t$element_name\tSTEP 4\tNo matches to initial protein sequence with tblastn\n";
-                    `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
-                    if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
+                    print REJECT "$datestring\t$cluster_name\tSTEP 4\tNo matches to initial protein sequence with tblastn\n";
+                    `mv $ELEMENT_FOLDER/$cluster_name $reject_folder_path`;
+                    if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$cluster_name to $ANALYSIS_FOLDER: error code $?\n"}
                 }
             }
             else {
                 my $datestring = localtime(); 
                 print README "$datestring, No genomic sequences with appropriately positioned TIRs were identified in STEP 4\n";
-                print REJECT "$datestring\t$element_name\tSTEP 4\tNo genomic sequences with appropriately positioned TIRs found\n";
-                `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
-                if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
+                print REJECT "$datestring\t$cluster_name\tSTEP 4\tNo genomic sequences with appropriately positioned TIRs found\n";
+                `mv $ELEMENT_FOLDER/$cluster_name $reject_folder_path`;
+                if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$cluster_name to $ANALYSIS_FOLDER: error code $?\n"}
             }
 
             close README;
-            print STDERR "done with $element_name\n";
+            print STDERR "done with $cluster_name\n";
         }
     }
 }
