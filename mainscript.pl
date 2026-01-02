@@ -1309,6 +1309,7 @@ if ($STEP == 4) { # check if this step should be performed or not
         # get the TIR sequences for this cluster
         my $tir1_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_name}[1]}[1]);
         my $tir2_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_name}[1]}[2]);
+#print "original $tir1_seq\t$tir2_seq\n";    
         my $TIRs_set = 1; # boolean, set to 1 if TIR sequence are ok, or zero if not
         if (($tir1_seq =~/n/i) or ($tir2_seq =~ /n/i)) { # if the tir sequences include "n" characters warn the user and stop processing
             print STDERR "WARNING: The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_name}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n";
@@ -1323,22 +1324,28 @@ if ($STEP == 4) { # check if this step should be performed or not
         elsif ($TSD_length eq "tata") {
             $TSD_length = 4;
         }
-print "$cluster_name, $TSD_length\n";
+#print "$cluster_name, $TSD_length\n";
         # identify the nucleotide sequences between TIR locations
         if ($TIRs_set) { # only continue if the TIR sequence are ok
             my %element_sequences; # holds the genomic sequence with intact tirs as well as tsd sequences, it's a hash to avoid duplications
             foreach my $chr (keys %genome) { # go through each genome subsection (calling it "chr" here)
                 # Identify all the element sequences (including TSDs) in the forward orientation. Converting everything to lower case to avoid confusion with cases.
                 # Also providing the name of the chrososome and orientation so that the position of all the elements can recorded.
+#print "going in $tir1_seq\t$tir2_seq\n";
                 my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_length, "+"); # look for TIRs on the + strand
                 %element_sequences = (%element_sequences, %fw_element_sequences); # add elements found on the + strand to %element_sequences
-print "ha\n";
+#my $ha=keys %element_sequences;
+#print "$chr forward keys $ha\n";
+
+### the RC part is not working
                 unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
+print "got into the rc\n";
                     my %rc_element_sequences = identify_element_sequence(lc($genome{$chr}), lc($reviewed_tsdtirs{$cluster_name}[1]), lc($reviewed_tsdtirs{$cluster_name}[2]), $MAX_ELEMENT_SIZE, $chr, $TSD_length, "-");
                     %element_sequences = (%element_sequences, %rc_element_sequences); # add any new elements to the hash %element_sequences
                 }
             }  
-
+exit;
+### Need to fix which element is used as a reference
             # Continue the analysis if complete elements have been found
             if (keys %element_sequences) { 
                 # make a blast database using the file that contains the nucleotide sequences of the element
@@ -1363,7 +1370,6 @@ print "ha\n";
                 my $tblastn_output = File::Temp->new(UNLINK => 1); 
                 `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output -outfmt "6 sseqid evalue sstart send"`;
                 if ($?) { die "ERROR executing tblastn: error code $?\n"}   
-                
                 # interpret the tblastn results, identify element sequences that have low e-value and report them in the same orientation 
                 # as the protein 
                 my %complete_elements_sequences; # this will hold the identified element sequences as value, and genomic location as value
@@ -1627,8 +1633,7 @@ sub identify_element_sequence {
                                                                                      # the maximum element size of the element, the chrosome name and orienation of the input sequence
     my @tir1; # location of all TIR1 sequence
     my @tir2; # location of all TIR2 sequence 
-    my %nucleotide_sequences; # location of elements as key and nucleotide sequence as value, this is what is returned
-
+    my %nucleotide_sequences; # location of elements as key and nucleotide sequence as value, this is what is returned 
     # test that the orientation provided is known
     unless (($orientation eq "+") or  ($orientation eq "-")) { die "ERROR: Orientation $orientation is not known in subroutine identify_element_sequences\n$tir1, $tir2, $maximum_size, $chromosome_name, $orientation\n"}
 
@@ -1637,13 +1642,13 @@ sub identify_element_sequence {
         $tir1 = rc($tir2);
         $tir2 = rc($tir1);
     }
-
     while ($chr_seq =~ m/$tir1/g) {
         push @tir1, pos($chr_seq) - length($tir1); # adjust the left position to compensate for where the loc is found
     }
     while ($chr_seq =~ m/$tir2/g) {
         push @tir2, pos($chr_seq);
     }
+#print "inside $tir1\t$tir2\n";
     # identify any pairs that are in the correct orientation and not too far from one another
     for (my $i=0; $i<scalar @tir1; $i++) {
         for (my $j=0; $j<scalar @tir2; $j++) {
@@ -1669,6 +1674,10 @@ sub identify_element_sequence {
                     $location_name .= "-identicalTSDs($tsd1)";
                 }
                 $nucleotide_sequences{$location_name} = $full_sequence;
+# if (length $tir1 == 0) { 
+#     print "$tir1, $tir2, $maximum_size, $chromosome_name, $tsd_length, $orientation\n"; exit;
+# }                
+# print ">$chromosome_name:$b1-$b2\n$tir1\t$tir2\n$full_sequence\n";
             }
         }
     }
