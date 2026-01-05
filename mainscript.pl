@@ -1351,19 +1351,27 @@ if ($STEP == 4) { # check if this step should be performed or not
                 `makeblastdb -in $database_input_file -dbtype nucl -out $tblastn_database_name`;
                 if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
 # modify this part to do a blast with all the proteins involved
-print "$clustering_info{$cluster_name}[0]\n"; exit;
+#print "$clustering_info{$cluster_name}[0]\n";
                 # make a file with the sequence of the original protein used to find the the current element
                 my $protein_file = File::Temp->new(UNLINK => 1);
+                my %protein_info;   # this will be used to record which of the proteins have a tblastn match,
+                                    # protein name as key as value: 0 no match, 1 match
                 open (OUTPUT, ">", $protein_file) or die "$!";
-                print OUTPUT ">protein\n$proteins{$cluster_name}\n";
+                my @protein_names = split " ", $clustering_info{$cluster_name}[0];
+                foreach my $pn (@protein_names) {
+                    print OUTPUT ">$pn\n$proteins{$pn}\n";
+                }
                 close OUTPUT;
 
                 # run tblastn
                 my $tblastn_output = File::Temp->new(UNLINK => 1); 
-                `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output -outfmt "6 sseqid evalue sstart send"`;
+                `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output -outfmt "6 sseqid evalue sstart send qseqid"`;
                 if ($?) { die "ERROR executing tblastn: error code $?\n"}   
                 # interpret the tblastn results, identify element sequences that have low e-value and report them in the same orientation 
-                # as the protein 
+                # as the 
+`cp $tblastn_output /home/peter/Desktop/tblastn_out.txt`;   exit;   
+# at this point I need to sort the tblastn output by nucleotide sequence so I can check if all the protein matches are 
+# in the same orientation. If so, orient it that way, if not, report that there's a discrepancy.          
                 my %complete_elements_sequences; # this will hold the identified element sequences as value, and genomic location as value
                 open (INPUT, $tblastn_output) or die "$!";           
                 while (my $line = <INPUT>) {
