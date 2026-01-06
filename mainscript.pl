@@ -1350,8 +1350,7 @@ if ($STEP == 4) { # check if this step should be performed or not
                 my $tblastn_database_name = File::Temp->new(UNLINK => 1); # file name for the tblastn database name
                 `makeblastdb -in $database_input_file -dbtype nucl -out $tblastn_database_name`;
                 if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
-# modify this part to do a blast with all the proteins involved
-#print "$clustering_info{$cluster_name}[0]\n";
+
                 # make a file with the sequence of the original protein used to find the the current element
                 my $protein_file = File::Temp->new(UNLINK => 1);
                 my %protein_info;   # this will be used to record which of the proteins have a tblastn match,
@@ -1369,34 +1368,49 @@ if ($STEP == 4) { # check if this step should be performed or not
                 if ($?) { die "ERROR executing tblastn: error code $?\n"}   
                 # interpret the tblastn results, identify element sequences that have low e-value and report them in the same orientation 
                 # as the 
-`cp $tblastn_output /home/peter/Desktop/tblastn_out.txt`;   exit;   
+`cp $tblastn_output /home/peter/Desktop/tblastn_out.txt`;
 # at this point I need to sort the tblastn output by nucleotide sequence so I can check if all the protein matches are 
 # in the same orientation. If so, orient it that way, if not, report that there's a discrepancy.          
                 my %complete_elements_sequences; # this will hold the identified element sequences as value, and genomic location as value
+                my %protein_matching_nucleotide_sequences;  # this is a hash of hashes, the first hash is the reference to the nucleotide sequence, the second has is the name of 
+                                                            # of the protein sequence matching and the value is the orientation, 1 for plus and 0 for minus
                 open (INPUT, $tblastn_output) or die "$!";           
                 while (my $line = <INPUT>) {
                     my @data = split " ", $line;
                     if ($data[1] < $PROTEIN_TBLASTN_CUTOFF) { # only continue if tblastn E value is low enough
-                        unless (exists $element_sequences{$data[0]}) { die "ERROR: Cannot find element $data[0]\n" } # a check to make sure the elemnent has been recorded
-                        # check the orientation of the element sequence compared to the protein, report all sequences in the same
-                        # orientation as the protein. Specifically test if the subject start position is lower than the end position or not
-                        # to determine orientation.
-                        if ($data[2] < $data[3]) {
-                            $complete_elements_sequences{$data[0]} = $element_sequences{$data[0]};
+                        if ($data[2] < $data[3]) { # the match in the + orientation
+                            $protein_matching_nucleotide_sequences{$data[0]}{$data[4]} = 1;
                         }
-                        else { # this element in on the other strand so change the orientation and reverse order of the positions on the location name
-                            if ($data[0] =~ /(\S+):(\d+)-(\d+)/) {
-                                my $updated_genomic_location = "$1:$3-$2";
-                                $complete_elements_sequences{$updated_genomic_location} = rc($element_sequences{$data[0]});
-                            }
-                            else {
-                                die "ERROR: Genomic location $data[0] could not be parsed $!";
-                            }
-                        }  
+                        else { # the match in the + orientation
+                            $protein_matching_nucleotide_sequences{$data[0]}{$data[4]} = 0;
+                        }
+                        # unless (exists $element_sequences{$data[0]}) { die "ERROR: Cannot find element $data[0]\n" } # a check to make sure the elemnent has been recorded
+                        # # check the orientation of the element sequence compared to the protein, report all sequences in the same
+                        # # orientation as the protein. Specifically test if the subject start position is lower than the end position or not
+                        # # to determine orientation.
+                        # if ($data[2] < $data[3]) {
+                        #     $complete_elements_sequences{$data[0]} = $element_sequences{$data[0]};
+                        # }
+                        # else { # this element in on the other strand so change the orientation and reverse order of the positions on the location name
+                        #     if ($data[0] =~ /(\S+):(\d+)-(\d+)/) {
+                        #         my $updated_genomic_location = "$1:$3-$2";
+                        #         $complete_elements_sequences{$updated_genomic_location} = rc($element_sequences{$data[0]});
+                        #     }
+                        #     else {
+                        #         die "ERROR: Genomic location $data[0] could not be parsed $!";
+                        #     }
+                        # }  
                     }
                 }   
-
-                # align the sequences 
+for my $nuc ( keys %protein_matching_nucleotide_sequences ) { 
+    print "$nuc: ";
+    for my $prot ( keys %{ $protein_matching_nucleotide_sequences{$nuc} } ) {
+        print "$prot=$protein_matching_nucleotide_sequences{$nuc}{$prot} ";
+    }
+    print "\n";
+}
+exit;    
+                    # align the sequences 
                 if (%complete_elements_sequences) { # only continue if complete elements were found
                     my $alignment_input_filename = File::Temp->new(UNLINK => 1);    # alignement program input and output files
                     my $alignment_output_filename = File::Temp->new(UNLINK => 1); 
