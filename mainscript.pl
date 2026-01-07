@@ -1366,12 +1366,14 @@ if ($STEP == 4) { # check if this step should be performed or not
                 my $tblastn_output = File::Temp->new(UNLINK => 1); 
                 `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output -outfmt "6 sseqid evalue sstart send qseqid"`;
                 if ($?) { die "ERROR executing tblastn: error code $?\n"}   
-                # interpret the tblastn results, identify element sequences that have low e-value and report them in the same orientation 
-                # as the 
+                # interpret the tblastn results in two steps 
+                # 1. Determine the orientation of each nucleotide sequence, matching to the orientation of the protein(s)
+                # 2. Create a hash with the nucleotide sequences oriented correctly
 `cp $tblastn_output /home/peter/Desktop/tblastn_out.txt`;
 # at this point I need to sort the tblastn output by nucleotide sequence so I can check if all the protein matches are 
 # in the same orientation. If so, orient it that way, if not, report that there's a discrepancy.          
-                my %complete_elements_sequences; # this will hold the identified element sequences as value, and genomic location as value
+                
+                # Part 1 Determine orientation
                 my %protein_matching_nucleotide_sequences;  # this is a hash of hashes, the first hash is the reference to the nucleotide sequence, the second has is the name of 
                                                             # of the protein sequence matching and the value is the orientation, 1 for plus and 0 for minus
                 open (INPUT, $tblastn_output) or die "$!";           
@@ -1402,14 +1404,37 @@ if ($STEP == 4) { # check if this step should be performed or not
                         # }  
                     }
                 }   
-for my $nuc ( keys %protein_matching_nucleotide_sequences ) { 
-    print "$nuc: ";
-    for my $prot ( keys %{ $protein_matching_nucleotide_sequences{$nuc} } ) {
-        print "$prot=$protein_matching_nucleotide_sequences{$nuc}{$prot} ";
-    }
-    print "\n";
+
+                # Part 2 Create hash with the complete sequences
+                my %complete_elements_sequences; # this will hold the identified element sequences as value, and genomic location as value
+                #   determine if the orientation of all the matching proteins to a nucleotide are the same
+                for my $nuc ( keys %protein_matching_nucleotide_sequences ) { 
+                    my $orientation_sum; # sum of all the orientation values
+                    my $i=0; # counter for number of proteins in this element
+                    for my $prot ( keys %{ $protein_matching_nucleotide_sequences{$nuc} } ) {
+                        $orientation_sum = $protein_matching_nucleotide_sequences{$nuc}{$prot};
+                        $i++;
+                    }
+                    if ($orientation_sum == $i) {
+                        $complete_elements_sequences{$nuc} = $element_sequences{$nuc};
+                    }
+                    elsif ($orientation_sum == 0) {
+                        if ($nuc =~ /(\S+):(\d+)-(\d+)(\S*)/) {
+                            my $updated_genomic_location = "$1:$3-$2$4";
+                            $complete_elements_sequences{$updated_genomic_location} = $element_sequences{$nuc};
+                        }
+                        else {
+                            die "ERROR: Genomic location $nuc could not be parsed $!";
+                        }
+                    }
+                    else {
+                        warn "WARNING: Sequence $nuc matches at least two proteins in different orientations, ignoring it.\n";
+                    }
+                }
+foreach my $n (keys %complete_elements_sequences) {
+    print ">$n\n$complete_elements_sequences{$n}\n";
 }
-exit;    
+# exit;
                     # align the sequences 
                 if (%complete_elements_sequences) { # only continue if complete elements were found
                     my $alignment_input_filename = File::Temp->new(UNLINK => 1);    # alignement program input and output files
@@ -1419,15 +1444,17 @@ exit;
                     open (ALIINPUT, ">", $alignment_input_filename) or die "$!";
                     foreach my $header (keys %complete_elements_sequences) {
 
-                        # modify the header to indicate if the TSDs are the same 
-                        my $left_tir = substr($complete_elements_sequences{$header}, 0, $reviewed_tsdtirs{$cluster_name}[0]); 
-                        my $right_tir = substr($complete_elements_sequences{$header}, length($complete_elements_sequences{$header}) - $reviewed_tsdtirs{$cluster_name}[0], $reviewed_tsdtirs{$cluster_name}[0]);                     
+                        # # modify the header to indicate if the TSDs are the same 
+                        # my $left_tir = substr($complete_elements_sequences{$header}, 0, $reviewed_tsdtirs{$cluster_name}[0]); 
+                        # my $right_tir = substr($complete_elements_sequences{$header}, length($complete_elements_sequences{$header}) - $reviewed_tsdtirs{$cluster_name}[0], $reviewed_tsdtirs{$cluster_name}[0]);                     
                       
-                        my $element_sequence = substr($complete_elements_sequences{$header}, $reviewed_tsdtirs{$cluster_name}[0], length($complete_elements_sequences{$header})-(2*$reviewed_tsdtirs{$cluster_name}[0]));                       
+                        # my $element_sequence = substr($complete_elements_sequences{$header}, $reviewed_tsdtirs{$cluster_name}[0], length($complete_elements_sequences{$header})-(2*$reviewed_tsdtirs{$cluster_name}[0]));                       
+                        my $element_sequence = substr($complete_elements_sequences{$header}, $TSD_length, length($complete_elements_sequences{$header})-(2*$TSD_length));
                         print ALIINPUT ">$header\n$element_sequence\n";
                     }
-
                     close (ALIINPUT);
+`cp $alignment_input_filename /home/peter/Desktop/align_input.fa`;
+exit;
 
                     # run the alignment and convert result into a hash
                     `mafft --quiet $alignment_input_filename > $alignment_output_filename`;
@@ -1442,11 +1469,11 @@ exit;
                     print README "$datestring, File $alignment_file_output_name contains the alignment of nearly-complete elements\n";
                 }
                 else {
-                    my $datestring = localtime(); 
-                    print README "$datestring, in STEP 4, while TIRs were found no sequence matched the intial protein sequence\n";
-                    print REJECT "$datestring\t$cluster_name\tSTEP 4\tNo matches to initial protein sequence with tblastn\n";
-                    `mv $ELEMENT_FOLDER/$cluster_name $reject_folder_path`;
-                    if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$cluster_name to $ANALYSIS_FOLDER: error code $?\n"}
+                    # my $datestring = localtime(); 
+                    # print README "$datestring, in STEP 4, while TIRs were found no sequence matched the intial protein sequence\n";
+                    # print REJECT "$datestring\t$cluster_name\tSTEP 4\tNo matches to initial protein sequence with tblastn\n";
+                    # `mv $ELEMENT_FOLDER/$cluster_name $reject_folder_path`;
+                    # if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$cluster_name to $ANALYSIS_FOLDER: error code $?\n"}
                 }
             }
             else {
