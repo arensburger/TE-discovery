@@ -1299,11 +1299,13 @@ if ($STEP == 4) { # check if this step should be performed or not
         }
     }
 
-
-    ## Using tTIR sequences for each cluster, identify possible element sequences, then match these to the original protein sequence.
+    ## Using TIR sequences for each cluster, identify possible element sequences, then match these to the original protein sequence.
     ## Report potential complete elements.
     my %proteins = fastatohash($INPUT_PROTEIN_SEQUENCES); # this holds the sequence of all the original protein sequences
     my %genome = fastatohash($INPUT_GENOME); # load the genome into memory
+# foreach my $p (keys %proteins) {
+#     print "$p\n$proteins{$p}\n";
+# }
     foreach my $cluster_name (keys %clustering_info) { # go through the clusters individually
       
         # get the TIR sequences for this cluster
@@ -1323,6 +1325,7 @@ if ($STEP == 4) { # check if this step should be performed or not
         elsif ($TSD_length eq "tata") {
             $TSD_length = 4;
         }
+print "$cluster_name\t$tir1_seq\t$tir2_seq\t$TSD_length\t$TIRs_set\t$clustering_info{$cluster_name}[0]\n";
         # identify the nucleotide sequences between TIR locations
         if ($TIRs_set) { # only continue if the TIR sequence are ok
             my %element_sequences; # holds the genomic sequence with intact tirs as well as tsd sequences, it's a hash to avoid duplications
@@ -1336,6 +1339,9 @@ if ($STEP == 4) { # check if this step should be performed or not
                     %element_sequences = (%element_sequences, %rc_element_sequences); # add any new elements to the hash %element_sequences
                 }
             }  
+#foreach my $key (keys %element_sequences) {
+#    print "$key\n$element_sequences{$key}\n";
+#}
 
             # Continue the analysis if complete elements have been found
             if (keys %element_sequences) { 
@@ -1343,15 +1349,20 @@ if ($STEP == 4) { # check if this step should be performed or not
                 my $database_input_file = File::Temp->new(UNLINK => 1); 
                 open (OUTPUT, ">", $database_input_file) or die "$!";
                 foreach my $seq (keys %element_sequences) {
-                    print OUTPUT ">$seq\n$element_sequences{$seq}\n";
+                    if (exists $element_sequences{$seq}) {
+                        print OUTPUT ">$seq\n$element_sequences{$seq}\n";
+                    }
+                    else {
+                        die "ERROR: cannot find protein sequence called $seq in file $INPUT_PROTEIN_SEQUENCES\n"
+                    }
                 }   
                 close OUTPUT;
-
+`cp $database_input_file ~/Desktop/tblastn_input.fa`;
                 my $tblastn_database_name = File::Temp->new(UNLINK => 1); # file name for the tblastn database name
                 `makeblastdb -in $database_input_file -dbtype nucl -out $tblastn_database_name`;
                 if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
 
-                # make a file with the sequence of the original protein used to find the the current element
+                # make a file with the sequence of the original proteins used to find the the current element
                 my $protein_file = File::Temp->new(UNLINK => 1);
                 my %protein_info;   # this will be used to record which of the proteins have a tblastn match,
                                     # protein name as key as value: 0 no match, 1 match
@@ -1361,7 +1372,7 @@ if ($STEP == 4) { # check if this step should be performed or not
                     print OUTPUT ">$pn\n$proteins{$pn}\n";
                 }
                 close OUTPUT;
-
+`cp $protein_file ~/Desktop/protein.fa`;
                 # run tblastn
                 my $tblastn_output = File::Temp->new(UNLINK => 1); 
                 `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output -outfmt "6 sseqid evalue sstart send qseqid"`;
@@ -1434,7 +1445,7 @@ if ($STEP == 4) { # check if this step should be performed or not
 foreach my $n (keys %complete_elements_sequences) {
     print ">$n\n$complete_elements_sequences{$n}\n";
 }
-# exit;
+exit;
                     # align the sequences 
                 if (%complete_elements_sequences) { # only continue if complete elements were found
                     my $alignment_input_filename = File::Temp->new(UNLINK => 1);    # alignement program input and output files
