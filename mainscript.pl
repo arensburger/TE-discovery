@@ -1358,6 +1358,7 @@ print "$cluster_name\t$tir1_seq\t$tir2_seq\t$TSD_length\t$TIRs_set\t$clustering_
                 }   
                 close OUTPUT;
 `cp $database_input_file ~/Desktop/tblastn_input.fa`;
+exit;
                 my $tblastn_database_name = File::Temp->new(UNLINK => 1); # file name for the tblastn database name
                 `makeblastdb -in $database_input_file -dbtype nucl -out $tblastn_database_name`;
                 if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
