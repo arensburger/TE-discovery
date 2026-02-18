@@ -1176,37 +1176,29 @@ if ($STEP == 3) { # check if this step should be performed or not
 }
 
 ### PIPELINE STEP 4 
-### Identify most likely transposase ORF based on identified TIR sequences
-
-# need to fix to read the new README file names
+### Identify elements with unique TIR sequences, get their sequences from the genome, and make a file
+### of those sequences to use with Interpro. The titles of that file are 1) scaffold and location, 2) TIR cluster number
+### 3) length of TSDs, 4) length of TIRs. Outputted sequences include both the TSD and TIR sequence.
 
 if ($STEP == 4) { # check if this step should be performed or not  
     print STDERR "Working on STEP 4 ...\n";
 
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
-    my $PROTEIN_TBLASTN_CUTOFF = 1e-6; # E-value cutoff for initial protein to match element nucleotide sequence
-    my $CONSENSUS_REMOVAL_THRESHOLD = 0.75; # minium number of taxa with a definite nucleotide at a position to make a consensus at this position
-    my $CONSENSUS_LEVEL = 0.5; # proportion of agreeing nucleotides to call a consensus 
-    
-    ## update the analysis file with what is going on
-    print ANALYSIS "Running STEP 4\n";
 
     # making sure all the required information has been provided
-    unless ($INPUT_GENOME and $INPUT_PROTEIN_SEQUENCES){
+    unless ($INPUT_GENOME){
         die "ERROR: for this step you need to provide two pieces of information:
              1) a fasta formated genome file, using the -g parameter
              2) the input protein file using the -p parameter\n";
     }
-    print ANALYSIS "\tGenome: $INPUT_GENOME\n";
-    print ANALYSIS "\tInput protein file: $INPUT_PROTEIN_SEQUENCES\n";
-    print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
-    print ANALYSIS "\tPROTEIN_TBLASTN_CUTOFF = $PROTEIN_TBLASTN_CUTOFF\n";
-    print ANALYSIS "\tCONSENSUS_REMOVAL_THRESHOLD = $CONSENSUS_REMOVAL_THRESHOLD\n";
-    print ANALYSIS "\tCONSENSUS_LEVEL = $CONSENSUS_LEVEL\n";
 
-    ## Read the README files and identify TIRs sequences and TSD
-    
+    ## update the analysis file with what is going on
+    print ANALYSIS "Running STEP 4\n";
+    print ANALYSIS "\tGenome: $INPUT_GENOME\n";
+    print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
+
+    ## Read the README files and identify TIRs sequences and TSD  
     # load the element information from the README files
     my %reviewed_tsdtirs;  # holds the element name as key and information on the element ends as array of values. 
                     # specifically [0] = TSD size or type, [1] = TIR1 sequence, [2] = TIR2 sequence
@@ -1254,38 +1246,38 @@ if ($STEP == 4) { # check if this step should be performed or not
     if ($?) { die "ERROR executing cd-hit-est: error code $?\n" }
 
     # interpret the clustering .clstr file and populate the %clustering_info hash 
-    my $cluster_name; # current element name;
+    my $cluster_number;
     open (INPUT, "$tircluster_output_file.clstr") or die "Cannot open cd-hit output file $tircluster_output_file.clstr\n";
     while (my $line = <INPUT>) {
         if ($line =~ />Cluster\s(\d+)/) {
-            $cluster_name = "element$1";
+            $cluster_number = "$1";
         }
         elsif ($line =~ /^\d+\s+(\d+)nt,\s>(\S+)\.\.\./) {
             my $length = $1;
             my $protein_name = $2;
 
             # add the protein name to the list 
-            $clustering_info{$cluster_name}[0] .= $protein_name . " ";
+            $clustering_info{$cluster_number}[0] .= $protein_name . " ";
 
             # record the name of the shortest TIRs in each cluster
-            if ((exists $clustering_info{$cluster_name}[2]) and ($length < $clustering_info{$cluster_name}[2])) {
-                $clustering_info{$cluster_name}[1] = $protein_name;
-                $clustering_info{$cluster_name}[2] = $length;
+            if ((exists $clustering_info{$cluster_number}[2]) and ($length < $clustering_info{$cluster_number}[2])) {
+                $clustering_info{$cluster_number}[1] = $protein_name;
+                $clustering_info{$cluster_number}[2] = $length;
             }
-            unless (exists $clustering_info{$cluster_name}[2]) {
-                $clustering_info{$cluster_name}[1] = $protein_name;
-                $clustering_info{$cluster_name}[2] = $length;
+            unless (exists $clustering_info{$cluster_number}[2]) {
+                $clustering_info{$cluster_number}[1] = $protein_name;
+                $clustering_info{$cluster_number}[2] = $length;
             }
 
             # check that the TSDs are the same
-            if (exists $clustering_info{$cluster_name}[3]) { # a TSD has been observed previously
-                if ($clustering_info{$cluster_name}[3] ne $reviewed_tsdtirs{$protein_name}[0]) {
-                    $clustering_info{$cluster_name}[4] = 1;
+            if (exists $clustering_info{$cluster_number}[3]) { # a TSD has been observed previously
+                if ($clustering_info{$cluster_number}[3] ne $reviewed_tsdtirs{$protein_name}[0]) {
+                    $clustering_info{$cluster_number}[4] = 1;
                 }
             }
             else {
-                $clustering_info{$cluster_name}[3] = $reviewed_tsdtirs{$protein_name}[0];
-                $clustering_info{$cluster_name}[4] = 0;
+                $clustering_info{$cluster_number}[3] = $reviewed_tsdtirs{$protein_name}[0];
+                $clustering_info{$cluster_number}[4] = 0;
             }
         }    
         else {
@@ -1295,209 +1287,55 @@ if ($STEP == 4) { # check if this step should be performed or not
     # Warn the user of any elements where the TSD sizes do not all agree
     foreach my $key (keys %clustering_info) {
         if ($clustering_info{$key}[4] == 1) {
-        warn "WARNING: Clustered elements $clustering_info{$key}[0] do not all have the same TSDs, these elements will be ignored\n";   
+            warn "WARNING: Clustered elements $clustering_info{$key}[0] do not all have the same TSDs, these elements will be ignored\n";   
         }
     }
 
     ## Using TIR sequences for each cluster, identify possible element sequences, then match these to the original protein sequence.
     ## Report potential complete elements.
-    my %proteins = fastatohash($INPUT_PROTEIN_SEQUENCES); # this holds the sequence of all the original protein sequences
     my %genome = fastatohash($INPUT_GENOME); # load the genome into memory
-# foreach my $p (keys %proteins) {
-#     print "$p\n$proteins{$p}\n";
-# }
-    foreach my $cluster_name (keys %clustering_info) { # go through the clusters individually
-      
+    my $TSD_length;
+    my $TIR_length;
+
+    foreach my $cluster_number (keys %clustering_info) { # go through the clusters individually     
         # get the TIR sequences for this cluster
-        my $tir1_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_name}[1]}[1]);
-        my $tir2_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_name}[1]}[2]);
+        my $tir1_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[1]);
+        my $tir2_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[2]);
+        $TIR_length = length($tir1_seq);
         my $TIRs_set = 1; # boolean, set to 1 if TIR sequence are ok, or zero if not
         if (($tir1_seq =~/n/i) or ($tir2_seq =~ /n/i)) { # if the tir sequences include "n" characters warn the user and stop processing
-            print STDERR "WARNING: The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_name}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n";
+            print STDERR "WARNING: The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_number}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n";
             $TIRs_set = 0;
         }
 
         # get the TSD length for this cluster
-        my $TSD_length = lc($reviewed_tsdtirs{$clustering_info{$cluster_name}[1]}[0]); # all lower case to avoid confusion
+        $TSD_length = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[0]); # all lower case to avoid confusion
         if ($TSD_length eq "ta") {
             $TSD_length = 2;
         }
         elsif ($TSD_length eq "tata") {
             $TSD_length = 4;
         }
-print "$cluster_name\t$tir1_seq\t$tir2_seq\t$TSD_length\t$TIRs_set\t$clustering_info{$cluster_name}[0]\n";
+
         # identify the nucleotide sequences between TIR locations
+        my %cluster_sequences; # holds the genomic sequence with intact tirs as well as tsd sequences, it's a hash to avoid duplications
         if ($TIRs_set) { # only continue if the TIR sequence are ok
-            my %element_sequences; # holds the genomic sequence with intact tirs as well as tsd sequences, it's a hash to avoid duplications
             foreach my $chr (keys %genome) { # go through each genome subsection (calling it "chr" here)
                 # Identify all the element sequences (including TSDs) in the forward orientation. Converting everything to lower case to avoid confusion with cases.
                 # Also providing the name of the chrososome and orientation so that the position of all the elements can recorded.
-                my %fw_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_length, "+"); # look for TIRs on the + strand
-                %element_sequences = (%element_sequences, %fw_element_sequences); # add elements found on the + strand to %element_sequences
+                my %fw_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_length, "+"); # look for TIRs on the + strand
+                %cluster_sequences = (%cluster_sequences, %fw_cluster_sequences); # add elements found on the + strand to %cluster_sequences
                 unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
-                    my %rc_element_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_length, "-");
-                    %element_sequences = (%element_sequences, %rc_element_sequences); # add any new elements to the hash %element_sequences
+                    my %rc_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_length, "-");
+                    %cluster_sequences = (%cluster_sequences, %rc_cluster_sequences); # add any new elements to the hash %cluster_sequences
                 }
-            }  
-#foreach my $key (keys %element_sequences) {
-#    print "$key\n$element_sequences{$key}\n";
-#}
-
-            # Continue the analysis if complete elements have been found
-            if (keys %element_sequences) { 
-                # make a blast database using the file that contains the nucleotide sequences of the element
-                my $database_input_file = File::Temp->new(UNLINK => 1); 
-                open (OUTPUT, ">", $database_input_file) or die "$!";
-                foreach my $seq (keys %element_sequences) {
-                    if (exists $element_sequences{$seq}) {
-                        print OUTPUT ">$seq\n$element_sequences{$seq}\n";
-                    }
-                    else {
-                        die "ERROR: cannot find protein sequence called $seq in file $INPUT_PROTEIN_SEQUENCES\n"
-                    }
-                }   
-                close OUTPUT;
-`cp $database_input_file ~/Desktop/tblastn_input.fa`;
-exit;
-                my $tblastn_database_name = File::Temp->new(UNLINK => 1); # file name for the tblastn database name
-                `makeblastdb -in $database_input_file -dbtype nucl -out $tblastn_database_name`;
-                if ($?) { die "ERROR executing makeblastdb: error code $?\n"}
-
-                # make a file with the sequence of the original proteins used to find the the current element
-                my $protein_file = File::Temp->new(UNLINK => 1);
-                my %protein_info;   # this will be used to record which of the proteins have a tblastn match,
-                                    # protein name as key as value: 0 no match, 1 match
-                open (OUTPUT, ">", $protein_file) or die "$!";
-                my @protein_names = split " ", $clustering_info{$cluster_name}[0];
-                foreach my $pn (@protein_names) {
-                    print OUTPUT ">$pn\n$proteins{$pn}\n";
-                }
-                close OUTPUT;
-`cp $protein_file ~/Desktop/protein.fa`;
-                # run tblastn
-                my $tblastn_output = File::Temp->new(UNLINK => 1); 
-                `tblastn -query $protein_file -db $tblastn_database_name -out $tblastn_output -outfmt "6 sseqid evalue sstart send qseqid"`;
-                if ($?) { die "ERROR executing tblastn: error code $?\n"}   
-                # interpret the tblastn results in two steps 
-                # 1. Determine the orientation of each nucleotide sequence, matching to the orientation of the protein(s)
-                # 2. Create a hash with the nucleotide sequences oriented correctly
-`cp $tblastn_output /home/peter/Desktop/tblastn_out.txt`;
-# at this point I need to sort the tblastn output by nucleotide sequence so I can check if all the protein matches are 
-# in the same orientation. If so, orient it that way, if not, report that there's a discrepancy.          
-                
-                # Part 1 Determine orientation
-                my %protein_matching_nucleotide_sequences;  # this is a hash of hashes, the first hash is the reference to the nucleotide sequence, the second has is the name of 
-                                                            # of the protein sequence matching and the value is the orientation, 1 for plus and 0 for minus
-                open (INPUT, $tblastn_output) or die "$!";           
-                while (my $line = <INPUT>) {
-                    my @data = split " ", $line;
-                    if ($data[1] < $PROTEIN_TBLASTN_CUTOFF) { # only continue if tblastn E value is low enough
-                        if ($data[2] < $data[3]) { # the match in the + orientation
-                            $protein_matching_nucleotide_sequences{$data[0]}{$data[4]} = 1;
-                        }
-                        else { # the match in the + orientation
-                            $protein_matching_nucleotide_sequences{$data[0]}{$data[4]} = 0;
-                        }
-                        # unless (exists $element_sequences{$data[0]}) { die "ERROR: Cannot find element $data[0]\n" } # a check to make sure the elemnent has been recorded
-                        # # check the orientation of the element sequence compared to the protein, report all sequences in the same
-                        # # orientation as the protein. Specifically test if the subject start position is lower than the end position or not
-                        # # to determine orientation.
-                        # if ($data[2] < $data[3]) {
-                        #     $complete_elements_sequences{$data[0]} = $element_sequences{$data[0]};
-                        # }
-                        # else { # this element in on the other strand so change the orientation and reverse order of the positions on the location name
-                        #     if ($data[0] =~ /(\S+):(\d+)-(\d+)/) {
-                        #         my $updated_genomic_location = "$1:$3-$2";
-                        #         $complete_elements_sequences{$updated_genomic_location} = rc($element_sequences{$data[0]});
-                        #     }
-                        #     else {
-                        #         die "ERROR: Genomic location $data[0] could not be parsed $!";
-                        #     }
-                        # }  
-                    }
-                }   
-
-                # Part 2 Create hash with the complete sequences
-                my %complete_elements_sequences; # this will hold the identified element sequences as value, and genomic location as value
-                #   determine if the orientation of all the matching proteins to a nucleotide are the same
-                for my $nuc ( keys %protein_matching_nucleotide_sequences ) { 
-                    my $orientation_sum; # sum of all the orientation values
-                    my $i=0; # counter for number of proteins in this element
-                    for my $prot ( keys %{ $protein_matching_nucleotide_sequences{$nuc} } ) {
-                        $orientation_sum = $protein_matching_nucleotide_sequences{$nuc}{$prot};
-                        $i++;
-                    }
-                    if ($orientation_sum == $i) {
-                        $complete_elements_sequences{$nuc} = $element_sequences{$nuc};
-                    }
-                    elsif ($orientation_sum == 0) {
-                        if ($nuc =~ /(\S+):(\d+)-(\d+)(\S*)/) {
-                            my $updated_genomic_location = "$1:$3-$2$4";
-                            $complete_elements_sequences{$updated_genomic_location} = $element_sequences{$nuc};
-                        }
-                        else {
-                            die "ERROR: Genomic location $nuc could not be parsed $!";
-                        }
-                    }
-                    else {
-                        warn "WARNING: Sequence $nuc matches at least two proteins in different orientations, ignoring it.\n";
-                    }
-                }
-foreach my $n (keys %complete_elements_sequences) {
-    print ">$n\n$complete_elements_sequences{$n}\n";
-}
-exit;
-                    # align the sequences 
-                if (%complete_elements_sequences) { # only continue if complete elements were found
-                    my $alignment_input_filename = File::Temp->new(UNLINK => 1);    # alignement program input and output files
-                    my $alignment_output_filename = File::Temp->new(UNLINK => 1); 
-
-                    # write sequences to the alignent input file, minus the TSDs
-                    open (ALIINPUT, ">", $alignment_input_filename) or die "$!";
-                    foreach my $header (keys %complete_elements_sequences) {
-
-                        # # modify the header to indicate if the TSDs are the same 
-                        # my $left_tir = substr($complete_elements_sequences{$header}, 0, $reviewed_tsdtirs{$cluster_name}[0]); 
-                        # my $right_tir = substr($complete_elements_sequences{$header}, length($complete_elements_sequences{$header}) - $reviewed_tsdtirs{$cluster_name}[0], $reviewed_tsdtirs{$cluster_name}[0]);                     
-                      
-                        # my $element_sequence = substr($complete_elements_sequences{$header}, $reviewed_tsdtirs{$cluster_name}[0], length($complete_elements_sequences{$header})-(2*$reviewed_tsdtirs{$cluster_name}[0]));                       
-                        my $element_sequence = substr($complete_elements_sequences{$header}, $TSD_length, length($complete_elements_sequences{$header})-(2*$TSD_length));
-                        print ALIINPUT ">$header\n$element_sequence\n";
-                    }
-                    close (ALIINPUT);
-`cp $alignment_input_filename /home/peter/Desktop/align_input.fa`;
-exit;
-
-                    # run the alignment and convert result into a hash
-                    `mafft --quiet $alignment_input_filename > $alignment_output_filename`;
-                    if ($?) { die "ERROR executing mafft: error code $?\n"}  
-
-                    # report results
-                    my $alignment_file_output_name = "$cluster_name" . "_complete-elements-alignment.fa";
-                    `cp $alignment_output_filename $ELEMENT_FOLDER/$cluster_name/$alignment_file_output_name`;
-                    if ($?) { die "ERROR using cp: error code $?\n"}  
-
-                    my $datestring = localtime(); 
-                    print README "$datestring, File $alignment_file_output_name contains the alignment of nearly-complete elements\n";
-                }
-                else {
-                    # my $datestring = localtime(); 
-                    # print README "$datestring, in STEP 4, while TIRs were found no sequence matched the intial protein sequence\n";
-                    # print REJECT "$datestring\t$cluster_name\tSTEP 4\tNo matches to initial protein sequence with tblastn\n";
-                    # `mv $ELEMENT_FOLDER/$cluster_name $reject_folder_path`;
-                    # if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$cluster_name to $ANALYSIS_FOLDER: error code $?\n"}
-                }
+            } 
+        }
+        if(%cluster_sequences) {
+            foreach my $title (keys %cluster_sequences) {
+                print ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
+                print "$cluster_sequences{$title}\n";
             }
-            else {
-                # my $datestring = localtime(); 
-                # print README "$datestring, No genomic sequences with appropriately positioned TIRs were identified in STEP 4\n";
-                # print REJECT "$datestring\t$cluster_name\tSTEP 4\tNo genomic sequences with appropriately positioned TIRs found\n";
-                # `mv $ELEMENT_FOLDER/$cluster_name $reject_folder_path`;
-                # if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$cluster_name to $ANALYSIS_FOLDER: error code $?\n"}
-            }
-
-            close README;
-            print STDERR "done with $cluster_name\n";
         }
     }
 }
@@ -1722,9 +1560,6 @@ sub identify_element_sequence {
                 my $full_sequence = substr($chr_seq, $tir1[$i]-$tsd_length, $size);
                 my $tsd1 = substr($full_sequence, 0, $tsd_length);
                 my $tsd2 = substr($full_sequence, length($full_sequence)-$tsd_length, $tsd_length);
-                if ($tsd1 eq $tsd2) {
-                    $location_name .= "-identicalTSDs($tsd1)";
-                }
                 $nucleotide_sequences{$location_name} = $full_sequence;
             }
         }
