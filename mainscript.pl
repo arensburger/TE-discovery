@@ -1186,7 +1186,7 @@ if ($STEP == 4) { # check if this step should be performed or not
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
     my $NUCLEOTIDE_OUTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-nucleotide-sequences.fa"; # file that has all the nucleotide sequence of the potential elments, will be used for intepro analysis
-    my $CLUSTER2INTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-cluster2inputsequences.fa"; # file that links the cluster number to the input proteins
+    my $CLUSTER2INTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-cluster2inputsequences.txt"; # file that links the cluster number to the input proteins
 
     # making sure all the required information has been provided
     unless ($INPUT_GENOME){
