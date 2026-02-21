@@ -1185,18 +1185,20 @@ if ($STEP == 4) { # check if this step should be performed or not
 
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
+    my $NUCLEOTIDE_OUTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-nucleotide-sequences.fa"; # file that has all the nucleotide sequence of the potential elments, will be used for intepro analysis
+    my $CLUSTER2INTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-cluster2inputsequences.fa"; # file that links the cluster number to the input proteins
 
     # making sure all the required information has been provided
     unless ($INPUT_GENOME){
-        die "ERROR: for this step you need to provide two pieces of information:
-             1) a fasta formated genome file, using the -g parameter
-             2) the input protein file using the -p parameter\n";
+        die "ERROR: for this step you need to provide a fasta formated genome file, using the -g parameter\n";
     }
 
     ## update the analysis file with what is going on
     print ANALYSIS "Running STEP 4\n";
     print ANALYSIS "\tGenome: $INPUT_GENOME\n";
     print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
+    print ANALYSIS "\tIdentified nucleotide sequences will be printed to file $NUCLEOTIDE_OUTPUT_FILENAME\n";
+    print ANALYSIS "\tThe file with the cluster number to input protein conversion will be $CLUSTER2INTPUT_FILENAME\n";
 
     ## Read the README files and identify TIRs sequences and TSD  
     # load the element information from the README files
@@ -1291,8 +1293,17 @@ if ($STEP == 4) { # check if this step should be performed or not
         }
     }
 
-    ## Using TIR sequences for each cluster, identify possible element sequences, then match these to the original protein sequence.
-    ## Report potential complete elements.
+    # Output a file with the cluster number to input protein convertion
+    open (CLUSTER_OUTPUT, ">>", $CLUSTER2INTPUT_FILENAME) or die "ERROR: Cannot create the file $CLUSTER2INTPUT_FILENAME to output the convertions of cluster number to input protein\n";
+    foreach my $cn (keys %clustering_info) {
+        print CLUSTER_OUTPUT "$cn\t$clustering_info{$cn}[0]\n";
+    }
+    close CLUSTER_OUTPUT;
+
+    ## Using TIR sequences for each cluster, identify possible element nucleotide sequences. Print these into a single file for 
+    ## protein scanning.
+
+    open (NUCLEOTIDE_OUTPUT, ">>", $NUCLEOTIDE_OUTPUT_FILENAME) or die "ERROR: Cannot create the file $NUCLEOTIDE_OUTPUT_FILENAME to output the nucleotide sequences to\n";
     my %genome = fastatohash($INPUT_GENOME); # load the genome into memory
     my $TSD_length;
     my $TIR_length;
@@ -1310,11 +1321,8 @@ if ($STEP == 4) { # check if this step should be performed or not
 
         # get the TSD length for this cluster
         $TSD_length = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[0]); # all lower case to avoid confusion
-        if ($TSD_length eq "ta") {
-            $TSD_length = 2;
-        }
-        elsif ($TSD_length eq "tata") {
-            $TSD_length = 4;
+        if ((length $TSD_length) > 1) { # in case the tsd length is the string "a" or "ttaa" it will be converted to a number
+            $TSD_length = length $TSD_length;
         }
 
         # identify the nucleotide sequences between TIR locations
@@ -1331,13 +1339,16 @@ if ($STEP == 4) { # check if this step should be performed or not
                 }
             } 
         }
+
+        # output the
         if(%cluster_sequences) {
             foreach my $title (keys %cluster_sequences) {
-                print ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
-                print "$cluster_sequences{$title}\n";
+                print NUCLEOTIDE_OUTPUT ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
+                print NUCLEOTIDE_OUTPUT "$cluster_sequences{$title}\n";
             }
         }
     }
+    close (NUCLEOTIDE_OUTPUT);
 }
 close ANALYSIS;
 close REJECT;
