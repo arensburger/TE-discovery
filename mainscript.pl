@@ -18,6 +18,7 @@ my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
 my $TBLASTN_FILE; # name of the file containing the out put of the tblastn
 my $INPUT_GENOME; # fasta formated file with genome that input proteins
 my $ANALYSIS_NAME; # base name for the analysis the analysis folder and element folder will be created based on this
+my $INTERPRO_FILENAME; # name of intrepro file with protein searches
 my $ANALYSIS_FOLDER; # name of folder to store analysis files into
 my $ELEMENT_FOLDER; # directory where individual folders for each element are stored
 my $REJECTED_ELEMENTS_FOLDER = "Rejected_elements"; # name of folder that contains files for elements have been reviewed and rejected
@@ -32,6 +33,7 @@ GetOptions(
 	't:s'   => \$TBLASTN_FILE,
 	'g:s'   => \$INPUT_GENOME,
     'n:s'   => \$ANALYSIS_NAME,
+    'in:s'  => \$INTERPRO_FILENAME,
     's:s'   => \$STEP,
     'h'     => \$SHOW_HELP,
 );
@@ -1350,6 +1352,27 @@ if ($STEP == 4) { # check if this step should be performed or not
     }
     close (NUCLEOTIDE_OUTPUT);
 }
+
+### PIPELINE STEP 5 
+### Using the Interpro run, create a summary of cluster
+
+if ($STEP == 5) { # check if this step should be performed or not  
+    print STDERR "Working on STEP 5 ...\n";
+
+    ## Constant for this step
+ 
+    # making sure all the required information has been provided
+    unless ($INTERPRO_FILENAME){
+        die "ERROR: for this step you need to provide a file with the Interpro output, using the -in parameter\n";
+    }
+
+    open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
+
+    # parse the interpro file
+    my %
+    close INTERPRO;
+}
+
 close ANALYSIS;
 close REJECT;
 
