@@ -683,14 +683,20 @@ if ($STEP == 3) { # check if this step should be performed or not
             unless ($_ =~ /^\./) { # prevents reading invisible files or the . and .. files     
                 # check if a manual review is already present in the README file for this element
                 my $current_element_folder = $ELEMENT_FOLDER . "/" . $_ ; # folder with specific element of interest   
-                my $grep_res = `grep "Review 1 result" $current_element_folder/*README.txt`;
-                if ($grep_res) { # yes, this element has already been reviewed
-                    # recording any TIRs
-                    if ($grep_res =~ /TSD\s(\S+),\sTIRs\s(\S+)\sand\s(\S+)/) {
-                        my $unique_tsdtir_string = $1 . $2 . $3;
-                        $seen_tirs{$unique_tsdtir_string}[0]=$1;
-                        $seen_tirs{$unique_tsdtir_string}[1]=$2;
-                        $seen_tirs{$unique_tsdtir_string}[2]=$3;
+ #               my $grep_res = `grep "Review 1 result" $current_element_folder/*README.txt`;
+                my @grep_result_array = split "\n", `grep "Review 1 result" $current_element_folder/*README.txt`;
+
+                if (@grep_result_array) { # yes, this element has already been reviewed
+                    foreach my $grep_res (@grep_result_array) { # if there are multiple TIR combinations recorded this will record them all
+                        if ($grep_res =~ /TSD\s(\S+),\sTIRs\s(\S+)\sand\s(\S+)/) {
+                            my $unique_tsdtir_string = $1 . $2 . $3;
+                            $seen_tirs{$unique_tsdtir_string}[0]=$1;
+                            $seen_tirs{$unique_tsdtir_string}[1]=$2;
+                            $seen_tirs{$unique_tsdtir_string}[2]=$3;
+                        }
+                        else {
+                            die "ERROR: Cannot parse Review 1 line from README file in directory $current_element_folder\n$grep_res\n";
+                        }
                     }
                 }
                 else { # no, this element has not been reviewed yet
@@ -777,7 +783,7 @@ if ($STEP == 3) { # check if this step should be performed or not
             }
 
             # record all the relevant information from the .tirtsd file and check if one or more
-            # of the proposed locations match a known tisdtir
+            # of the proposed locations match a known tsdtir
             my %locs;   # holds base pair locations as key and array of with all the other values
                         # [0-9] number of found TSDs for sizes TA through 10 
             my %observed_locs;  # just like the %locs but holds the information for previously seen TIRs, this will
