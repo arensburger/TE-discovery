@@ -658,6 +658,7 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
 ### CONSTANTS applicable only for STEP 3
 my $TIR_bp = 30; # how many bp to display on the TIR side
 my $FURTHER_REVIEW_FOLDER_NAME = $ANALYSIS_NAME . "-further_review"; # if the user choose to put elements for further review they will go here
+my $TIR_CONSENSUS_THRESHOLD = 0.6; # when displaying TIRs each position must have at least one nucleotide with this level of support in the consensus
 
 if ($STEP == 3) { # check if this step should be performed or not  
     print STDERR "Working on STEP 3 ...\n";
@@ -990,6 +991,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                                 $consensus_sequence = $alignment_sequences{$seq_name};
                             }
                             else {# avoid the line with the consensus sequence
+
                                 ## left side sequences
                                 my $left_whole_seq = substr($alignment_sequences{$seq_name}, 0, $TIR_b1-1);
                                 $left_whole_seq =~ s/-//g; #remove gaps
@@ -1027,7 +1029,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                                 my $i=0;
                                 my $right_tir_seq;
                                 while ((length $right_tir_seq) < $TIR_bp) {
-                                    unless ((substr $consensus_sequence, $TIR_b2-$i-1, 1) =~ /n/i) {
+                                    unless ((substr $consensus_sequence, $TIR_b2-$i-1, 1) =~ /n/) {
                                         $right_tir_seq .= substr($alignment_sequences{$seq_name}, $TIR_b2-$i-1, 1);
                                     }
                                     $i++;
@@ -1070,19 +1072,49 @@ if ($STEP == 3) { # check if this step should be performed or not
                         # don't use the consensus sequence for this, because that contains n characters
                         my $TIR1_sequence;
                         my $TIR2_sequence; 
+                        my $problem_positions_left; # these are positions where the TIR sequence is uncertain, alert the user
+                        my $problem_positions_right; # these are positions where the TIR sequence is uncertain, alert the user
                         for (my $i=0; $i <$TIR_size; $i++) {
                             my %left_char_abundance; # holds the character as key and abundance as value
                             my %right_char_abundance;
+                            my $left_total_sequences; # total number of nucleotides at this postion on the left
+                            my $right_total_sequences; # total number of nucleotides at this postion on the left
                             foreach my $seqname (keys %TIR_sequences) {
                                 my $left_character = substr($TIR_sequences{$seqname}[0], $i, 1); # current left character
                                 my $right_character = substr($TIR_sequences{$seqname}[1], length($TIR_sequences{$seqname}[1])-$TIR_size+$i, 1); # current right character
                                 unless ($left_character eq "-") {
                                     $left_char_abundance{$left_character} += 1;
+                                    $left_total_sequences++;
                                 }
                                 unless ($right_character eq "-") {
                                     $right_char_abundance{$right_character} += 1;
+                                    $right_total_sequences++;
                                 }
                             }
+
+                            # check if the current TIR position is dominated by one nucleotide, if not, the user will be warned
+                            my $left_nucleotide_certain = 0; # boolean, set to zero until one a nucleotide is found above the $TIR_CONSENSUS_THRESHOLD at this TIR position
+                            my $right_nucleotide_certain = 0; # boolean, set to zero until one a nucleotide is found above the $TIR_CONSENSUS_THRESHOLD at this TIR position
+                            foreach my $s (keys %left_char_abundance) {
+                                if (($left_char_abundance{$s}/$left_total_sequences) > $TIR_CONSENSUS_THRESHOLD) {
+                                    $left_nucleotide_certain = 1;
+                                }
+                            }
+                            foreach my $s (keys %right_char_abundance) {
+                                if (($right_char_abundance{$s}/$right_total_sequences) > $TIR_CONSENSUS_THRESHOLD) {
+                                    $right_nucleotide_certain = 1;
+                                }
+                            }
+                            unless ($left_nucleotide_certain) {
+                                my $corrected_position = $i + 1;
+                                $problem_positions_left .= " " . $corrected_position;
+                            }
+                            unless ($right_nucleotide_certain) {
+                                my $corrected_position = $TIR_size - $i;
+                                $problem_positions_right .= " " . $corrected_position;
+                            }
+
+                            # print the default TIR sequence with the max abundance position
                             $TIR1_sequence .= max_by { $left_char_abundance{$_} } keys %left_char_abundance;
                             $TIR2_sequence .= max_by { $right_char_abundance{$_} } keys %right_char_abundance;
                         }
@@ -1099,7 +1131,12 @@ if ($STEP == 3) { # check if this step should be performed or not
                             push @menu2_items, "Update the README to record TIRs $TIR1_sequence and $TIR2_sequence";
                         }
                         elsif ($TIR1_sequence and $TIR2_sequence) {
-                            push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence";
+                            if (($problem_positions_left) or ($problem_positions_right)) {
+                                push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence .\n\tWARNING One or more of these TIR nucleotides are uncertain (left pos $problem_positions_left  right pos $problem_positions_right)\n\tYou might want to consider editing the README file with IUPAC codes";
+                            }
+                            else {
+                                push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence";
+                            }
                         }
                         else {
                             push @menu2_items, "No TIRs were found, update the README to say this is not an element";
@@ -1187,8 +1224,8 @@ if ($STEP == 4) { # check if this step should be performed or not
 
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
-    my $NUCLEOTIDE_OUTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-nucleotide-sequences.fa"; # file that has all the nucleotide sequence of the potential elments, will be used for intepro analysis
-    my $CLUSTER2INTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-cluster2inputsequences.txt"; # file that links the cluster number to the input proteins
+    my $COMBINED_CLUSTERS_OUTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-nucleotide-sequences.fa"; # file that has all the nucleotide sequence of the potential elments, will be used for intepro analysis
+#    my $CLUSTER2INTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-cluster2inputsequences.txt"; # file that links the cluster number to the input proteins
     my $CLUSTER_FOLDER = $ANALYSIS_NAME . "-clusters";
     # making sure all the required information has been provided
     unless ($INPUT_GENOME){
@@ -1199,8 +1236,8 @@ if ($STEP == 4) { # check if this step should be performed or not
     print ANALYSIS "Running STEP 4\n";
     print ANALYSIS "\tGenome: $INPUT_GENOME\n";
     print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
-    print ANALYSIS "\tIdentified nucleotide sequences will be printed to file $NUCLEOTIDE_OUTPUT_FILENAME\n";
-    print ANALYSIS "\tThe file with the cluster number to input protein conversion will be $CLUSTER2INTPUT_FILENAME\n";
+    print ANALYSIS "\tCombined cluster nucleotide sequences printed to file $COMBINED_CLUSTERS_OUTPUT_FILENAME\n";
+ #   print ANALYSIS "\tThe file with the cluster number to input protein conversion will be $CLUSTER2INTPUT_FILENAME\n";
 
     ## Read the README files and identify TIRs sequences and TSD  
     # load the element information from the README files
@@ -1295,14 +1332,6 @@ if ($STEP == 4) { # check if this step should be performed or not
         }
     }
 
-    ## this should be in the README files not a separate file!
-    # # Output a file with the cluster number to input protein convertion
-    open (CLUSTER_OUTPUT, ">>", $CLUSTER2INTPUT_FILENAME) or die "ERROR: Cannot create the file $CLUSTER2INTPUT_FILENAME to output the convertions of cluster number to input protein\n";
-    foreach my $cn (keys %clustering_info) {
-        print CLUSTER_OUTPUT "$cn\t$clustering_info{$cn}[0]\n";
-    }
-    close CLUSTER_OUTPUT;
-
     # Create a new directory where that will now how the clusters, rather than the old 'elements' (need to rename all this)
     if (-d $CLUSTER_FOLDER) { 
         print "WARNING: folder $CLUSTER_FOLDER already exists, using this folder rather than creating a new one\n";
@@ -1311,41 +1340,15 @@ if ($STEP == 4) { # check if this step should be performed or not
         `mkdir $CLUSTER_FOLDER`;
         if ($?) { die "ERROR creating directory $CLUSTER_FOLDER: error code $?\n"}
     }
-    # foreach my $cluster_number (keys %clustering_info) {
-
-    #     # create directory and README
-    #     my $cluster_directory = "$CLUSTER_FOLDER/cluster$cluster_number";
-    #     if (-d $cluster_directory) { 
-    #         print "WARNING: folder $cluster_directory already exists, using this folder rather than creating a new one\n";
-    #     }
-    #     else {
-    #         `mkdir $cluster_directory`;
-    #         if ($?) { die "ERROR creating directory $cluster_directory: error code $?\n"}
-    #     }
-    #     open (CLREADME, ">", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
-
-    #     my $cluster_sequence_file = "$cluster_directory/cluster$cluster_number.fa";
-    #     open (CLSEQ, ">", $cluster_sequence_file) or die "ERROR: Cannot create sequence file $cluster_sequence_file, $!\n";
-
-    #     my @elements = split " ",$clustering_info{$cluster_number}[0];
-    #     foreach my $element_name (@elements) {
-    #         print "cluster $cluster_number\t$element_name\n";
-    #     }
-    #     close CLSEQ;
-    #     close CLREADME;
-    #     exit;
-    # }
 
     ## Using TIR sequences for each cluster, identify possible element nucleotide sequences. Print these into a single file for 
     ## protein scanning.
 
-    open (NUCLEOTIDE_OUTPUT, ">>", $NUCLEOTIDE_OUTPUT_FILENAME) or die "ERROR: Cannot create the file $NUCLEOTIDE_OUTPUT_FILENAME to output the nucleotide sequences to\n";
+    open (COMBINED_CLUSTERS_OUTPUT, ">>", $COMBINED_CLUSTERS_OUTPUT_FILENAME) or die "ERROR: Cannot create the file $COMBINED_CLUSTERS_OUTPUT_FILENAME to output the nucleotide sequences to\n";
     my %genome = fastatohash($INPUT_GENOME); # load the genome into memory
     my $TSD_length;
     my $TIR_length;
         
- #my %seen; # titles that have been seen, used to avoid exporting duplicates
-
     foreach my $cluster_number (keys %clustering_info) { # go through the clusters individually     
 
         # get the TIR sequences for this cluster
@@ -1379,8 +1382,8 @@ if ($STEP == 4) { # check if this step should be performed or not
             } 
         }
 
-        # output the cluster sequences to the single file NUCLEOTIDE_OUTPUT
-        if(%cluster_sequences) {
+        # output the cluster sequences to the single file COMBINED_CLUSTERS_OUTPUT
+        if(%cluster_sequences) { # only continue if sequences were found
 
             # Create directory cluster specific folder
             my $cluster_directory = "$CLUSTER_FOLDER/cluster$cluster_number";
@@ -1400,44 +1403,22 @@ if ($STEP == 4) { # check if this step should be performed or not
             print CLREADME "\tFile cluster$cluster_number.fa contains the genome sequences of sequences in this cluster\n";
             close CLREADME;
 
+            # Output the genomic sequences both to the cluster files and to the combined output
             open (CLSEQ, ">", $cluster_sequence_file) or die "ERROR: Cannot create sequence file $cluster_sequence_file, $!\n";
-            
             foreach my $title (keys %cluster_sequences) {
                 print CLSEQ ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
                 print CLSEQ "$cluster_sequences{$title}\n";
-            #     if ($title =~ /^(\S+):(\d+)-(\d+)/) {
-            #         my $name = "$1:$2-$3";
-            #         if (exists $seen{$name}) {
-            #             my $full_name = "$title" . "_$cluster_number" . "_$TSD_length" . "_$TIR_length";
-            #             print "duplicate1 $full_name, $seen{$name}\n";
-            #         }
-            #         else {
-            #             my $full_name = "$title" . "_$cluster_number" . "_$TSD_length" . "_$TIR_length";
-            #             print NUCLEOTIDE_OUTPUT ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
-            #             print NUCLEOTIDE_OUTPUT "$cluster_sequences{$title}\n";
-            #             $seen{$name} = $full_name;
-            #         }
-            #     } 
-            #     else {
-            #         die "ERROR, cannot parse $title\n";
-            #     }
-            #     # unless (exists $seen{$title}) {
-            #     #     print NUCLEOTIDE_OUTPUT ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
-            #     #     print NUCLEOTIDE_OUTPUT "$cluster_sequences{$title}\n";
-            #     #     $seen{$title} = 1;
-            #     # }
-            #     # else {
-            #     #     print "$cluster_number duplicate $title\n";
-            #     # }
-            #     #print CLSEQ ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
-            #     #print CLSEQ "$cluster_sequences{$title}\n";
+                print COMBINED_CLUSTERS_OUTPUT ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
+                print COMBINED_CLUSTERS_OUTPUT "$cluster_sequences{$title}\n";
             }
             close CLSEQ;
-exit;
+        }
+        else { # this means that no genomic sequences were found for this cluster
+            print ANALYSIS "\tElements $clustering_info{$cluster_number}[0] were clustered in this step but no genomic sequences were identified, stopping the analysis of these sequences here\n";
         }
 
     }
-    close (NUCLEOTIDE_OUTPUT);
+    close (COMBINED_CLUSTERS_OUTPUT);
 }
 
 ### PIPELINE STEP 5 
