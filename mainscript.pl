@@ -1189,7 +1189,7 @@ if ($STEP == 4) { # check if this step should be performed or not
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
     my $NUCLEOTIDE_OUTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-nucleotide-sequences.fa"; # file that has all the nucleotide sequence of the potential elments, will be used for intepro analysis
     my $CLUSTER2INTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-cluster2inputsequences.txt"; # file that links the cluster number to the input proteins
-
+#    my $CLUSTER_FOLDER = $ANALYSIS_NAME . "-clusters";
     # making sure all the required information has been provided
     unless ($INPUT_GENOME){
         die "ERROR: for this step you need to provide a fasta formated genome file, using the -g parameter\n";
@@ -1246,7 +1246,7 @@ if ($STEP == 4) { # check if this step should be performed or not
         print TIRCLUSTER ">$protein_name\n$seq\n";
     }
     close TIRCLUSTER;
-    `cd-hit-est -i $tircluster_input_file -o $tircluster_output_file`; # run clustering
+    `cd-hit-est -n 4 -i $tircluster_input_file -o $tircluster_output_file`; # run clustering, the -n 4 is for short word sizes
     if ($?) { die "ERROR executing cd-hit-est: error code $?\n" }
 
     # interpret the clustering .clstr file and populate the %clustering_info hash 
@@ -1295,12 +1295,45 @@ if ($STEP == 4) { # check if this step should be performed or not
         }
     }
 
-    # Output a file with the cluster number to input protein convertion
+    # # Output a file with the cluster number to input protein convertion
     open (CLUSTER_OUTPUT, ">>", $CLUSTER2INTPUT_FILENAME) or die "ERROR: Cannot create the file $CLUSTER2INTPUT_FILENAME to output the convertions of cluster number to input protein\n";
     foreach my $cn (keys %clustering_info) {
         print CLUSTER_OUTPUT "$cn\t$clustering_info{$cn}[0]\n";
     }
     close CLUSTER_OUTPUT;
+
+    # # create a new set of directories, this time with clusters instead of elements
+    # if (-d $CLUSTER_FOLDER) { 
+    #     print "WARNING: folder $CLUSTER_FOLDER already exists, using this folder rather than creating a new one\n";
+    # }
+    # else {
+    #     `mkdir $CLUSTER_FOLDER`;
+    #     if ($?) { die "ERROR creating directory $CLUSTER_FOLDER: error code $?\n"}
+    # }
+    # foreach my $cluster_number (keys %clustering_info) {
+
+    #     # create directory and README
+    #     my $cluster_directory = "$CLUSTER_FOLDER/cluster$cluster_number";
+    #     if (-d $cluster_directory) { 
+    #         print "WARNING: folder $cluster_directory already exists, using this folder rather than creating a new one\n";
+    #     }
+    #     else {
+    #         `mkdir $cluster_directory`;
+    #         if ($?) { die "ERROR creating directory $cluster_directory: error code $?\n"}
+    #     }
+    #     open (CLREADME, ">", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
+
+    #     my $cluster_sequence_file = "$cluster_directory/cluster$cluster_number.fa";
+    #     open (CLSEQ, ">", $cluster_sequence_file) or die "ERROR: Cannot create sequence file $cluster_sequence_file, $!\n";
+
+    #     my @elements = split " ",$clustering_info{$cluster_number}[0];
+    #     foreach my $element_name (@elements) {
+    #         print "cluster $cluster_number\t$element_name\n";
+    #     }
+    #     close CLSEQ;
+    #     close CLREADME;
+    #     exit;
+    # }
 
     ## Using TIR sequences for each cluster, identify possible element nucleotide sequences. Print these into a single file for 
     ## protein scanning.
@@ -1309,8 +1342,25 @@ if ($STEP == 4) { # check if this step should be performed or not
     my %genome = fastatohash($INPUT_GENOME); # load the genome into memory
     my $TSD_length;
     my $TIR_length;
+        
+ my %seen; # titles that have been seen, used to avoid exporting duplicates
 
     foreach my $cluster_number (keys %clustering_info) { # go through the clusters individually     
+
+# # create directory and README
+#         my $cluster_directory = "$CLUSTER_FOLDER/cluster$cluster_number";
+#         if (-d $cluster_directory) { 
+#             print "WARNING: folder $cluster_directory already exists, using this folder rather than creating a new one\n";
+#         }
+#         else {
+#             `mkdir $cluster_directory`;
+#             if ($?) { die "ERROR creating directory $cluster_directory: error code $?\n"}
+#         }
+#         open (CLREADME, ">", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
+
+#         my $cluster_sequence_file = "$cluster_directory/cluster$cluster_number.fa";
+#         open (CLSEQ, ">", $cluster_sequence_file) or die "ERROR: Cannot create sequence file $cluster_sequence_file, $!\n";
+
         # get the TIR sequences for this cluster
         my $tir1_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[1]);
         my $tir2_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[2]);
@@ -1342,13 +1392,41 @@ if ($STEP == 4) { # check if this step should be performed or not
             } 
         }
 
-        # output the
+        # output the cluster sequences to the single file NUCLEOTIDE_OUTPUT
         if(%cluster_sequences) {
             foreach my $title (keys %cluster_sequences) {
-                print NUCLEOTIDE_OUTPUT ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
-                print NUCLEOTIDE_OUTPUT "$cluster_sequences{$title}\n";
+                if ($title =~ /^(\S+):(\d+)-(\d+)/) {
+                    my $name = "$1:$2-$3";
+                    if (exists $seen{$name}) {
+                        my $full_name = "$title" . "_$cluster_number" . "_$TSD_length" . "_$TIR_length";
+                        print "duplicate1 $full_name, $seen{$name}\n";
+                    }
+                    else {
+                        my $full_name = "$title" . "_$cluster_number" . "_$TSD_length" . "_$TIR_length";
+                        print NUCLEOTIDE_OUTPUT ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
+                        print NUCLEOTIDE_OUTPUT "$cluster_sequences{$title}\n";
+                        $seen{$name} = $full_name;
+                    }
+                } 
+                else {
+                    die "ERROR, cannot parse $title\n";
+                }
+                # unless (exists $seen{$title}) {
+                #     print NUCLEOTIDE_OUTPUT ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
+                #     print NUCLEOTIDE_OUTPUT "$cluster_sequences{$title}\n";
+                #     $seen{$title} = 1;
+                # }
+                # else {
+                #     print "$cluster_number duplicate $title\n";
+                # }
+                #print CLSEQ ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
+                #print CLSEQ "$cluster_sequences{$title}\n";
             }
         }
+
+
+        # close CLSEQ;
+        # close CLREADME;
     }
     close (NUCLEOTIDE_OUTPUT);
 }
@@ -1369,7 +1447,6 @@ if ($STEP == 5) { # check if this step should be performed or not
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
 
     # parse the interpro file
-    my %
     close INTERPRO;
 }
 
