@@ -1229,7 +1229,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                                 while ($menu3) {
                                     # display menu 3
                                     my $menu3_choice = prompt('m', {
-                                        title => "MENU3 of $element_name\n",
+                                        title => "\nMENU3 of $element_name\n",
                                         prompt => 'What would you like to do?',
                                         display_base => 0,
                                         return_base => 0,
@@ -1481,7 +1481,10 @@ if ($STEP == 4) { # check if this step should be performed or not
             close CLSEQ;
         }
         else { # this means that no genomic sequences were found for this cluster
+            my $datestring = localtime();
             print ANALYSIS "\tElements $clustering_info{$cluster_number}[0] were clustered in this step but no genomic sequences were identified, stopping the analysis of these sequences here\n";
+            print REJECT "$datestring\t$clustering_info{$cluster_number}[0]\tSTEP 4\tNo genomic location were found for this (these) element(s)\n";
+            print "reject\n";
         }
 
     }
