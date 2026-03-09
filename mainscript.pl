@@ -683,7 +683,6 @@ if ($STEP == 3) { # check if this step should be performed or not
             unless ($_ =~ /^\./) { # prevents reading invisible files or the . and .. files     
                 # check if a manual review is already present in the README file for this element
                 my $current_element_folder = $ELEMENT_FOLDER . "/" . $_ ; # folder with specific element of interest   
- #               my $grep_res = `grep "Review 1 result" $current_element_folder/*README.txt`;
                 my @grep_result_array = split "\n", `grep "Review 1 result" $current_element_folder/*README.txt`;
 
                 if (@grep_result_array) { # yes, this element has already been reviewed
@@ -748,6 +747,9 @@ if ($STEP == 3) { # check if this step should be performed or not
                     $prior_notes .= $line;
                 }
             } 
+            close README;
+
+            # print any prior notes if applicable
             print color('bold blue');
             if ($prior_notes) {
                 print "\nPRIOR REVIEW NOTES FOR ELEMENT $element_name\n$prior_notes";
@@ -828,7 +830,9 @@ if ($STEP == 3) { # check if this step should be performed or not
                     my $tsd = $known_tsdtirs{$l}[0];
                     my $tir1 = $known_tsdtirs{$l}[2];
                     my $tir2 = $known_tsdtirs{$l}[3];
+                    open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
                     print README "$datestring, Automated Review 1 result: This is an element, TSD $tsd, TIRs $tir1 and $tir2\n";
+                    close README;
                 }
             }
             else { # this element need manual review
@@ -841,7 +845,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                 push @menu1_items, "Make a note in the README file"; # item 3
                 push @menu1_items, "Update the README to say this is not an element and quit this element"; # item 4
                 push @menu1_items, "Set this element aside for later review"; # item 5
-                push @menu1_items, "Manually enter TIRs and TSD"; # item 6
+                push @menu1_items, "Manually enter TIR positions and TSD size"; # item 6
                 foreach my $loc (keys %observed_locs) {
                     my @pos = split "-", $loc; # get the TIR end positions
                     my ($TIR_number, $average_TIR_length) = average_tir_number_and_length($pos[0], $pos[1], $MIN_TIR_SIZE, $TIR_MISMATCHES, %alignment_sequences);
@@ -874,7 +878,6 @@ if ($STEP == 3) { # check if this step should be performed or not
                     # process answer to menu 1
                     if ($menu1_choice == 0) {
                         `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
-                        close README;
                         close ANALYSIS;
                         close REJECT;
                         exit;
@@ -897,7 +900,9 @@ if ($STEP == 3) { # check if this step should be performed or not
                     }
                     elsif ($menu1_choice == 4) { # the user wants to label this an not an element
                         my $datestring = localtime(); 
+                        open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
                         print README "$datestring, Manual Review 1 result: This is not an element\n";
+                        close README;
                         print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
                         `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
                         $menu1 = 0;
@@ -907,7 +912,9 @@ if ($STEP == 3) { # check if this step should be performed or not
                             `mkdir $FURTHER_REVIEW_FOLDER_NAME`;
                             if ($?) { die "ERROR: could make folder $FURTHER_REVIEW_FOLDER_NAME: error code $?\n"}
                         }
+                        open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
                         print README "$datestring, in STEP 3 manual review 1, reviewer moved this element to the folder $FURTHER_REVIEW_FOLDER_NAME for further review\n";
+                        close README;
                         `mv $ELEMENT_FOLDER/$element_name $FURTHER_REVIEW_FOLDER_NAME`;
                         if ($?) { die "ERROR: could not move folder $ELEMENT_FOLDER/$element_name to folder $FURTHER_REVIEW_FOLDER_NAME: error code $?\n"}
                         print "\tMoved the element to the folder $FURTHER_REVIEW_FOLDER_NAME\n";
@@ -1137,18 +1144,28 @@ if ($STEP == 3) { # check if this step should be performed or not
                             push @menu2_items, "Update the README to record TIRs $TIR1_sequence and $TIR2_sequence";
                         }
                         elsif ($TIR1_sequence and $TIR2_sequence) {
-                            if (($problem_positions_left) or ($problem_positions_right)) {
-                                push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence .\n\tWARNING One or more of these TIR nucleotides are uncertain (left pos $problem_positions_left  right pos $problem_positions_right)\n\tYou might want to consider editing the README file with IUPAC codes";
-                            }
-                            else {
-                                push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence";
-                            }
+                            push @menu2_items, "Update the README to say this is an element with TSDs of type $TSD_type bp.\n\tand TIRs $TIR1_sequence and $TIR2_sequence";
                         }
                         else {
                             push @menu2_items, "No TIRs were found, update the README to say this is not an element";
                         }
-                        
+
+                        # next give user chance to enter a different set of TIRs
+                        my $text_menu = "Enter TIR sequences manually";
+                        if (($problem_positions_left) or ($problem_positions_right)) {
+                            $text_menu .= "\n\tWARNING: There is ambiguity about the TIR sequence";
+                            if ($problem_positions_left) {
+                                $text_menu .= " on left TIR at position(s)$problem_positions_left";
+                            }
+                            if ($problem_positions_right) {
+                                $text_menu .= " on right TIR at posistion(s)$problem_positions_right";
+                            }
+                        }
+                        push @menu2_items, $text_menu;
+
+                        # finally give user a chance to say it's not an element at all
                         push @menu2_items, "Update the README to say this is not an element";
+
                         while ($menu2) {  #keep displaying until the user ready to leave
 
                             # if applicable tell the user this TIRs been seen before
@@ -1180,19 +1197,21 @@ if ($STEP == 3) { # check if this step should be performed or not
                             elsif ($menu2_choice == 1) { # user wants to report this an element as it is
                                 my $datestring = localtime(); 
                                 if ($TIR1_sequence and $TIR2_sequence) { # this prevents printing if no TIRs were found
-                                    if ($TSD_type eq "TA") {
-                                        print README "$datestring, Manual Review 1 result: This is an element, TSD TA, TIRs $TIR1_sequence and $TIR2_sequence\n";
-                                    }
-                                    elsif ($TSD_type eq "NA") {
-                                        print README "$datestring, Manual Review 1 result: TSD NA, TIRs $TIR1_sequence and $TIR2_sequence\n";               
+                                    if ($TSD_type eq "NA") {
+                                        open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
+                                        print README "$datestring, Manual Review 1 result: TSD NA, TIRs $TIR1_sequence and $TIR2_sequence\n";   
+                                        close README            
                                     }
                                     else {
+                                        open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
                                         print README "$datestring, Manual Review 1 result: This is an element, TSD $TSD_type, TIRs $TIR1_sequence and $TIR2_sequence\n";
+                                        close README;
                                     }
-#                                    $prior_review = 1;
                                 }
                                 else { # no TIRS were found
+                                    open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
                                     print README "$datestring, Manual Review 1 result: This is not an element\n";
+                                    close README;
                                     print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
                                     `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
                                     $menu2 = 0;
@@ -1200,9 +1219,53 @@ if ($STEP == 3) { # check if this step should be performed or not
                                 }
                                 $menu2 = 0;
                             }
-                            elsif ($menu2_choice == 2) {  # user wants to report this as not an element
+                            elsif ($menu2_choice == 2) { # user want to enter their own TIR sequence
+                                my $menu3 = 1; # boolean until user is done with menu 3
+                                my @menu3_items; # hold the text of menu 3 choices
+                                push @menu3_items, "Go back to the previous menu";
+                                push @menu3_items, "Manually enter TIR sequences";
+                                push @menu3_items, "View or edit the README file";
+
+                                while ($menu3) {
+                                    # display menu 3
+                                    my $menu3_choice = prompt('m', {
+                                        title => "MENU3 of $element_name\n",
+                                        prompt => 'What would you like to do?',
+                                        display_base => 0,
+                                        return_base => 0,
+                                        accept_multiple_selections => 0,
+                                    items  => [@menu3_items],
+                                    },'', 1);
+
+                                    if ($menu3_choice == 0) { # user wants to go back to previous menu
+                                        $menu3 = 0;
+                                    }
+                                    elsif ($menu3_choice == 1) { # user want to enter new TIR sequences
+                                        $TIR1_sequence = prompt('a', "Left TIR sequence:", '', $TIR1_sequence);
+                                        $TIR2_sequence = prompt('a', "Right TIR sequence:", '', $TIR2_sequence);
+                                        my $datestring = localtime(); 
+                                        if ($TSD_type eq "NA") {
+                                            open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
+                                            print README "$datestring, Manual Review 1 result: TSD NA, TIRs $TIR1_sequence and $TIR2_sequence\n";               
+                                            close README;
+                                        }
+                                        else {
+                                            open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
+                                            print README "$datestring, Manual Review 1 result: This is an element, TSD $TSD_type, TIRs $TIR1_sequence and $TIR2_sequence\n";
+                                            close README;
+                                        }
+                                    }
+                                    elsif ($menu3_choice == 2) { # user want to view or edit the README file
+                                        `gnome-text-editor $ELEMENT_FOLDER/$element_name/$element_name-README.txt`;
+                                        if ($?) { die "ERROR: could not open for editing the file $ELEMENT_FOLDER/$element_name/$element_name-README.txt: error code $?\n"}
+                                    }
+                                }
+                            } 
+                            elsif ($menu2_choice == 3) {  # user wants to report this as not an element
                                 my $datestring = localtime(); 
+                                open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
                                 print README "$datestring, Manual Review 1 result: This is not an element\n";
+                                close README;
                                 print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
                                 `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
                                 if ($?) { die "ERROR: Could not move folder $ELEMENT_FOLDER/$element_name to $ANALYSIS_FOLDER: error code $?\n"}
@@ -1212,7 +1275,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                     }            
                 }  
             }
-            close README;         
+#            close README;         
         }
         else {
             print "No elements left that need review\n";
@@ -1231,7 +1294,6 @@ if ($STEP == 4) { # check if this step should be performed or not
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
     my $COMBINED_CLUSTERS_OUTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-nucleotide-sequences.fa"; # file that has all the nucleotide sequence of the potential elments, will be used for intepro analysis
-#    my $CLUSTER2INTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-cluster2inputsequences.txt"; # file that links the cluster number to the input proteins
     my $CLUSTER_FOLDER = $ANALYSIS_NAME . "-clusters";
     # making sure all the required information has been provided
     unless ($INPUT_GENOME){
@@ -1243,7 +1305,6 @@ if ($STEP == 4) { # check if this step should be performed or not
     print ANALYSIS "\tGenome: $INPUT_GENOME\n";
     print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
     print ANALYSIS "\tCombined cluster nucleotide sequences printed to file $COMBINED_CLUSTERS_OUTPUT_FILENAME\n";
- #   print ANALYSIS "\tThe file with the cluster number to input protein conversion will be $CLUSTER2INTPUT_FILENAME\n";
 
     ## Read the README files and identify TIRs sequences and TSD  
     # load the element information from the README files
