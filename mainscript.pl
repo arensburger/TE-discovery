@@ -904,6 +904,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                         close README;
                         print REJECT "$datestring\t$element_name\tSTEP 3\tManual review of TSD and TIRs determined this is not an element\n";
                         `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+                        if ($?) { die "ERROR: could not move $ELEMENT_FOLDER/$element_name to $reject_folder_path: error code $?\n"}
                         $menu1 = 0;
                     }
                     elsif ($menu1_choice == 5) { # the user wants to set this element aside
@@ -1481,9 +1482,7 @@ if ($STEP == 4) { # check if this step should be performed or not
         }
         else { # this means that no genomic sequences were found for this cluster
             my $datestring = localtime();
-            print ANALYSIS "\tElements $clustering_info{$cluster_number}[0] were clustered in this step but no genomic sequences were identified, stopping the analysis of these sequences here\n";
             print REJECT "$datestring\t$clustering_info{$cluster_number}[0]\tSTEP 4\tNo genomic location were found for this (these) element(s)\n";
-            print "reject\n";
         }
 
     }
