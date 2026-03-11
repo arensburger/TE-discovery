@@ -415,10 +415,9 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
         
         # 2.2.3 determine the highest percentage of agreement on a single nucleotide at each position
         # go through the alignment to record positions that have high agreement on a single nucleotide.
-
         my %aliseq = fastatohash($aligned_sequences_file_name); # aligned sequences
         my $alignment_length = length($aliseq{(keys %aliseq)[rand keys %aliseq]}); # pick a random sequence to get the length of the alignment (assuming all are the same length)
-        my @agreement_proportion; # holds the highest percentage of sequences that agree on one nucleotide at a postion
+        my @agreement_proportion; # holds the highest percentage of sequences that agree on one nucleotide for each position of the consensus sequence that is not an "n"
         my %location_conversion; # holds the position of the alignment without gaps as key and corresponding alignment with gaps as value
         my $consensus_sequence; # this will hold a consensus sequence for the whole alignment, in this consensus "n" means there's too many gaps or n sequences, "N" means there are enough nucleotides but they don't agree
 
