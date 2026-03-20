@@ -12,6 +12,7 @@ use Scalar::Util qw(looks_like_number);
 use File::Temp qw(tempdir);
 use Term::Prompt;
 use Term::ANSIColor;
+use Cwd;
 
 ### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
@@ -20,11 +21,12 @@ my $INPUT_GENOME; # fasta formated file with genome that input proteins
 my $ANALYSIS_NAME; # base name for the analysis the analysis folder and element folder will be created based on this
 my $INTERPRO_FILENAME; # name of intrepro file with protein searches
 my $ANALYSIS_FOLDER; # name of folder to store analysis files into
+my $CLUSTER_FOLDER; # folder that the clusters will be put into
 my $ELEMENT_FOLDER; # directory where individual folders for each element are stored
 my $REJECTED_ELEMENTS_FOLDER = "Rejected_elements"; # name of folder that contains files for elements have been reviewed and rejected
 my $STEP; # analysis step to perform
-my $START_STEP; # analysis step to start at 
-my $END_STEP; # analysis step to end at.
+my $START_STEP; # analysis step to start at
+my $END_STEP; # analysis step to end at
 my $SHOW_HELP; # call for help 
 
 ### CHECK INPUTS Read and check that the inputs have been provided
@@ -38,7 +40,7 @@ GetOptions(
     'h'     => \$SHOW_HELP,
 );
 
-## CHECK INPUTS if help was called (this could probably be improved)
+## CHECK INPUTS If help was called (this could probably be improved)
 if ($SHOW_HELP) {
     print STDERR "Description and input help can be found at https://github.com/arensburger/TE-discovery\n";
     exit;
@@ -49,18 +51,17 @@ unless ($ANALYSIS_NAME and $STEP) {
     die "usage: perl mainscript.pl <-n analysis name REQUIRED> <-s step number REQUIRED> <step specific parameters, use -h for more help>\n";
 }
 
-## CHECK INPUTS (NOT STEP SPECIFIC) AND CREATE DIRECTORIES IF NECESSARY
+## CHECK INPUTS If the analysis is not launched from the right directory it will give an error, create directories if the analysis just started
 $ANALYSIS_NAME = fixdirname($ANALYSIS_NAME);
-$ANALYSIS_FOLDER = $ANALYSIS_NAME . "-analysis";
-$ELEMENT_FOLDER = $ANALYSIS_NAME . "-element";
-$ANALYSIS_FOLDER = fixdirname($ANALYSIS_FOLDER);
-$ELEMENT_FOLDER = fixdirname($ELEMENT_FOLDER);
+$ANALYSIS_FOLDER = fixdirname($ANALYSIS_NAME . "-analysis");
+$ELEMENT_FOLDER = fixdirname($ANALYSIS_NAME . "-element");
+$CLUSTER_FOLDER = fixdirname($ANALYSIS_NAME . "-clusters");
 my $reject_folder_path = $ANALYSIS_FOLDER . "/" . $REJECTED_ELEMENTS_FOLDER;
 
-
+my $current_directry = getcwd();
 if (($STEP == 1) or ($STEP == 12)) {
     if (-d $ANALYSIS_FOLDER) { 
-        print "WARNING: folder $ANALYSIS_FOLDER already exists, using this folder rather than creating a new one\n";
+        print "WARNING: folder $current_directry/$ANALYSIS_FOLDER already exists, using this folder rather than creating a new one\n";
     }
     else {
         print STDERR "Creating directory $ANALYSIS_FOLDER for storing analysis files\n";
@@ -86,16 +87,26 @@ if (($STEP == 1) or ($STEP == 12)) {
         if ($?) { die "ERROR creating directory: error code $?\n"}
     }
 }
-elsif (($STEP == 2) or ($STEP == 3) or ($STEP == 4)) {
+elsif (($STEP == 2) or ($STEP == 3)) {
     unless ((-d $ANALYSIS_FOLDER) and (-d $ELEMENT_FOLDER) and (-d $reject_folder_path)) {
-        die "ERROR: Expecting folders $ANALYSIS_FOLDER, $ELEMENT_FOLDER, and $reject_folder_path would have been created prior to running step $STEP\n"
+        die "ERROR: Expecting folders $current_directry/$ANALYSIS_FOLDER, $current_directry/$ELEMENT_FOLDER, and $current_directry/$reject_folder_path would have been created prior to running step $STEP\n"
+    }
+}
+elsif ($STEP == 4) {
+    unless ((-d $ANALYSIS_FOLDER) and (-d $ELEMENT_FOLDER)) {
+        die "ERROR: Expecting folders $current_directry/$ANALYSIS_FOLDER and $current_directry/$ELEMENT_FOLDER would have been created prior to running step $STEP\n"
+    }
+}
+elsif ($STEP == 5) {
+    unless (-d $CLUSTER_FOLDER) {
+        die "ERROR: Expecting folder $current_directry/$CLUSTER_FOLDER would have been created prior to running step $STEP\n"
     }
 }
 else {
     die "ERROR: don't recognize the step specified with the -s parameter. Stopping analysis.\n";
 }
 
-## Create or open files to store analysis parameters, and to store rejected sequences. 
+## CHECK INPUTS Create or open files to store analysis parameters, and rejected sequences. 
 my $analysis_parameters_file_name = "$ANALYSIS_FOLDER/Analysis_run_and_parameters.txt"; # file to record parameters and how the run went
 my $rejection_file_name = "$ANALYSIS_FOLDER/Rejected_sequences.txt"; # file to store rejected sequences, and why
 open (ANALYSIS,'>>', $analysis_parameters_file_name) or die "ERROR: cannot open file $analysis_parameters_file_name\n"; # create or append to file
@@ -103,8 +114,6 @@ open (REJECT, '>>', $rejection_file_name) or die "ERROR, cannot create output fi
 
 my $datestring = localtime();
 print ANALYSIS "\nSTARTING ANALYSIS on $datestring\n";
-
-
 
 ### PIPELINE STEP 1 identify proteins that match the genome with parameters specified above under
 ###     The output is a list of proteins for further analysis recorded in the file $output_file_name
@@ -910,7 +919,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                     elsif ($menu1_choice == 5) { # the user wants to set this element aside
                         unless (-d $FURTHER_REVIEW_FOLDER_NAME) { # create the folder if necessary
                             `mkdir $FURTHER_REVIEW_FOLDER_NAME`;
-                            if ($?) { die "ERROR: could make folder $FURTHER_REVIEW_FOLDER_NAME: error code $?\n"}
+                            if ($?) { die "ERROR: could not create folder $FURTHER_REVIEW_FOLDER_NAME: error code $?\n"}
                         }
                         open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
                         print README "$datestring, in STEP 3 manual review 1, reviewer moved this element to the folder $FURTHER_REVIEW_FOLDER_NAME for further review\n";
@@ -1293,8 +1302,8 @@ if ($STEP == 4) { # check if this step should be performed or not
 
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
-    my $COMBINED_CLUSTERS_OUTPUT_FILENAME = $ANALYSIS_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-nucleotide-sequences.fa"; # file that has all the nucleotide sequence of the potential elments, will be used for intepro analysis
-    my $CLUSTER_FOLDER = $ANALYSIS_NAME . "-clusters";
+    my $COMBINED_CLUSTERS_OUTPUT_FILENAME = $CLUSTER_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-all-nucleotide-sequences.fa"; # file that has all the nucleotide sequence of the potential elments, will be used for intepro analysis
+
     # making sure all the required information has been provided
     unless ($INPUT_GENOME){
         die "ERROR: for this step you need to provide a fasta formated genome file, using the -g parameter\n";
@@ -1490,7 +1499,7 @@ if ($STEP == 4) { # check if this step should be performed or not
 }
 
 ### PIPELINE STEP 5 
-### Using the Interpro run, create a summary of cluster
+### Looking at the outcome of interpro, making a summary of element for the user for each cluster
 
 if ($STEP == 5) { # check if this step should be performed or not  
     print STDERR "Working on STEP 5 ...\n";
