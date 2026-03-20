@@ -17,8 +17,8 @@ my $INPUT_GENOME; # fasta formated file with genome that input proteins
 my $ANALYSIS_FOLDER; # name of folder to store analysis files into
 my $ELEMENT_FOLDER; # directory where individual folders for each element are stored
 my $REJECTED_ELEMENTS_FOLDER = "Rejected_elements"; # name of folder that contains files for elements have been reviewed and rejected
-my $START_STEP; # analysis step to start at
-my $END_STEP; # analysis step to end at 
+my $START_STEP; # analysis step to start at 
+my $END_STEP; # analysis step to end at zxc
 my $SHOW_HELP; # call for help 
 
 ### CHECK INPUTS Read and check that the inputs have been provided
