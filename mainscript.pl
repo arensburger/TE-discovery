@@ -24,7 +24,7 @@ my $ELEMENT_FOLDER; # directory where individual folders for each element are st
 my $REJECTED_ELEMENTS_FOLDER = "Rejected_elements"; # name of folder that contains files for elements have been reviewed and rejected
 my $STEP; # analysis step to perform
 my $START_STEP; # analysis step to start at 
-my $END_STEP; # analysis step to end at
+my $END_STEP; # analysis step to end at.
 my $SHOW_HELP; # call for help 
 
 ### CHECK INPUTS Read and check that the inputs have been provided
