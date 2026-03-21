@@ -57,6 +57,7 @@ $ANALYSIS_FOLDER = fixdirname($ANALYSIS_NAME . "-analysis");
 $ELEMENT_FOLDER = fixdirname($ANALYSIS_NAME . "-element");
 $CLUSTER_FOLDER = fixdirname($ANALYSIS_NAME . "-clusters");
 my $reject_folder_path = $ANALYSIS_FOLDER . "/" . $REJECTED_ELEMENTS_FOLDER;
+my $COMBINED_CLUSTERS_OUTPUT_FILENAME = $CLUSTER_FOLDER . "/" . $ANALYSIS_NAME . "-combined-clusters-nucleotide-sequences.fa"; # file that has all the nucleotide sequence of the potential elments, will be used for intepro analysis
 
 my $current_directry = getcwd();
 if (($STEP == 1) or ($STEP == 12)) {
@@ -1302,7 +1303,6 @@ if ($STEP == 4) { # check if this step should be performed or not
 
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
-    my $COMBINED_CLUSTERS_OUTPUT_FILENAME = $CLUSTER_FOLDER . "/" . $ANALYSIS_NAME . "-STEP$STEP-all-nucleotide-sequences.fa"; # file that has all the nucleotide sequence of the potential elments, will be used for intepro analysis
 
     # making sure all the required information has been provided
     unless ($INPUT_GENOME){
@@ -1504,16 +1504,43 @@ if ($STEP == 4) { # check if this step should be performed or not
 if ($STEP == 5) { # check if this step should be performed or not  
     print STDERR "Working on STEP 5 ...\n";
 
-    ## Constant for this step
- 
+    ## Variables
+    my %ORF_info;   # holds as key the nucleotide sequence name used as input for interproscan, as value an array with 
+                    # [0] ORF positions, [1] ORF orientation in the sequence, [2] amino acid sequence, [3] ATG start, boolean
+                    # [4] stop condon, boolean, [5] annotations string
+
     # making sure all the required information has been provided
     unless ($INTERPRO_FILENAME){
         die "ERROR: for this step you need to provide a file with the Interpro output, using the -in parameter\n";
     }
+    unless (-e $COMBINED_CLUSTERS_OUTPUT_FILENAME) {
+        die "ERROR: this step expected the file $COMBINED_CLUSTERS_OUTPUT_FILENAME that contains the input for the interproscan run\n";
+    }
 
+    my %interpro_input_sequences = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); #load all the input sequences in
+
+    # parse the interpro file get the information for each line
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
+    while (my $line = <INTERPRO>) {
+        if ($line =~ /^(\S+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S)/) {
+            my $full_ORF_name = $1;
+            my $location1 = $2;
+            my $location2 = $3;
+            my $orientation = $4;
 
-    # parse the interpro file
+            # get the name of the input sequence by striping interproscan orf name
+            my $input_sequence_name = $full_ORF_name;
+            $input_sequence_name =~ s/_[^_]+$//;
+
+            # check that matching nucleotide sequence can be found to $input_sequence_name
+            unless (exists $interpro_input_sequences{$input_sequence_name}) {
+                die "ERROR: Based on the interproscan file $INTERPRO_FILENAME was expecting the input sequence $input_sequence_name in the file $COMBINED_CLUSTERS_OUTPUT_FILENAME\n";
+            }
+
+            # get the amino acid sequence and start and stop information
+            my ($aa_seq, $start_codon, $stop_codon) = translate_nucleotide($interpro_input_sequences{$input_sequence_name}, $location1, $location2, $orientation);
+        }
+    }
     close INTERPRO;
 }
 
@@ -1834,4 +1861,17 @@ sub average_tir_number_and_length {
     }
 
     return ($TIR_number, $average_TIR_length);
+}
+
+# take a nucleotide sequence and postion information and returns the translated
+# amino acid sequence as well as information about the presence of start and stop codons
+sub translate_nucleotide {
+    my ($nucleotide_sequence, $location1, $location2, $orientation) = @_;
+    my $aa_sequence;
+    my $start_codon = 0;
+    my $stop_codon = 0;
+
+    print "$nucleotide_sequence, $location1, $location2, $orientation\n";
+
+    return ($aa_sequence, $start_codon, $stop_codon);
 }
