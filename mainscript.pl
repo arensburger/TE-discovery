@@ -1871,7 +1871,60 @@ sub translate_nucleotide {
     my $start_codon = 0;
     my $stop_codon = 0;
 
-    print "$nucleotide_sequence, $location1, $location2, $orientation\n";
+    my %genetic_code = (
+    'TTT' => 'F', 'TTC' => 'F', 'TTA' => 'L', 'TTG' => 'L',
+    'TCT' => 'S', 'TCC' => 'S', 'TCA' => 'S', 'TCG' => 'S',
+    'TAT' => 'Y', 'TAC' => 'Y', 'TAA' => '*', 'TAG' => '*',
+    'TGT' => 'C', 'TGC' => 'C', 'TGA' => '*', 'TGG' => 'W',
+    'CTT' => 'L', 'CTC' => 'L', 'CTA' => 'L', 'CTG' => 'L',
+    'CCT' => 'P', 'CCC' => 'P', 'CCA' => 'P', 'CCG' => 'P',
+    'CAT' => 'H', 'CAC' => 'H', 'CAA' => 'Q', 'CAG' => 'Q',
+    'CGT' => 'R', 'CGC' => 'R', 'CGA' => 'R', 'CGG' => 'R',
+    'ATT' => 'I', 'ATC' => 'I', 'ATA' => 'I', 'ATG' => 'M',
+    'ACT' => 'T', 'ACC' => 'T', 'ACA' => 'T', 'ACG' => 'T',
+    'AAT' => 'N', 'AAC' => 'N', 'AAA' => 'K', 'AAG' => 'K',
+    'AGT' => 'S', 'AGC' => 'S', 'AGA' => 'R', 'AGG' => 'R',
+    'GTT' => 'V', 'GTC' => 'V', 'GTA' => 'V', 'GTG' => 'V',
+    'GCT' => 'A', 'GCC' => 'A', 'GCA' => 'A', 'GCG' => 'A',
+    'GAT' => 'D', 'GAC' => 'D', 'GAA' => 'E', 'GAG' => 'E',
+    'GGT' => 'G', 'GGC' => 'G', 'GGA' => 'G', 'GGG' => 'G',
+    );
+
+    my $subseq;
+    if ($orientation eq "+" ) {
+        $subseq = uc(substr($nucleotide_sequence, $location1-1, ($location2 - $location1)));
+#        my $rc_subseq = rc($subseq);
+#        print "$subseq\n$rc_subseq\n"; exit;
+    }
+    elsif ($orientation eq "-") {
+#        print "$nucleotide_sequence\n$location1\t$location2\n";
+
+#        $nucleotide_sequence = ($nucleotide_sequence);
+#        $subseq = rc(uc(substr($nucleotide_sequence, $location1, $location2 - $location1+1)));
+        $subseq = rc(uc(substr($nucleotide_sequence, $location1-1, ($location2 - $location1 + 1))));
+#        print "$subseq\n"; exit;
+#        $subseq = rc($subseq); 
+    }
+    else {
+        die "ERROR: expecting orientation to be + or - but got $orientation in sub translate_nucleotide\n";
+    }
+
+    my $protein = '';
+    for (my $i = 0; $i < length($subseq); $i += 3) {
+        my $codon = substr($subseq, $i, 3);
+        last if length($codon) < 3;  # Skip incomplete codons
+        
+        my $aa = $genetic_code{$codon};
+        if (!defined $aa) {
+            $protein .= "X";
+        }
+        else {
+            $protein .= $aa;
+        }
+    }
+
+
+    print "$location1, $location2, $orientation\n$protein\n";
 
     return ($aa_sequence, $start_codon, $stop_codon);
 }
