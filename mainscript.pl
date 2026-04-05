@@ -1537,8 +1537,9 @@ if ($STEP == 5) { # check if this step should be performed or not
                 die "ERROR: Based on the interproscan file $INTERPRO_FILENAME was expecting the input sequence $input_sequence_name in the file $COMBINED_CLUSTERS_OUTPUT_FILENAME\n";
             }
 
-            # get the amino acid sequence and start and stop information
-            my ($aa_seq, $start_codon, $stop_codon) = translate_nucleotide($interpro_input_sequences{$input_sequence_name}, $location1, $location2, $orientation);
+            # get the amino acid sequence
+            my ($aa_seq) = translate_nucleotide($interpro_input_sequences{$input_sequence_name}, $location1, $location2, $orientation);
+            print ">$input_sequence_name\n$aa_seq\n";
         }
     }
     close INTERPRO;
@@ -1867,10 +1868,6 @@ sub average_tir_number_and_length {
 # amino acid sequence as well as information about the presence of start and stop codons
 sub translate_nucleotide {
     my ($nucleotide_sequence, $location1, $location2, $orientation) = @_;
-    my $aa_sequence;
-    my $start_codon = 0;
-    my $stop_codon = 0;
-
     my %genetic_code = (
     'TTT' => 'F', 'TTC' => 'F', 'TTA' => 'L', 'TTG' => 'L',
     'TCT' => 'S', 'TCC' => 'S', 'TCA' => 'S', 'TCG' => 'S',
@@ -1892,18 +1889,20 @@ sub translate_nucleotide {
 
     my $subseq;
     if ($orientation eq "+" ) {
-        $subseq = uc(substr($nucleotide_sequence, $location1-1, ($location2 - $location1)));
-#        my $rc_subseq = rc($subseq);
-#        print "$subseq\n$rc_subseq\n"; exit;
+        if (($location2 - $location1) > 3) {
+            $subseq = uc(substr($nucleotide_sequence, $location1-1, ($location2 - $location1 + 6)));
+        }
+        else {
+            $subseq = uc(substr($nucleotide_sequence, $location1-1, ($location2 - $location1 + 3)));
+        }
     }
     elsif ($orientation eq "-") {
-#        print "$nucleotide_sequence\n$location1\t$location2\n";
-
-#        $nucleotide_sequence = ($nucleotide_sequence);
-#        $subseq = rc(uc(substr($nucleotide_sequence, $location1, $location2 - $location1+1)));
-        $subseq = rc(uc(substr($nucleotide_sequence, $location1-1, ($location2 - $location1 + 1))));
-#        print "$subseq\n"; exit;
-#        $subseq = rc($subseq); 
+        if ($location1 > 3) {
+            $subseq = rc(uc(substr($nucleotide_sequence, $location1-4, ($location2 - $location1 + 1))));
+        }
+        else {
+            $subseq = rc(uc(substr($nucleotide_sequence, $location1-1, ($location2 - $location1 + 1))));
+        }
     }
     else {
         die "ERROR: expecting orientation to be + or - but got $orientation in sub translate_nucleotide\n";
@@ -1923,8 +1922,5 @@ sub translate_nucleotide {
         }
     }
 
-
-    print "$location1, $location2, $orientation\n$protein\n";
-
-    return ($aa_sequence, $start_codon, $stop_codon);
+    return ($protein);
 }
