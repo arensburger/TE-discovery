@@ -1506,8 +1506,7 @@ if ($STEP == 5) { # check if this step should be performed or not
 
     ## Variables
     my %ORF_info;   # holds as key the nucleotide sequence name used as input for interproscan, as value an array with 
-                    # [0] ORF positions, [1] ORF orientation in the sequence, [2] amino acid sequence, [3] ATG start, boolean
-                    # [4] stop condon, boolean, [5] annotations string
+                    # [0] ORF positions, [1] ORF orientation in the sequence, [2] amino acid sequence, [3] annotations string
 
     # making sure all the required information has been provided
     unless ($INTERPRO_FILENAME){
@@ -1522,7 +1521,7 @@ if ($STEP == 5) { # check if this step should be performed or not
     # parse the interpro file get the information for each line
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
     while (my $line = <INTERPRO>) {
-        if ($line =~ /^(\S+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S)/) {
+        if ($line =~ /^(\S+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S)/) { # This line will give us ORF position, orientation, and amino acid sequence
             my $full_ORF_name = $1;
             my $location1 = $2;
             my $location2 = $3;
@@ -1539,8 +1538,49 @@ if ($STEP == 5) { # check if this step should be performed or not
 
             # get the amino acid sequence
             my ($aa_seq) = translate_nucleotide($interpro_input_sequences{$input_sequence_name}, $location1, $location2, $orientation);
-            print ">$input_sequence_name\n$aa_seq\n";
+
+            # populate %ORF_info
+            $ORF_info{$input_sequence_name}[0] = $location1 . "-" . $location2;
+            $ORF_info{$input_sequence_name}[1] = $orientation;
+            $ORF_info{$input_sequence_name}[2] = $aa_seq;
         }
+
+
+        if ($line =~ /^(\S+)\sPfam\sprotein_match/) { # match to a pFam annotation
+            my $description_text;
+            my $accession;
+            my $input_sequence_name;
+            my @data = split(/;/, $line);
+
+            # get the name of the input sequence by striping interproscan orf name
+            if ($data[0] =~ /(.+)_orf\d+\sPfam\sprotein_match/) {
+                $input_sequence_name = $1;
+            }
+            else {
+                warn "WARNING: could not parse the gff3 line below, expected text \"_Pfam protein_match\"\n$line";
+            }
+
+
+            if ($data[3] =~ /signature_desc=(.+)/) {
+                $description_text = $1;
+            }
+            else {
+                warn "WARNING: could not properly parse the gff3 line below, expected text \"signature_desc=\"\n$line";
+            }
+
+            if ($data[4] =~ /Name=(.+)/) {
+                $accession = $1;
+            }
+
+            if ($data[6] =~ /Dbxref=\"InterPro:(.+)\"/) {
+                $accession = $1;
+            }
+
+            $ORF_info{$input_sequence_name}[3] = $accession . "\t" . $description_text;
+            print "$input_sequence_name\t$ORF_info{$input_sequence_name}[3]\n";
+        }
+
+        
     }
     close INTERPRO;
 }
