@@ -13,6 +13,8 @@ use File::Temp qw(tempdir);
 use Term::Prompt;
 use Term::ANSIColor;
 use Cwd;
+use LWP::UserAgent;
+use JSON;
 
 ### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
@@ -1520,6 +1522,7 @@ if ($STEP == 5) { # check if this step should be performed or not
 
     # parse the interpro file get the information for each line
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
+    my %seen_descriptions; # holds the seen PANTHER or Pfam id as key and description as value, this is to speed up searches
     while (my $line = <INTERPRO>) {
         if ($line =~ /^(\S+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S)/) { # This line will give us ORF position, orientation, and amino acid sequence
             my $full_ORF_name = $1;
@@ -1547,81 +1550,41 @@ if ($STEP == 5) { # check if this step should be performed or not
 
         if ($line =~ /^(.+)_orf\d+\s\w+\sprotein_match/) {
             my $input_sequence_name = $1;
-
- #           my @data = split(/;/, $line);
-            # if ($data[0] =~ /^(.+)_orf\d+\s/) {
-            #     $input_sequence_name = $1;
-            # }
-            # else {
-            #     warn "WARNING: could not parse the gff3 line below, expected orf name ending in _orf/n$line";
-            # }
-
-            # if ($data[3] =~ /signature_desc=(.+)/) {
-            #      $description_text = $1;
-            #  }
-
-        }
-
-
-#         if ($line =~ /^(\S+)\sPfam\sprotein_match/) { # match to a pFam annotation
-#             my $description_text;
-#             my $accession;
-#             my $input_sequence_name;
-#             my @data = split(/;/, $line);
-
-#             # get the name of the input sequence by striping interproscan orf name
-#             if ($data[0] =~ /(.+)_orf\d+\sPfam\sprotein_match/) {
-#                 $input_sequence_name = $1;
-#             }
-#             else {
-#                 warn "WARNING: could not parse the gff3 line below, expected text \"_Pfam protein_match\"\n$line";
-#             }
-
-
-#             if ($data[3] =~ /signature_desc=(.+)/) {
-#                 $description_text = $1;
-#             }
-#             else {
-#                 warn "WARNING: could not properly parse the gff3 line below, expected text \"signature_desc=\"\n$line";
-#             }
-
-#             if ($data[4] =~ /Name=(.+)/) {
-#                 $accession = $1;
-#             }
-
-#             if ($data[6] =~ /Dbxref=\"InterPro:(.+)\"/) {
-#                 $accession = $1;
-#             }
-
-#             my ($d2,$d3) = fetch_interpro_description($accession); 
-#             print "$d2\t$d3\n";
-
-#  #           $ORF_info{$input_sequence_name}[3] = $accession . "\t" . $description_text;
-#  #           print "$input_sequence_name\t$ORF_info{$input_sequence_name}[3]\n";
-#         }
-
-        # if ($line =~ /^(\S+)\sPANTHER\sprotein_match/) { # match to a pFam annotation
-        #     my $description_text;
-        #     my $accession;
-        #     my $input_sequence_name;
-        #     my @data = split(/;/, $line);
-
-        #     # get the name of the input sequence by striping interproscan orf name
-        #     if ($data[0] =~ /(.+)_orf\d+\sPANTHER\sprotein_match/) {
-        #         $input_sequence_name = $1;
-        #     }
-        #     else {
-        #         warn "WARNING: could not parse the gff3 line below, expected text \"_PANTHER protein_match\"\n$line";
-        #     }
-
-        #     if ($data[3] =~ /signature_desc=(.+)/) {
-        #         $description_text = $1;
-        #     }
-        #     else {
-        #         warn "WARNING: could not properly parse the gff3 line below, expected text \"signature_desc=\"\n$line";
-        #     }
-
+            my $feature_description;
+            my $feature_reference;
         
+            if ($line =~ /signature_desc=(.+?);.+\"InterPro:(\S+)\"/) {
+                    $feature_description = $1;
+                    $feature_reference = "https://www.ebi.ac.uk/interpro/entry/InterPro/$2/";
+            }
+            elsif ($line =~ /Name=(\S+?);/) {
+                my $id = $1;
+
+                # determine the web link to the feature
+                if ($id =~ /^PTHR\d+/) { # it's a PANTHER ID
+                    $feature_reference = "https://www.ebi.ac.uk/interpro/entry/panther/$id/";
+                }
+                elsif ($id =~ /^PF\d+/) { # it's a Pfam ID {
+                    $feature_reference = "https://www.ebi.ac.uk/interpro/entry/pfam/$id/";
+                }
+                else {
+                    die "ERROR: Cannot parse the id in the GFF3 line\n$line";
+                }
+
+                # get the description of the feature if there is one
+                if (exists $seen_descriptions{$id}) {
+                    $feature_description = $seen_descriptions{$id};
+                }
+                else {
+                    $feature_description = fetch_description($id);
+                    $seen_descriptions{$id} = $feature_description;
+                } 
+            }
+            else {
+                die "ERROR: Cannot parse the line below from the interpro GFF3 file\n";
+            }
+            print "$input_sequence_name\t$feature_description\t$feature_reference\n";  
+        }    
     }
     close INTERPRO;
 }
@@ -2006,79 +1969,31 @@ sub translate_nucleotide {
     return ($protein);
 }
 
-sub fetch_interpro_description {
-    use LWP::UserAgent;
-    use JSON;
-
-#    my $id = shift @ARGV or die "Usage: $0 <InterPro_ID>\nExample: $0 IPR052739\n";
-    my ($id) = @_;
-
-    # Validate ID format
-    $id =~ /^IPR\d+$/i or die "Error: Invalid InterPro ID format. Expected format: IPR######\n";
-
-    my $url = "https://www.ebi.ac.uk/interpro/api/entry/interpro/$id/?format=json";
-
+sub fetch_description {
+     my ($id) = @_;
+    my $url;
+    if ($id =~ /^PTHR\d+/) {
+        $url = "https://www.ebi.ac.uk/interpro/api/entry/panther/$id/?format=json";
+    }
+    elsif ($id =~ /^PF\d+/) {
+        $url = "https://www.ebi.ac.uk/interpro/api/entry/pfam/$id/?format=json";
+    }
+    else {
+        die "ERROR: do not recognize protein id $id\n";
+    }
     my $ua = LWP::UserAgent->new(timeout => 30);
     $ua->agent('Mozilla/5.0');
-
     my $response = $ua->get($url);
-
     if (!$response->is_success) {
         my $code = $response->code;
         if ($code == 404) {
-            die "Error: InterPro entry '$id' not found.\n";
+            die "Error: PANTHER entry '$id' not found.\n";
         } else {
-            die "Error: HTTP request failed with status $code: " . $response->status_line . "\n";
+            die "Error: HTTP request failed with status $code in sub fetch_PANTHER_description: " . $response->status_line . "\n";
         }
     }
-
     my $data = decode_json($response->decoded_content);
+    my $description = $data->{metadata}{name}{name}  // 'N/A';
 
-    my $name        = $data->{metadata}{name}{name}   // 'N/A';
-#    my $short_name  = $data->{metadata}{name}{short}  // 'N/A';
-    my $type        = $data->{metadata}{type}         // 'N/A';
-
-#    print "Name:        $name\n";
-#    print "Type:        $type\n";
-    return ($name, $type);
-}
-
-sub fetch_panter_description {
-    #!/usr/bin/env perl
-use strict;
-use warnings;
-use LWP::UserAgent;
-use JSON;
-
-my $id = shift @ARGV or die "Usage: $0 <PANTHER_ID>\nExample: $0 PTHR45913\n";
-
-# Validate ID format (optionally with subfamily suffix e.g. PTHR45913:SF1)
-$id =~ /^PTHR\d+(?::SF\d+)?$/i or die "Error: Invalid PANTHER ID format. Expected format: PTHR###### or PTHR######:SF#\n";
-
-my $url = "https://www.ebi.ac.uk/interpro/api/entry/panther/$id/?format=json";
-
-my $ua = LWP::UserAgent->new(timeout => 30);
-$ua->agent('Mozilla/5.0');
-
-my $response = $ua->get($url);
-
-if (!$response->is_success) {
-    my $code = $response->code;
-    if ($code == 404) {
-        die "Error: PANTHER entry '$id' not found.\n";
-    } else {
-        die "Error: HTTP request failed with status $code: " . $response->status_line . "\n";
-    }
-}
-
-my $data = decode_json($response->decoded_content);
-
-my $name       = $data->{metadata}{name}{name}  // 'N/A';
-my $short_name = $data->{metadata}{name}{short} // 'N/A';
-my $type       = $data->{metadata}{type}        // 'N/A';
-
-print "ID:          $id\n";
-print "Name:        $name\n";
-print "Short name:  $short_name\n";
-print "Type:        $type\n";
+    return ($description);
 }
