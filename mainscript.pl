@@ -1508,7 +1508,7 @@ if ($STEP == 5) { # check if this step should be performed or not
 
     ## Variables
     my %ORF_info;   # holds as key the nucleotide sequence name used as input for interproscan, as value an array with 
-                    # [0] ORF positions, [1] ORF orientation in the sequence, [2] amino acid sequence, [3] annotations string
+                    # [0] ORF positions, [1] ORF orientation in the sequence, [2] amino acid sequence, [3] short descriptions and web links
 
     # making sure all the required information has been provided
     unless ($INTERPRO_FILENAME){
@@ -1548,7 +1548,7 @@ if ($STEP == 5) { # check if this step should be performed or not
             $ORF_info{$input_sequence_name}[2] = $aa_seq;
         }
 
-        if ($line =~ /^(.+)_orf\d+\s\w+\sprotein_match/) {
+        if ($line =~ /^(.+)_orf\d+\s\w+\sprotein_match/) { # This line will give descriptions of proteins matching this sequence
             my $input_sequence_name = $1;
             my $feature_description;
             my $feature_reference;
@@ -1583,7 +1583,7 @@ if ($STEP == 5) { # check if this step should be performed or not
             else {
                 die "ERROR: Cannot parse the line below from the interpro GFF3 file\n";
             }
-            print "$input_sequence_name\t$feature_description\t$feature_reference\n";  
+            $ORF_info{$input_sequence_name}[3] = "$feature_description\t$feature_reference\t";
         }    
     }
     close INTERPRO;
