@@ -1345,7 +1345,8 @@ if ($STEP == 4) { # check if this step should be performed or not
         }
     }
     unless (keys %reviewed_tsdtirs) {
-        print STDERR "WARNING: No elements where found for processing in this dataset\n";
+        print STDERR "ERROR: No elements where found for processing in this dataset\n";
+        exit;
     }
 
     # Cluster the TIR sequences
@@ -1356,9 +1357,9 @@ if ($STEP == 4) { # check if this step should be performed or not
     my $tircluster_input_file = File::Temp->new(UNLINK => 1); # clustering program input file
     my $tircluster_output_file = File::Temp->new(UNLINK => 1); # clustering program output file
     open (TIRCLUSTER, ">", $tircluster_input_file) or die "Cannot create temporary file $tircluster_input_file\n";
-    foreach my $protein_name (keys %reviewed_tsdtirs) {
-        my $seq = "$reviewed_tsdtirs{$protein_name}[1]$reviewed_tsdtirs{$protein_name}[2]";
-        print TIRCLUSTER ">$protein_name\n$seq\n";
+    foreach my $element_name (keys %reviewed_tsdtirs) {
+        my $seq = "$reviewed_tsdtirs{$element_name}[1]$reviewed_tsdtirs{$element_name}[2]";
+        print TIRCLUSTER ">$element_name\n$seq\n";
     }
     close TIRCLUSTER;
     `cd-hit-est -n 4 -i $tircluster_input_file -o $tircluster_output_file`; # run clustering, the -n 4 is for short word sizes
@@ -1373,29 +1374,29 @@ if ($STEP == 4) { # check if this step should be performed or not
         }
         elsif ($line =~ /^\d+\s+(\d+)nt,\s>(\S+)\.\.\./) {
             my $length = $1;
-            my $protein_name = $2;
+            my $element_name = $2;
 
             # add the protein name to the list 
-            $clustering_info{$cluster_number}[0] .= $protein_name . " ";
+            $clustering_info{$cluster_number}[0] .= $element_name . " ";
 
             # record the name of the shortest TIRs in each cluster
             if ((exists $clustering_info{$cluster_number}[2]) and ($length < $clustering_info{$cluster_number}[2])) {
-                $clustering_info{$cluster_number}[1] = $protein_name;
+                $clustering_info{$cluster_number}[1] = $element_name;
                 $clustering_info{$cluster_number}[2] = $length;
             }
             unless (exists $clustering_info{$cluster_number}[2]) {
-                $clustering_info{$cluster_number}[1] = $protein_name;
+                $clustering_info{$cluster_number}[1] = $element_name;
                 $clustering_info{$cluster_number}[2] = $length;
             }
 
             # check that the TSDs are the same
             if (exists $clustering_info{$cluster_number}[3]) { # a TSD has been observed previously
-                if ($clustering_info{$cluster_number}[3] ne $reviewed_tsdtirs{$protein_name}[0]) {
+                if ($clustering_info{$cluster_number}[3] ne $reviewed_tsdtirs{$element_name}[0]) {
                     $clustering_info{$cluster_number}[4] = 1;
                 }
             }
             else {
-                $clustering_info{$cluster_number}[3] = $reviewed_tsdtirs{$protein_name}[0];
+                $clustering_info{$cluster_number}[3] = $reviewed_tsdtirs{$element_name}[0];
                 $clustering_info{$cluster_number}[4] = 0;
             }
         }    
@@ -1403,7 +1404,8 @@ if ($STEP == 4) { # check if this step should be performed or not
             die "ERROR: Unexpected line in file $tircluster_output_file.clstr\n$line\n";
         }
     }
-    # Warn the user of any elements where the TSD sizes do not all agree
+    
+    # Die if any clusters don't agree on TSDs, tell the user to fix this before continuing
     foreach my $key (keys %clustering_info) {
         if ($clustering_info{$key}[4] == 1) {
             die "ERROR: Clustered elements $clustering_info{$key}[0] do not all have the same TSDs, the README files for these elements should be reviewed and fixed before running this again.\n";   
@@ -1424,6 +1426,7 @@ if ($STEP == 4) { # check if this step should be performed or not
 
     open (COMBINED_CLUSTERS_OUTPUT, ">>", $COMBINED_CLUSTERS_OUTPUT_FILENAME) or die "ERROR: Cannot create the file $COMBINED_CLUSTERS_OUTPUT_FILENAME to output the nucleotide sequences to\n";
     my %genome = fastatohash($INPUT_GENOME); # load the genome into memory
+    my $TSD_type; # a number, or a specific sequence
     my $TSD_length;
     my $TIR_length;
         
@@ -1440,10 +1443,7 @@ if ($STEP == 4) { # check if this step should be performed or not
         }
 
         # get the TSD length for this cluster
-        $TSD_length = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[0]); # all lower case to avoid confusion
-        if ((length $TSD_length) > 1) { # in case the tsd length is the string "a" or "ttaa" it will be converted to a number
-            $TSD_length = length $TSD_length;
-        }
+        $TSD_type = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[0]); # all lower case to avoid confusion
 
         # identify the nucleotide sequences between TIR locations
         my %cluster_sequences; # holds the genomic sequence with intact tirs as well as tsd sequences, it's a hash to avoid duplications
@@ -1451,10 +1451,10 @@ if ($STEP == 4) { # check if this step should be performed or not
             foreach my $chr (keys %genome) { # go through each genome subsection (calling it "chr" here)
                 # Identify all the element sequences (including TSDs) in the forward orientation. Converting everything to lower case to avoid confusion with cases.
                 # Also providing the name of the chrososome and orientation so that the position of all the elements can recorded.
-                my %fw_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_length, "+"); # look for TIRs on the + strand
+                my %fw_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_type, "+"); # look for TIRs on the + strand
                 %cluster_sequences = (%cluster_sequences, %fw_cluster_sequences); # add elements found on the + strand to %cluster_sequences
                 unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
-                    my %rc_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_length, "-");
+                    my %rc_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_type, "-");
                     %cluster_sequences = (%cluster_sequences, %rc_cluster_sequences); # add any new elements to the hash %cluster_sequences
                 }
             } 
@@ -1478,7 +1478,7 @@ if ($STEP == 4) { # check if this step should be performed or not
             open (CLREADME, ">", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
             my $datestring = localtime();
             print CLREADME "$datestring, Clustering sequences $clustering_info{$cluster_number}[0]\n";
-            print CLREADME "\tFile cluster$cluster_number.fa contains the genome sequences of sequences in this cluster\n";
+            print CLREADME "\tFile cluster$cluster_number.fa contains the genome sequences of sequences in this cluster. These sequences are not oriented.\n";
             close CLREADME;
 
             # Output the genomic sequences both to the cluster files and to the combined output
@@ -1517,6 +1517,20 @@ if ($STEP == 5) { # check if this step should be performed or not
     unless (-e $COMBINED_CLUSTERS_OUTPUT_FILENAME) {
         die "ERROR: this step expected the file $COMBINED_CLUSTERS_OUTPUT_FILENAME that contains the input for the interproscan run\n";
     }
+
+    # reviewing the alignment files for each cluster and identifying sequences that overlap with the cluster
+    my %cluster_fasta = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME);
+    foreach my $title (keys %cluster_fasta) {
+        if ($title =~ /^(\S+):(\d+)-(\d+)_(\d+)_\d+_\d+/) {
+            
+            print "$1\t$2\t$3\t$4\n";
+        }
+        else {
+            die "ERROR: Cannot parse title $title\n";
+        }
+    }
+exit;
+
 
     my %interpro_input_sequences = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); #load all the input sequences in
 
@@ -1770,11 +1784,22 @@ sub rc {
 
 # identify element sequences
 sub identify_element_sequence {
-    my ($chr_seq, $tir1, $tir2, $maximum_size, $chromosome_name, $tsd_length, $orientation) = @_; # takes as input the chromosome sequence, the TIR sequences,
+    use Scalar::Util qw(looks_like_number);
+    my ($chr_seq, $tir1, $tir2, $maximum_size, $chromosome_name, $tsd_type, $orientation) = @_; # takes as input the chromosome sequence, the TIR sequences,
                                                                                      # the maximum element size of the element, the chrosome name and orienation of the input sequence
     my @tir1; # location of all TIR1 sequence
     my @tir2; # location of all TIR2 sequence 
     my %nucleotide_sequences; # location of elements as key and nucleotide sequence as value, this is what is returned 
+    my $tsd_length;
+
+    # get the length of the TSD
+    if (looks_like_number($tsd_type)) {
+        $tsd_length = $tsd_type
+    }
+    else {
+        $tsd_length = length ($tsd_type);
+    }
+
     # test that the orientation provided is known
     unless (($orientation eq "+") or  ($orientation eq "-")) { die "ERROR: Orientation $orientation is not known in subroutine identify_element_sequences\n$tir1, $tir2, $maximum_size, $chromosome_name, $orientation\n"}
 
@@ -1810,7 +1835,15 @@ sub identify_element_sequence {
                 my $full_sequence = substr($chr_seq, $tir1[$i]-$tsd_length, $size);
                 my $tsd1 = substr($full_sequence, 0, $tsd_length);
                 my $tsd2 = substr($full_sequence, length($full_sequence)-$tsd_length, $tsd_length);
-                $nucleotide_sequences{$location_name} = $full_sequence;
+                if (looks_like_number($tsd_type)) { # if the TSD type is a number then just the sequence
+                    $nucleotide_sequences{$location_name} = $full_sequence;
+                }    
+                else { # if the TSD type is a specific sequence, then only add it if that sequence is has been identified
+                    if (($tsd1 eq $tsd2) and ($tsd1 eq $tsd_type)) {
+                        $nucleotide_sequences{$location_name} = $full_sequence;
+                    }
+                }       
+                
             }
         }
     }
