@@ -1442,8 +1442,14 @@ if ($STEP == 4) { # check if this step should be performed or not
             $TIRs_set = 0;
         }
 
-        # get the TSD length for this cluster
+        # get the TSD information for this cluster
         $TSD_type = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[0]); # all lower case to avoid confusion
+        if (looks_like_number($TSD_type)) {
+            $TSD_length = $TSD_type;
+        }
+        else {
+            $TSD_length = length ($TSD_type)
+        }
 
         # identify the nucleotide sequences between TIR locations
         my %cluster_sequences; # holds the genomic sequence with intact tirs as well as tsd sequences, it's a hash to avoid duplications
@@ -1451,10 +1457,10 @@ if ($STEP == 4) { # check if this step should be performed or not
             foreach my $chr (keys %genome) { # go through each genome subsection (calling it "chr" here)
                 # Identify all the element sequences (including TSDs) in the forward orientation. Converting everything to lower case to avoid confusion with cases.
                 # Also providing the name of the chrososome and orientation so that the position of all the elements can recorded.
-                my %fw_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_type, "+"); # look for TIRs on the + strand
+                my %fw_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_type, $TSD_length, "+"); # look for TIRs on the + strand
                 %cluster_sequences = (%cluster_sequences, %fw_cluster_sequences); # add elements found on the + strand to %cluster_sequences
                 unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
-                    my %rc_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_type, "-");
+                    my %rc_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_type, $TSD_length, "-");
                     %cluster_sequences = (%cluster_sequences, %rc_cluster_sequences); # add any new elements to the hash %cluster_sequences
                 }
             } 
@@ -1784,21 +1790,11 @@ sub rc {
 
 # identify element sequences
 sub identify_element_sequence {
-    use Scalar::Util qw(looks_like_number);
-    my ($chr_seq, $tir1, $tir2, $maximum_size, $chromosome_name, $tsd_type, $orientation) = @_; # takes as input the chromosome sequence, the TIR sequences,
+    my ($chr_seq, $tir1, $tir2, $maximum_size, $chromosome_name, $tsd_type, $tsd_length, $orientation) = @_; # takes as input the chromosome sequence, the TIR sequences,
                                                                                      # the maximum element size of the element, the chrosome name and orienation of the input sequence
     my @tir1; # location of all TIR1 sequence
     my @tir2; # location of all TIR2 sequence 
-    my %nucleotide_sequences; # location of elements as key and nucleotide sequence as value, this is what is returned 
-    my $tsd_length;
-
-    # get the length of the TSD
-    if (looks_like_number($tsd_type)) {
-        $tsd_length = $tsd_type
-    }
-    else {
-        $tsd_length = length ($tsd_type);
-    }
+    my %nucleotide_sequences; # location of elements as key and nucleotide sequence as value, this is what is returned ;
 
     # test that the orientation provided is known
     unless (($orientation eq "+") or  ($orientation eq "-")) { die "ERROR: Orientation $orientation is not known in subroutine identify_element_sequences\n$tir1, $tir2, $maximum_size, $chromosome_name, $orientation\n"}
@@ -2003,7 +1999,7 @@ sub translate_nucleotide {
 }
 
 sub fetch_description {
-     my ($id) = @_;
+    my ($id) = @_;
     my $url;
     if ($id =~ /^PTHR\d+/) {
         $url = "https://www.ebi.ac.uk/interpro/api/entry/panther/$id/?format=json";
