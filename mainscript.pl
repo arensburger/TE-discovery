@@ -1484,16 +1484,33 @@ if ($STEP == 4) { # check if this step should be performed or not
             open (CLREADME, ">", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
             my $datestring = localtime();
             print CLREADME "$datestring, Clustering sequences $clustering_info{$cluster_number}[0]\n";
-            print CLREADME "\tFile cluster$cluster_number.fa contains the genome sequences of sequences in this cluster. These sequences are not oriented.\n";
+            print CLREADME "\tFile cluster$cluster_number.fa contains the genome sequences of sequences in this cluster. The sequences are oriented\n";
             close CLREADME;
+
+            # orient the sequences by aligning them with mafft and --adjustdirection option. Might need to change orientation after INTERPRO run
+            my $temp_input_alignment_file = File::Temp->new(UNLINK => 1); # input to mafft alignment
+            open (MAFFTINPUT, ">", $temp_input_alignment_file) or die "ERROR: Cannot create temporay mafft input alignment file\n";
+            my $temp_output_alignment_file = File::Temp->new(UNLINK => 1); # output of mafft alignment
+            foreach my $title (keys %cluster_sequences) {
+                print MAFFTINPUT ">$title\n";
+                print MAFFTINPUT "$cluster_sequences{$title}\n";
+            }
+            close MAFFTINPUT;
+            `mafft --adjustdirection --quiet $temp_input_alignment_file > $temp_output_alignment_file`; 
+            if ($?) { die "ERROR running MAFFT with --adjustdirection option: error code $?\n"}
 
             # Output the genomic sequences both to the cluster files and to the combined output
             open (CLSEQ, ">", $cluster_sequence_file) or die "ERROR: Cannot create sequence file $cluster_sequence_file, $!\n";
-            foreach my $title (keys %cluster_sequences) {
-                print CLSEQ ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
-                print CLSEQ "$cluster_sequences{$title}\n";
-                print COMBINED_CLUSTERS_OUTPUT ">$title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
-                print COMBINED_CLUSTERS_OUTPUT "$cluster_sequences{$title}\n";
+            my %alignment_output = fastatohash($temp_output_alignment_file); # output of the mafft alignment above
+            foreach my $seq_title (keys %alignment_output) {
+                if ($seq_title =~ /_R_(\S+):(\d+)-(\d+)/) { # fix the title if necessary
+                    $seq_title = "$1:$3-$2"; 
+                }
+                $alignment_output{$seq_title} =~ s/-//g; # remove the gaps from the alignment
+                print CLSEQ ">$seq_title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
+                print CLSEQ "$alignment_output{$seq_title}\n";
+                print COMBINED_CLUSTERS_OUTPUT ">$seq_title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
+                print COMBINED_CLUSTERS_OUTPUT "$alignment_output{$seq_title}\n";
             }
             close CLSEQ;
         }
