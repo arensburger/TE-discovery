@@ -1541,17 +1541,49 @@ if ($STEP == 5) { # check if this step should be performed or not
         die "ERROR: this step expected the file $COMBINED_CLUSTERS_OUTPUT_FILENAME that contains the input for the interproscan run\n";
     }
 
-    # reviewing the alignment files for each cluster and identifying sequences that overlap with the cluster
-    my %cluster_fasta = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME);
+    # Identify any sequences that overlap
+    # Write all the location data to a bed file, sort it, and use bedtools to identify overlaps, and report these
+    my %cluster_fasta = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); # get the raw data
+    my $temp_bed_file = File::Temp->new(UNLINK => 1); # temporary bed file
+    my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command
+    open (BED, ">", $temp_bed_file) or die "ERROR: cannot created temporary bed file $temp_bed_file\n";
+    my $temp_bed_sorted_file = File::Temp->new(UNLINK => 1); # temporary bed file sorted
     foreach my $title (keys %cluster_fasta) {
         if ($title =~ /^(\S+):(\d+)-(\d+)_(\d+)_\d+_\d+/) {
-            
-            print "$1\t$2\t$3\t$4\n";
+            my $chromosome = $1;
+            my $b1 = $2;
+            my $b2 = $3;
+            my $cluster = $4;
+            my $orientation = "+";
+            if ($b1 > $b2) {
+                $orientation = "-";
+                my $temp = $b2;
+                $b2 = $b1;
+                $b1 = $temp;
+            }
+            print BED "$chromosome\t$b1\t$b2\t$orientation\t$cluster\n";
         }
         else {
             die "ERROR: Cannot parse title $title\n";
         }
     }
+    close BED;
+    `bedtools sort -i $temp_bed_file > $temp_bed_sorted_file`;
+    if ($?) { die "ERROR running bedtools sort: error code $?\n"}
+    `bedtools intersect -a $temp_bed_sorted_file -b $temp_bed_sorted_file -wo > $temp_overlap_file`; # has all the overlaping including the sequence to itself
+    if ($?) { die "ERROR running bedtools intersect: error code $?\n"}
+    open (OVERLAP, $temp_overlap_file) or die "ERROR: Cannot open temporary overlap file $temp_overlap_file\n";
+    while (my $line = <OVERLAP>) {
+        if ($line =~ /^(\S+\s\S+\s\S+\s\S+\s\S+)\s(\S+\s\S+\s\S+\s\S+\s\S+)/) {
+            unless ($1 eq $2) {
+                print "$1\t$2\n";
+            }
+        }
+        else {
+            die "ERROR: could not parse bedtool output line\n$line";
+        }
+    }
+    
 exit;
 
 
