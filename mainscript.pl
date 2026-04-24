@@ -15,7 +15,7 @@ use Term::ANSIColor;
 use Cwd;
 use LWP::UserAgent;
 use JSON;
-use Graph;
+use Graph; # use sudo apt install libgraph-perl to install this
 
 ### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
@@ -1542,11 +1542,12 @@ if ($STEP == 5) { # check if this step should be performed or not
         die "ERROR: this step expected the file $COMBINED_CLUSTERS_OUTPUT_FILENAME that contains the input for the interproscan run\n";
     }
 
-    # Identify any sequences that overlap
-    # Write all the location data to a bed file, sort it, and use bedtools to identify overlaps, and report these
+    # Identify any sequences that overlap. Write all the location data to a bed file,
+    # use bedtools to identify overlaps pairs, then a graph to group the overlaping files
     my %cluster_fasta = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); # get the raw data
     my $temp_bed_file = File::Temp->new(UNLINK => 1); # temporary bed file
-    my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command
+    my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command   
+    #create BED file
     open (BED, ">", $temp_bed_file) or die "ERROR: cannot created temporary bed file $temp_bed_file\n";
     my $temp_bed_sorted_file = File::Temp->new(UNLINK => 1); # temporary bed file sorted
     foreach my $title (keys %cluster_fasta) {
@@ -1569,22 +1570,34 @@ if ($STEP == 5) { # check if this step should be performed or not
         }
     }
     close BED;
+    # identify overalaping pairs of sequences
     `bedtools sort -i $temp_bed_file > $temp_bed_sorted_file`;
     if ($?) { die "ERROR running bedtools sort: error code $?\n"}
     `bedtools intersect -a $temp_bed_sorted_file -b $temp_bed_sorted_file -wo > $temp_overlap_file`; # has all the overlaping including the sequence to itself
     if ($?) { die "ERROR running bedtools intersect: error code $?\n"}
-
-    # process the overlap results\
+    # process the pairs of overalps put them into groups, non-overlaping sequences will be in a group by themselves
     my $graph = Graph->new(undirected => 1); # this is a graph to join all the pairs of overlaping sequences
     open (OVERLAP, $temp_overlap_file) or die "ERROR: Cannot open temporary overlap file $temp_overlap_file\n";
     my @overlap_pairs; # this is an array of array with two elements, each a pair member
     while (my $line = <OVERLAP>) {
         my @data = split " ", $line;
-#        if (($data[5] ne $data[11]) and ($data[4] eq $data[10])) {  # this will be true if the overlaping sequences are in the same cluster and
-                                                                    # are not the same sequence
-        if (($data[4] eq $data[10])) {  # this will be true if the overlaping sequences are in the same cluster and
+        if (($data[4] eq $data[10])) {  # this will be true if the overlaping sequences are in the same cluster
             $graph->add_edge($data[5], $data[11]);                                               
         }
+    }
+    my @groups = $graph->connected_components(); # @groups is an array of arrays with the overlaping sequences in one group 
+    # sort the groups by cluster
+    my %cluster_nucleotide_sequences; # holds the cluster number as key and an array as value with each group of sequences
+    foreach my $g (@groups) {
+        # identify the current cluster of the current group by parsing the name of the first sequence
+        my $cluster_number;
+        if(@$g[0] =~ /_\d+_\d+_(\d+)/) {
+            $cluster_number = $1;
+        }
+        else {
+            die "ERROR: Could not parse sequence name after grouping: @$g[0]\n";
+        }
+        print "$cluster_number\n";
     }
 
 #     my $graph = Graph->new(undirected => 1);
@@ -1594,13 +1607,13 @@ if ($STEP == 5) { # check if this step should be performed or not
 #     print "@$pair\n";
 #     $graph->add_edge(@$pair);
 # }
-my @clusters = $graph->connected_components();
 
-my $cluster_num = 1;
-foreach my $cluster (@clusters) {
-    print "Cluster ", $cluster_num++, ": ",
-          join(", ", sort @$cluster), "\n";
-}
+
+# my $cluster_num = 1;
+# foreach my $cluster (@clusters) {
+#     print "Cluster ", $cluster_num++, ": ",
+#           join(", ", sort @$cluster), "\n";
+# }
     
 exit;
 
