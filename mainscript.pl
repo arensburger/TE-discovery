@@ -15,6 +15,7 @@ use Term::ANSIColor;
 use Cwd;
 use LWP::UserAgent;
 use JSON;
+use Graph;
 
 ### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
@@ -1561,7 +1562,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                 $b2 = $b1;
                 $b1 = $temp;
             }
-            print BED "$chromosome\t$b1\t$b2\t$orientation\t$cluster\n";
+            print BED "$chromosome\t$b1\t$b2\t$orientation\t$cluster\t$title\n"; # all the information about overlaps
         }
         else {
             die "ERROR: Cannot parse title $title\n";
@@ -1572,17 +1573,34 @@ if ($STEP == 5) { # check if this step should be performed or not
     if ($?) { die "ERROR running bedtools sort: error code $?\n"}
     `bedtools intersect -a $temp_bed_sorted_file -b $temp_bed_sorted_file -wo > $temp_overlap_file`; # has all the overlaping including the sequence to itself
     if ($?) { die "ERROR running bedtools intersect: error code $?\n"}
+
+    # process the overlap results\
+    my $graph = Graph->new(undirected => 1); # this is a graph to join all the pairs of overlaping sequences
     open (OVERLAP, $temp_overlap_file) or die "ERROR: Cannot open temporary overlap file $temp_overlap_file\n";
+    my @overlap_pairs; # this is an array of array with two elements, each a pair member
     while (my $line = <OVERLAP>) {
-        if ($line =~ /^(\S+\s\S+\s\S+\s\S+\s\S+)\s(\S+\s\S+\s\S+\s\S+\s\S+)/) {
-            unless ($1 eq $2) {
-                print "$1\t$2\n";
-            }
-        }
-        else {
-            die "ERROR: could not parse bedtool output line\n$line";
+        my @data = split " ", $line;
+#        if (($data[5] ne $data[11]) and ($data[4] eq $data[10])) {  # this will be true if the overlaping sequences are in the same cluster and
+                                                                    # are not the same sequence
+        if (($data[4] eq $data[10])) {  # this will be true if the overlaping sequences are in the same cluster and
+            $graph->add_edge($data[5], $data[11]);                                               
         }
     }
+
+#     my $graph = Graph->new(undirected => 1);
+# my @pairs = (['A','B'], ['B','C'], ['D','E'], ['F','G'], ['G','H']);
+
+# foreach my $pair (@pairs) {
+#     print "@$pair\n";
+#     $graph->add_edge(@$pair);
+# }
+my @clusters = $graph->connected_components();
+
+my $cluster_num = 1;
+foreach my $cluster (@clusters) {
+    print "Cluster ", $cluster_num++, ": ",
+          join(", ", sort @$cluster), "\n";
+}
     
 exit;
 
