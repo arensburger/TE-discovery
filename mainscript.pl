@@ -1597,23 +1597,14 @@ if ($STEP == 5) { # check if this step should be performed or not
         else {
             die "ERROR: Could not parse sequence name after grouping: @$g[0]\n";
         }
-        print "$cluster_number\n";
+        push @{ $cluster_nucleotide_sequences{$cluster_number}}, join(",", @$g);
     }
 
-#     my $graph = Graph->new(undirected => 1);
-# my @pairs = (['A','B'], ['B','C'], ['D','E'], ['F','G'], ['G','H']);
-
-# foreach my $pair (@pairs) {
-#     print "@$pair\n";
-#     $graph->add_edge(@$pair);
-# }
-
-
-# my $cluster_num = 1;
-# foreach my $cluster (@clusters) {
-#     print "Cluster ", $cluster_num++, ": ",
-#           join(", ", sort @$cluster), "\n";
-# }
+    # foreach my $t (keys %cluster_nucleotide_sequences) {
+    #     foreach my $u (@{ $cluster_nucleotide_sequences{$t}}) {
+    #         print "$t\t$u\n";
+    #     }
+    # }
     
 exit;
 
