@@ -1599,19 +1599,9 @@ if ($STEP == 5) { # check if this step should be performed or not
         }
         push @{ $cluster_nucleotide_sequences{$cluster_number}}, join(",", @$g);
     }
-
-    # foreach my $t (keys %cluster_nucleotide_sequences) {
-    #     foreach my $u (@{ $cluster_nucleotide_sequences{$t}}) {
-    #         print "$t\t$u\n";
-    #     }
-    # }
     
-exit;
-
-
+    # parse the interpro file and get the information for each line and record information about each sequences into %ORF_info
     my %interpro_input_sequences = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); #load all the input sequences in
-
-    # parse the interpro file get the information for each line
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
     my %seen_descriptions; # holds the seen PANTHER or Pfam id as key and description as value, this is to speed up searches
     while (my $line = <INTERPRO>) {
@@ -1678,6 +1668,12 @@ exit;
         }    
     }
     close INTERPRO;
+
+    foreach my $t (keys %cluster_nucleotide_sequences) {
+        foreach my $u (@{ $cluster_nucleotide_sequences{$t}}) {
+            print "$t\t$u\t$ORF_info{$u}[3]\t$ORF_info{$u}[1]\n";
+        }
+    }
 }
 
 close ANALYSIS;
