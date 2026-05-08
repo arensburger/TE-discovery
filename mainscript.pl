@@ -1510,6 +1510,15 @@ if ($STEP == 4) { # check if this step should be performed or not
                 $alignment_output{$seq_title} =~ s/-//g; # remove the gaps from the alignment
                 print CLSEQ ">$seq_title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
                 print CLSEQ "$alignment_output{$seq_title}\n";
+my $ha = length $alignment_output{$seq_title};
+if ($ha < 5) {
+    print ">$seq_title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
+    `cp $temp_output_alignment_file /home/peter/Desktop/temp.txt`;
+    foreach my $key (%alignment_output) {
+        print "$key\n$alignment_output{$key}\n";
+    }
+    exit;
+}
                 print COMBINED_CLUSTERS_OUTPUT ">$seq_title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
                 print COMBINED_CLUSTERS_OUTPUT "$alignment_output{$seq_title}\n";
             }
@@ -1591,7 +1600,7 @@ if ($STEP == 5) { # check if this step should be performed or not
     foreach my $g (@groups) {
         # identify the current cluster of the current group by parsing the name of the first sequence
         my $cluster_number;
-        if(@$g[0] =~ /_\d+_\d+_(\d+)/) {
+        if(@$g[0] =~ /_(\d+)_\d+_\d+/) {
             $cluster_number = $1;
         }
         else {
@@ -1599,7 +1608,7 @@ if ($STEP == 5) { # check if this step should be performed or not
         }
         push @{ $cluster_nucleotide_sequences{$cluster_number}}, join(",", @$g);
     }
-    
+  
     # parse the interpro file and get the information for each line and record information about each sequences into %ORF_info
     my %interpro_input_sequences = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); #load all the input sequences in
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
