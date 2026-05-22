@@ -1485,7 +1485,7 @@ if ($STEP == 4) { # check if this step should be performed or not
             open (CLREADME, ">", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
             my $datestring = localtime();
             print CLREADME "$datestring, Clustering sequences $clustering_info{$cluster_number}[0]\n";
-            print CLREADME "\tFile cluster$cluster_number.fa contains the genome sequences of sequences in this cluster. The sequences are oriented\n";
+            print CLREADME "\tFile cluster$cluster_number.fa contains the genome sequences of sequences in this cluster. The sequences are oriented.\n";
             close CLREADME;
 
             # orient the sequences by aligning them with mafft and --adjustdirection option. Might need to change orientation after INTERPRO run
@@ -1504,23 +1504,16 @@ if ($STEP == 4) { # check if this step should be performed or not
             open (CLSEQ, ">", $cluster_sequence_file) or die "ERROR: Cannot create sequence file $cluster_sequence_file, $!\n";
             my %alignment_output = fastatohash($temp_output_alignment_file); # output of the mafft alignment above
             foreach my $seq_title (keys %alignment_output) {
-                if ($seq_title =~ /_R_(\S+):(\d+)-(\d+)/) { # fix the title if necessary
+                my $sequence = $alignment_output{$seq_title}; # get the sequence first, before $seq_title could be changed
+                $sequence =~ s/-//g; # remove the gaps from the alignment
+                if ($seq_title =~ /_R_(\S+):(\d+)-(\d+)/) { # if the title is reversed correct the order
                     $seq_title = "$1:$3-$2"; 
                 }
-                $alignment_output{$seq_title} =~ s/-//g; # remove the gaps from the alignment
                 print CLSEQ ">$seq_title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
-                print CLSEQ "$alignment_output{$seq_title}\n";
-my $ha = length $alignment_output{$seq_title};
-if ($ha < 5) {
-    print ">$seq_title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
-    `cp $temp_output_alignment_file /home/peter/Desktop/temp.txt`;
-    foreach my $key (%alignment_output) {
-        print "$key\n$alignment_output{$key}\n";
-    }
-    exit;
-}
+                print CLSEQ "$sequence\n";
                 print COMBINED_CLUSTERS_OUTPUT ">$seq_title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
-                print COMBINED_CLUSTERS_OUTPUT "$alignment_output{$seq_title}\n";
+                print COMBINED_CLUSTERS_OUTPUT "$sequence\n";
+
             }
             close CLSEQ;
         }
