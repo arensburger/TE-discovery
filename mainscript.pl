@@ -16,6 +16,7 @@ use Cwd;
 use LWP::UserAgent;
 use JSON;
 use Graph; # use sudo apt install libgraph-perl to install this
+use Term::ANSIColor qw(colored);
 
 ### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
@@ -1302,6 +1303,7 @@ if ($STEP == 3) { # check if this step should be performed or not
 ### 3) length of TSDs, 4) length of TIRs. Outputted sequences include both the TSD and TIR sequence.
 
 if ($STEP == 4) { # check if this step should be performed or not  
+
     print STDERR "Working on STEP 4 ...\n";
 
     ## Constant for this step
@@ -1521,9 +1523,12 @@ if ($STEP == 4) { # check if this step should be performed or not
             my $datestring = localtime();
             print REJECT "$datestring\t$clustering_info{$cluster_number}[0]\tSTEP 4\tNo genomic location were found for this (these) element(s)\n";
         }
-
     }
     close (COMBINED_CLUSTERS_OUTPUT);
+
+    # report what to do next
+    print colored("STEP $STEP is complete, clusters have been determined. The next step is to search for translated regions in these sequences using interproscan. Run the following search:", 'bold'), "\n";
+    print colored("interproscan.sh -i $COMBINED_CLUSTERS_OUTPUT_FILENAME -appl Pfam,Panther -t n -f GFF3 -o $ANALYSIS_NAME-Interpro.gff3", 'italic'), "\n";
 }
 
 ### PIPELINE STEP 5 
