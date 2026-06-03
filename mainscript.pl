@@ -1533,14 +1533,11 @@ if ($STEP == 4) { # check if this step should be performed or not
 
 ### PIPELINE STEP 5 
 ### Looking at the outcome of interpro, making a summary of element for the user for each cluster
+my %seen_descriptions; # holds the seen PANTHER or Pfam id as key and description as value
+                       # this is to speed up searches. Declaring it here so that it will available to the subroutines
 
 if ($STEP == 5) { # check if this step should be performed or not  
     print STDERR "Working on STEP 5 ...\n";
-
-    ## Variables
-# try to remove this
-#    my %ORF_info;   # holds as key the nucleotide sequence name used as input for interproscan, as value an array with 
-#                    # [0] ORF positions, [1] ORF orientation in the sequence, [2] amino acid sequence, [3] short descriptions and web links
 
     # making sure all the required information has been provided
     unless ($INTERPRO_FILENAME){
@@ -1552,7 +1549,6 @@ if ($STEP == 5) { # check if this step should be performed or not
 
     ## Identify any sequences that overlap in the input sequences. Write all the location data to a bed file,
     ## use bedtools to identify overlaps pairs, then a graph to group the overlaping files. 
-
     my %cluster_fasta = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); # get the raw data
     my $temp_bed_file = File::Temp->new(UNLINK => 1); # temporary bed file
     my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command   
@@ -1628,9 +1624,7 @@ if ($STEP == 5) { # check if this step should be performed or not
     }
     close INTERPRO;
     close OUTPUT;
-
-
-
+    my %interpro_fasta = fastatohash($temp_fasta_file);
   
     ## Parse the interpro results file, identify relevant information and put all of it into a single BED file
 
@@ -1646,22 +1640,30 @@ if ($STEP == 5) { # check if this step should be performed or not
     print BED2 "dbmatch_minus\t2b8cbe\n";
     print BED2 "##gff-version 3\n";
  #   my $temp_bedfile = File::Temp->new(UNLINK => 1); # temporary bed file with all the interproscan hits
-    my %seen_descriptions; # holds the seen PANTHER or Pfam id as key and description as value, this is to speed up searches
+#    my %seen_descriptions; # holds the seen PANTHER or Pfam id as key and description as value, this is to speed up searches
     my %orf_nucleotide_positions; # holds the name of the ORF (input sequence and ORF number) as key and the nucleotide 
                                   # positions of the ORF as value, this will be used to get the Pfam, etc. locations on the 
                                   # nucleotide sequence. [0] location 1, [1] location 2, [2] orientation
     my %orf_data; # orf name from interpro as key and as reference an array with information on input sequence name --> through Pfam annotation
     while (my $line = <INTERPRO>) {
-        if ($line =~ /^(\S+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S)/) { # This line will give us ORF position, orientation, and amino acid sequence
+        if ($line =~ /^(\S+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us ORF position, orientation, and amino acid sequence
             $orf_data{$2}[0]=$1; # input sequence name
             $orf_data{$2}[1]=$3; # nucleotide location 1
             $orf_data{$2}[2]=$4; # nucleotide location 2
             $orf_data{$2}[3]=$5; # orientation
+            $orf_data{$2}[4]=$interpro_fasta{$6}; # amino acid sequence
         }
-        if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match\s(\d+)\s(\d+)\s/) { # Match to PANTHER annotation
-            $orf_data{$2}[4]=$1; # PANTHER 
+        if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match.+;ID=(\S+?);Name=(\S+?);/) { # Match to PANTHER annotation
+            $orf_data{$1}[5]=$interpro_fasta{$2}; # PANTHER amino acid sequence
+            $orf_data{$1}[6]=$3; # PANTHER feature name;
+            $orf_data{$1}[7]=fetch_description($3); # PANTHER description
         }
-
+        if ($line =~ /^\S+_(orf\d+)\sPfam\sprotein_match.+;ID=(\S+?);signature_desc=(.+?);Name=(\S+?);/) { # Match to PANTHER annotation
+            $orf_data{$1}[8]=$interpro_fasta{$2}; # Pfam amino acid sequence
+            $orf_data{$1}[9]=$4; # Pfam feature name;
+            $orf_data{$1}[10]=$3; # Pfam description
+        }
+        
         #     # populate %orf_nucleotide_positions
         #     $orf_nucleotide_positions{$input_sequence_name . "_" . $orf_number}[0] = $location1;
         #     $orf_nucleotide_positions{$input_sequence_name . "_" . $orf_number}[1] = $location2;
@@ -2157,6 +2159,12 @@ sub translate_nucleotide {
 sub fetch_description {
     my ($id) = @_;
     my $url;
+
+    # this is to speed the searches up, by recording what's already been seen
+    if (exists $seen_descriptions{$id}) {
+        return($seen_descriptions{$id});
+    }
+
     if ($id =~ /(PTHR\d+)/) {
         $url = "https://www.ebi.ac.uk/interpro/api/entry/panther/$1/?format=json";
     }
@@ -2180,5 +2188,6 @@ sub fetch_description {
     my $data = decode_json($response->decoded_content);
     my $description = $data->{metadata}{name}{name}  // 'N/A';
 
+    $seen_descriptions{$id} = $description;
     return ($description);
 }
