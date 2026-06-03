@@ -1538,8 +1538,9 @@ if ($STEP == 5) { # check if this step should be performed or not
     print STDERR "Working on STEP 5 ...\n";
 
     ## Variables
-    my %ORF_info;   # holds as key the nucleotide sequence name used as input for interproscan, as value an array with 
-                    # [0] ORF positions, [1] ORF orientation in the sequence, [2] amino acid sequence, [3] short descriptions and web links
+# try to remove this
+#    my %ORF_info;   # holds as key the nucleotide sequence name used as input for interproscan, as value an array with 
+#                    # [0] ORF positions, [1] ORF orientation in the sequence, [2] amino acid sequence, [3] short descriptions and web links
 
     # making sure all the required information has been provided
     unless ($INTERPRO_FILENAME){
@@ -1549,8 +1550,9 @@ if ($STEP == 5) { # check if this step should be performed or not
         die "ERROR: this step expected the file $COMBINED_CLUSTERS_OUTPUT_FILENAME that contains the input for the interproscan run\n";
     }
 
-    # Identify any sequences that overlap. Write all the location data to a bed file,
-    # use bedtools to identify overlaps pairs, then a graph to group the overlaping files
+    ## Identify any sequences that overlap in the input sequences. Write all the location data to a bed file,
+    ## use bedtools to identify overlaps pairs, then a graph to group the overlaping files. 
+
     my %cluster_fasta = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); # get the raw data
     my $temp_bed_file = File::Temp->new(UNLINK => 1); # temporary bed file
     my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command   
@@ -1577,7 +1579,7 @@ if ($STEP == 5) { # check if this step should be performed or not
         }
     }
     close BED;
-    # identify overalaping pairs of sequences
+    # identify overlaping pairs of sequences
     `bedtools sort -i $temp_bed_file > $temp_bed_sorted_file`;
     if ($?) { die "ERROR running bedtools sort: error code $?\n"}
     `bedtools intersect -a $temp_bed_sorted_file -b $temp_bed_sorted_file -wo > $temp_overlap_file`; # has all the overlaping including the sequence to itself
@@ -1594,7 +1596,7 @@ if ($STEP == 5) { # check if this step should be performed or not
     }
     my @groups = $graph->connected_components(); # @groups is an array of arrays with the overlaping sequences in one group 
     # sort the groups by cluster
-    my %cluster_nucleotide_sequences; # holds the cluster number as key and an array as value with each group of sequences
+    my %overlaping_sequences; # holds the cluster number as key and as value an array with groups of sequences in the cluster that overlap
     foreach my $g (@groups) {
         # identify the current cluster of the current group by parsing the name of the first sequence
         my $cluster_number;
@@ -1604,83 +1606,163 @@ if ($STEP == 5) { # check if this step should be performed or not
         else {
             die "ERROR: Could not parse sequence name after grouping: @$g[0]\n";
         }
-        push @{ $cluster_nucleotide_sequences{$cluster_number}}, join(",", @$g);
-    }
-  
-    # parse the interpro file and get the information for each line and record information about each sequences into %ORF_info
-    my %interpro_input_sequences = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); #load all the input sequences in
-    open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
-    my %seen_descriptions; # holds the seen PANTHER or Pfam id as key and description as value, this is to speed up searches
-    while (my $line = <INTERPRO>) {
-        if ($line =~ /^(\S+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S)/) { # This line will give us ORF position, orientation, and amino acid sequence
-            my $full_ORF_name = $1;
-            my $location1 = $2;
-            my $location2 = $3;
-            my $orientation = $4;
 
-            # get the name of the input sequence by striping interproscan orf name
-            my $input_sequence_name = $full_ORF_name;
-            $input_sequence_name =~ s/_[^_]+$//;
-
-            # check that matching nucleotide sequence can be found to $input_sequence_name
-            unless (exists $interpro_input_sequences{$input_sequence_name}) {
-                die "ERROR: Based on the interproscan file $INTERPRO_FILENAME was expecting the input sequence $input_sequence_name in the file $COMBINED_CLUSTERS_OUTPUT_FILENAME\n";
-            }
-
-            # get the amino acid sequence
-            my ($aa_seq) = translate_nucleotide($interpro_input_sequences{$input_sequence_name}, $location1, $location2, $orientation);
-
-            # populate %ORF_info
-            $ORF_info{$input_sequence_name}[0] = $location1 . "-" . $location2;
-            $ORF_info{$input_sequence_name}[1] = $orientation;
-            $ORF_info{$input_sequence_name}[2] = $aa_seq;
+        if (scalar @$g > 1) {
+            push @{ $overlaping_sequences{$cluster_number}}, join(",", @$g);
         }
+    }
 
-        if ($line =~ /^(.+)_orf\d+\s\w+\sprotein_match/) { # This line will give descriptions of proteins matching this sequence
-            my $input_sequence_name = $1;
-            my $feature_description;
-            my $feature_reference;
-        
-            if ($line =~ /signature_desc=(.+?);.+\"InterPro:(\S+)\"/) {
-                    $feature_description = $1;
-                    $feature_reference = "https://www.ebi.ac.uk/interpro/entry/InterPro/$2/";
-            }
-            elsif ($line =~ /Name=(\S+?);/) {
-                my $id = $1;
-
-                # determine the web link to the feature
-                if ($id =~ /^PTHR\d+/) { # it's a PANTHER ID
-                    $feature_reference = "https://www.ebi.ac.uk/interpro/entry/panther/$id/";
-                }
-                elsif ($id =~ /^PF\d+/) { # it's a Pfam ID {
-                    $feature_reference = "https://www.ebi.ac.uk/interpro/entry/pfam/$id/";
-                }
-                else {
-                    die "ERROR: Cannot parse the id in the GFF3 line\n$line";
-                }
-
-                # get the description of the feature if there is one
-                if (exists $seen_descriptions{$id}) {
-                    $feature_description = $seen_descriptions{$id};
-                }
-                else {
-                    $feature_description = fetch_description($id);
-                    $seen_descriptions{$id} = $feature_description;
-                } 
-            }
-            else {
-                die "ERROR: Cannot parse the line below from the interpro GFF3 file\n";
-            }
-            $ORF_info{$input_sequence_name}[3] = "$feature_description\t$feature_reference\t";
-        }    
+    ## Read the Interpro results file and record all the fasta sequences in it, this will be used later 
+    ## to generate alignments and bed files with protein sequences
+    my $temp_fasta_file = File::Temp->new(UNLINK => 1); # temporary fasta fi file
+    open (OUTPUT, ">", $temp_fasta_file) or die "ERROR: cannot create temporary file $temp_fasta_file $!\n";
+    open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
+    my $in_fasta_section = 0; # boolean, 0 until hit the fasta section of the file
+    while (my $line = <INTERPRO>) {
+        if ($in_fasta_section) {
+            print OUTPUT $line;
+        }
+        if ($line =~ /\#\#FASTA/) {
+            $in_fasta_section = 1;
+        }
     }
     close INTERPRO;
+    close OUTPUT;
 
-    foreach my $t (keys %cluster_nucleotide_sequences) {
-        foreach my $u (@{ $cluster_nucleotide_sequences{$t}}) {
-            print "$t\t$u\t$ORF_info{$u}[3]\t$ORF_info{$u}[1]\n";
+
+
+  
+    ## Parse the interpro results file, identify relevant information and put all of it into a single BED file
+
+#    my %interpro_input_sequences = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); #load all the input sequences
+    open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
+    # create BED file, calling it BED2 to avoid confusion with the one used for finding overlaps
+    my $bed_file_name = "/home/peter/Desktop/interpro.bed"; 
+    open (BED2, ">", $bed_file_name) or die "ERROR: cannot created temporary bed file $temp_bed_file\n";
+    # BED file header
+    print BED2 "ORF_plus\tf7fcb9\n";
+    print BED2 "ORF_minus\tece7f2\n";
+    print BED2 "dbmatch_plus\t31a354\n";
+    print BED2 "dbmatch_minus\t2b8cbe\n";
+    print BED2 "##gff-version 3\n";
+ #   my $temp_bedfile = File::Temp->new(UNLINK => 1); # temporary bed file with all the interproscan hits
+    my %seen_descriptions; # holds the seen PANTHER or Pfam id as key and description as value, this is to speed up searches
+    my %orf_nucleotide_positions; # holds the name of the ORF (input sequence and ORF number) as key and the nucleotide 
+                                  # positions of the ORF as value, this will be used to get the Pfam, etc. locations on the 
+                                  # nucleotide sequence. [0] location 1, [1] location 2, [2] orientation
+    my %orf_data; # orf name from interpro as key and as reference an array with information on input sequence name --> through Pfam annotation
+    while (my $line = <INTERPRO>) {
+        if ($line =~ /^(\S+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S)/) { # This line will give us ORF position, orientation, and amino acid sequence
+            $orf_data{$2}[0]=$1; # input sequence name
+            $orf_data{$2}[1]=$3; # nucleotide location 1
+            $orf_data{$2}[2]=$4; # nucleotide location 2
+            $orf_data{$2}[3]=$5; # orientation
         }
+        if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match\s(\d+)\s(\d+)\s/) { # Match to PANTHER annotation
+            $orf_data{$2}[4]=$1; # PANTHER 
+        }
+
+        #     # populate %orf_nucleotide_positions
+        #     $orf_nucleotide_positions{$input_sequence_name . "_" . $orf_number}[0] = $location1;
+        #     $orf_nucleotide_positions{$input_sequence_name . "_" . $orf_number}[1] = $location2;
+        #     $orf_nucleotide_positions{$input_sequence_name . "_" . $orf_number}[2] = $orientation;
+        #     if ($orientation eq "+") {
+        #         print BED2 "$input_sequence_name\t.\tORF_plus\t$location1\t$location2\t.\t$orientation\t.\tID=$orf_number;Name=ORF\n";
+        #     }
+        #     elsif ($orientation eq "-") {
+        #         print BED2 "$input_sequence_name\t.\tORF_minus\t$location1\t$location2\t.\t$orientation\t.\tID=$orf_number;Name=ORF\n";
+        #     }
+        #     else {
+        #         die "ERROR: Unknown orientation $orientation for sequence $input_sequence_name\n";
+        #     }
+
+    #     if ($line =~ /^(.+_orf\d+)\s\w+\sprotein_match\s(\d+)\s(\d+)\s/) { # This line will give descriptions of proteins matching this sequence
+    #         my $sequence_orf_name = $1;
+    #         my $protein_l1 = $2; # protein location 1
+    #         my $protein_l2 = $3; # protein location 2
+    #         my $nucleotide_l1; # nucleotide location 1, will be caluclated below
+    #         my $nucleotide_l2; # nucleotide location 2, will be caluclated below
+    #         my $feature_type; # could be pFam, PANTHER, etc.
+    #         my $feature_description;
+    #         my $feature_reference; 
+    #         my $feature_id;
+
+    #         # Calculate the nucleotide position of the protein match. Only doing this for matches that have a "getorf" line.
+    #         # Those that don't are proteins from other sequences that happen to be same as the ones here, we don't need to worry about those     
+    #         if (exists $orf_nucleotide_positions{$sequence_orf_name}) { 
+    #             if($orf_nucleotide_positions{$sequence_orf_name}[2] eq "+") {
+    #                 $nucleotide_l1 = ($orf_nucleotide_positions{$sequence_orf_name}[0] - 3) + (3 * $protein_l1);
+    #                 $nucleotide_l2 = ($orf_nucleotide_positions{$sequence_orf_name}[0] - 3) + (3 * $protein_l2);
+    #             }
+    #             elsif($orf_nucleotide_positions{$sequence_orf_name}[2] eq "-") {
+    #                 $nucleotide_l2 = ($orf_nucleotide_positions{$sequence_orf_name}[1] + 3) - (3 * $protein_l1);
+    #                 $nucleotide_l1 = ($orf_nucleotide_positions{$sequence_orf_name}[1] + 3) - (3 * $protein_l2);
+
+    #             }
+    #             else {
+    #                 die "ERROR: orientation $orf_nucleotide_positions{$sequence_orf_name}[2] is unknown\n$line";
+    #             }
+            
+
+    #             # for this line, determine the type of protein match it is
+    #             if ($line =~ /Name=(PTHR\d+)/) { # it's a PANTHER ID
+    #                 $feature_id = $1;
+    #                 $feature_reference = "https://www.ebi.ac.uk/interpro/entry/panther/$feature_id/";
+    #                 $feature_type = "PANTHER";
+    #             }
+    #             if ($line =~ /^Name=(PF\d+)/) { # it's a Pfam ID {
+    #                 $feature_id = $1;
+    #                 $feature_reference = "https://www.ebi.ac.uk/interpro/entry/pfam/$feature_id/";
+    #                 $feature_type = "Pfam";
+    #             }
+
+    #             # if a reference has been found, get a description from the database
+    #             if ($feature_reference) {
+    #                 # get the description of the feature if there is one
+    #                 if (exists $seen_descriptions{$feature_reference}) {
+    #                     $feature_description = $seen_descriptions{$feature_reference};
+    #                 }
+    #                 else {
+    #                     $feature_description = fetch_description($feature_reference);
+    #                     $seen_descriptions{$feature_reference} = $feature_description;
+    #                 } 
+    #                 # print the descriptions
+    #                 if ($orf_nucleotide_positions{$sequence_orf_name}[2] eq "+") {
+    #                     $sequence_orf_name =~ s/_orf\d+$//; # strip the orf part of the name
+    #                     print BED2 "$sequence_orf_name\t.\tdbmatch_plus\t$nucleotide_l1\t$nucleotide_l2\t.\t+\t.\tID=$feature_id;Name=$feature_type;signature_desc=$feature_description\n";
+    #                 }
+    #                 elsif ($orf_nucleotide_positions{$sequence_orf_name}[2] eq "-") {
+    #                     $sequence_orf_name =~ s/_orf\d+$//; # strip the orf part of the name
+    #                     print BED2 "$sequence_orf_name\t.\tdbmatch_minus\t$nucleotide_l1\t$nucleotide_l2\t.\t-\t.\tID=$feature_id;Name=$feature_type;signature_desc=$feature_description\n";
+    #                 }
+    #                 else {
+    #                     die "ERROR: Unknown orientation for $line\n";
+    #                 }
+    #             } 
+    #         }
+    #    }    
     }
+
+#     # Data structure: $orf_data{$orf_id} = [$seqname, $start, $end]
+# my %orf_data = (
+#     'ORF001' => ['chr2', 500, 700],
+#     'ORF002' => ['chr1', 100, 300],
+#     'ORF003' => ['chr1', 300, 500],
+#     'ORF004' => ['chr2', 200, 400],
+# );
+
+    # my @sorted_keys = sort {
+    #     $orf_data_plus{$a}[0] cmp $orf_data_plus{$b}[0]   # seqname
+    #     or
+    #     $orf_data_plus{$a}[1] <=> $orf_data_plus{$b}[1]   # start position
+    # } keys %orf_data_plus;
+
+    # foreach my $key (@sorted_keys) {
+    #     print "$key: $orf_data_plus{$key}[0] - $orf_data_plus{$key}[1]\n";
+    # }
+
+    close BED2;
+    close INTERPRO;
 }
 
 close ANALYSIS;
@@ -2075,11 +2157,11 @@ sub translate_nucleotide {
 sub fetch_description {
     my ($id) = @_;
     my $url;
-    if ($id =~ /^PTHR\d+/) {
-        $url = "https://www.ebi.ac.uk/interpro/api/entry/panther/$id/?format=json";
+    if ($id =~ /(PTHR\d+)/) {
+        $url = "https://www.ebi.ac.uk/interpro/api/entry/panther/$1/?format=json";
     }
-    elsif ($id =~ /^PF\d+/) {
-        $url = "https://www.ebi.ac.uk/interpro/api/entry/pfam/$id/?format=json";
+    elsif ($id =~ /(PF\d+)/) {
+        $url = "https://www.ebi.ac.uk/interpro/api/entry/pfam/$1/?format=json";
     }
     else {
         die "ERROR: do not recognize protein id $id\n";
