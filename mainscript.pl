@@ -1627,24 +1627,23 @@ if ($STEP == 5) { # check if this step should be performed or not
     my %interpro_fasta = fastatohash($temp_fasta_file);
   
     ## Parse the interpro results file, identify relevant information and put all of it into a single BED file
-
-#    my %interpro_input_sequences = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); #load all the input sequences
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
-    # create BED file, calling it BED2 to avoid confusion with the one used for finding overlaps
-    my $bed_file_name = "/home/peter/Desktop/interpro.bed"; 
-    open (BED2, ">", $bed_file_name) or die "ERROR: cannot created temporary bed file $temp_bed_file\n";
-    # BED file header
-    print BED2 "ORF_plus\tf7fcb9\n";
-    print BED2 "ORF_minus\tece7f2\n";
-    print BED2 "dbmatch_plus\t31a354\n";
-    print BED2 "dbmatch_minus\t2b8cbe\n";
-    print BED2 "##gff-version 3\n";
- #   my $temp_bedfile = File::Temp->new(UNLINK => 1); # temporary bed file with all the interproscan hits
-#    my %seen_descriptions; # holds the seen PANTHER or Pfam id as key and description as value, this is to speed up searches
-    my %orf_nucleotide_positions; # holds the name of the ORF (input sequence and ORF number) as key and the nucleotide 
-                                  # positions of the ORF as value, this will be used to get the Pfam, etc. locations on the 
-                                  # nucleotide sequence. [0] location 1, [1] location 2, [2] orientation
+    # # create BED file, calling it BED2 to avoid confusion with the one used for finding overlaps
+    # my $bed_file_name = "/home/peter/Desktop/interpro.bed"; 
+    # open (BED2, ">", $bed_file_name) or die "ERROR: cannot created temporary bed file $temp_bed_file\n";
+    # # BED file header
+    # print BED2 "ORF_plus\tf7fcb9\n";
+    # print BED2 "ORF_minus\tece7f2\n";
+    # print BED2 "dbmatch_plus\t31a354\n";
+    # print BED2 "dbmatch_minus\t2b8cbe\n";
+    # print BED2 "##gff-version 3\n";
+
+    # my %orf_nucleotide_positions; # holds the name of the ORF (input sequence and ORF number) as key and the nucleotide 
+    #                               # positions of the ORF as value, this will be used to get the Pfam, etc. locations on the 
+    #                               # nucleotide sequence. [0] location 1, [1] location 2, [2] orientation
     my %orf_data; # orf name from interpro as key and as reference an array with information on input sequence name --> through Pfam annotation
+    my %orf_data_plus; # this will contain only the elements from %orf_data that are on the + strand
+    my %orf_data_minus; # this will contain only the elements from %orf_data that are on the - strand
     while (my $line = <INTERPRO>) {
         if ($line =~ /^(\S+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us ORF position, orientation, and amino acid sequence
             $orf_data{$2}[0]=$1; # input sequence name
@@ -1745,23 +1744,43 @@ if ($STEP == 5) { # check if this step should be performed or not
     #    }    
     }
 
-#     # Data structure: $orf_data{$orf_id} = [$seqname, $start, $end]
-# my %orf_data = (
-#     'ORF001' => ['chr2', 500, 700],
-#     'ORF002' => ['chr1', 100, 300],
-#     'ORF003' => ['chr1', 300, 500],
-#     'ORF004' => ['chr2', 200, 400],
-# );
+    # partition into + and - hashes
+    # #!/usr/bin/perl
+    # use strict;
+    # use warnings;
 
-    # my @sorted_keys = sort {
-    #     $orf_data_plus{$a}[0] cmp $orf_data_plus{$b}[0]   # seqname
-    #     or
-    #     $orf_data_plus{$a}[1] <=> $orf_data_plus{$b}[1]   # start position
-    # } keys %orf_data_plus;
+    # # Example hash structure
+    # my %original_hash = (
+    #     'gene1' => ['a', 'b', 'c', '+', 'e'],
+    #     'gene2' => ['x', 'y', 'z', '-', 'w'],
+    #     'gene3' => ['p', 'q', 'r', '+', 's'],
+    #     'gene4' => ['m', 'n', 'o', '-', 'p'],
+    # );
 
-    # foreach my $key (@sorted_keys) {
-    #     print "$key: $orf_data_plus{$key}[0] - $orf_data_plus{$key}[1]\n";
-    # }
+    # Partition the %orf_data hash into %orf_data_plus and %orf_data_minus
+    while (my ($key, $value) = each %orf_data) {
+        # Make sure the array has at least 4 elements (index 3 exists)
+        if (defined $value->[3]) {
+            if ($value->[3] eq '+') {
+                $orf_data_plus{$key} = $value;
+            }
+            elsif ($value->[3] eq '-') {
+                $orf_data_minus{$key} = $value;
+            }
+        }
+    }
+
+    # Sort the hashes, first by input nucleotide sequence then by start position of the ORF
+    my @sorted_keys = sort {
+        $orf_data_plus{$a}[0] cmp $orf_data_plus{$b}[0]   # seqname
+        or
+        $orf_data_plus{$a}[1] <=> $orf_data_plus{$b}[1]   # start position
+    } keys %orf_data_plus;
+
+    foreach my $key (@sorted_keys) {
+        print "$key: $orf_data_plus{$key}[0] - $orf_data_plus{$key}[1]\n";
+    }
+    exit;
 
     close BED2;
     close INTERPRO;
