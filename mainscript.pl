@@ -1628,16 +1628,6 @@ if ($STEP == 5) { # check if this step should be performed or not
   
     ## Parse the interpro results file, identify relevant information and put all of it into a single BED file
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
-    # # create BED file, calling it BED2 to avoid confusion with the one used for finding overlaps
-    # my $bed_file_name = "/home/peter/Desktop/interpro.bed"; 
-    # open (BED2, ">", $bed_file_name) or die "ERROR: cannot created temporary bed file $temp_bed_file\n";
-    # # BED file header
-    # print BED2 "ORF_plus\tf7fcb9\n";
-    # print BED2 "ORF_minus\tece7f2\n";
-    # print BED2 "dbmatch_plus\t31a354\n";
-    # print BED2 "dbmatch_minus\t2b8cbe\n";
-    # print BED2 "##gff-version 3\n";
-
     # my %orf_nucleotide_positions; # holds the name of the ORF (input sequence and ORF number) as key and the nucleotide 
     #                               # positions of the ORF as value, this will be used to get the Pfam, etc. locations on the 
     #                               # nucleotide sequence. [0] location 1, [1] location 2, [2] orientation
@@ -1662,140 +1652,9 @@ if ($STEP == 5) { # check if this step should be performed or not
             $orf_data{$1}[9]=$interpro_fasta{$2}; # Pfam amino acid sequence
             $orf_data{$1}[10]=$4; # Pfam feature name;
             $orf_data{$1}[11]=$3; # Pfam description
-        }
-        
-        #     # populate %orf_nucleotide_positions
-        #     $orf_nucleotide_positions{$input_sequence_name . "_" . $orf_number}[0] = $location1;
-        #     $orf_nucleotide_positions{$input_sequence_name . "_" . $orf_number}[1] = $location2;
-        #     $orf_nucleotide_positions{$input_sequence_name . "_" . $orf_number}[2] = $orientation;
-        #     if ($orientation eq "+") {
-        #         print BED2 "$input_sequence_name\t.\tORF_plus\t$location1\t$location2\t.\t$orientation\t.\tID=$orf_number;Name=ORF\n";
-        #     }
-        #     elsif ($orientation eq "-") {
-        #         print BED2 "$input_sequence_name\t.\tORF_minus\t$location1\t$location2\t.\t$orientation\t.\tID=$orf_number;Name=ORF\n";
-        #     }
-        #     else {
-        #         die "ERROR: Unknown orientation $orientation for sequence $input_sequence_name\n";
-        #     }
-
-    #     if ($line =~ /^(.+_orf\d+)\s\w+\sprotein_match\s(\d+)\s(\d+)\s/) { # This line will give descriptions of proteins matching this sequence
-    #         my $sequence_orf_name = $1;
-    #         my $protein_l1 = $2; # protein location 1
-    #         my $protein_l2 = $3; # protein location 2
-    #         my $nucleotide_l1; # nucleotide location 1, will be caluclated below
-    #         my $nucleotide_l2; # nucleotide location 2, will be caluclated below
-    #         my $feature_type; # could be pFam, PANTHER, etc.
-    #         my $feature_description;
-    #         my $feature_reference; 
-    #         my $feature_id;
-
-    #         # Calculate the nucleotide position of the protein match. Only doing this for matches that have a "getorf" line.
-    #         # Those that don't are proteins from other sequences that happen to be same as the ones here, we don't need to worry about those     
-    #         if (exists $orf_nucleotide_positions{$sequence_orf_name}) { 
-    #             if($orf_nucleotide_positions{$sequence_orf_name}[2] eq "+") {
-    #                 $nucleotide_l1 = ($orf_nucleotide_positions{$sequence_orf_name}[0] - 3) + (3 * $protein_l1);
-    #                 $nucleotide_l2 = ($orf_nucleotide_positions{$sequence_orf_name}[0] - 3) + (3 * $protein_l2);
-    #             }
-    #             elsif($orf_nucleotide_positions{$sequence_orf_name}[2] eq "-") {
-    #                 $nucleotide_l2 = ($orf_nucleotide_positions{$sequence_orf_name}[1] + 3) - (3 * $protein_l1);
-    #                 $nucleotide_l1 = ($orf_nucleotide_positions{$sequence_orf_name}[1] + 3) - (3 * $protein_l2);
-
-    #             }
-    #             else {
-    #                 die "ERROR: orientation $orf_nucleotide_positions{$sequence_orf_name}[2] is unknown\n$line";
-    #             }
-            
-
-    #             # for this line, determine the type of protein match it is
-    #             if ($line =~ /Name=(PTHR\d+)/) { # it's a PANTHER ID
-    #                 $feature_id = $1;
-    #                 $feature_reference = "https://www.ebi.ac.uk/interpro/entry/panther/$feature_id/";
-    #                 $feature_type = "PANTHER";
-    #             }
-    #             if ($line =~ /^Name=(PF\d+)/) { # it's a Pfam ID {
-    #                 $feature_id = $1;
-    #                 $feature_reference = "https://www.ebi.ac.uk/interpro/entry/pfam/$feature_id/";
-    #                 $feature_type = "Pfam";
-    #             }
-
-    #             # if a reference has been found, get a description from the database
-    #             if ($feature_reference) {
-    #                 # get the description of the feature if there is one
-    #                 if (exists $seen_descriptions{$feature_reference}) {
-    #                     $feature_description = $seen_descriptions{$feature_reference};
-    #                 }
-    #                 else {
-    #                     $feature_description = fetch_description($feature_reference);
-    #                     $seen_descriptions{$feature_reference} = $feature_description;
-    #                 } 
-    #                 # print the descriptions
-    #                 if ($orf_nucleotide_positions{$sequence_orf_name}[2] eq "+") {
-    #                     $sequence_orf_name =~ s/_orf\d+$//; # strip the orf part of the name
-    #                     print BED2 "$sequence_orf_name\t.\tdbmatch_plus\t$nucleotide_l1\t$nucleotide_l2\t.\t+\t.\tID=$feature_id;Name=$feature_type;signature_desc=$feature_description\n";
-    #                 }
-    #                 elsif ($orf_nucleotide_positions{$sequence_orf_name}[2] eq "-") {
-    #                     $sequence_orf_name =~ s/_orf\d+$//; # strip the orf part of the name
-    #                     print BED2 "$sequence_orf_name\t.\tdbmatch_minus\t$nucleotide_l1\t$nucleotide_l2\t.\t-\t.\tID=$feature_id;Name=$feature_type;signature_desc=$feature_description\n";
-    #                 }
-    #                 else {
-    #                     die "ERROR: Unknown orientation for $line\n";
-    #                 }
-    #             } 
-    #         }
-    #    }    
+        }   
     }
-
-    # partition into + and - hashes
-    # #!/usr/bin/perl
-    # use strict;
-    # use warnings;
-
-<<<<<<< HEAD
-    my @sorted_keys = sort {
-        $orf_data{$a}[1] cmp $orf_data{$b}[1]   # cluster number
-        # or
-        # $orf_data_plus{$a}[1] <=> $orf_data_plus{$b}[1]   # start position
-    } keys %orf_data;
-
-    foreach my $key (@sorted_keys) {
-        print ">$key" , "_$orf_data{$key}[1]\n$orf_data{$key}[5]\n";
-    }
-=======
-    # # Example hash structure
-    # my %original_hash = (
-    #     'gene1' => ['a', 'b', 'c', '+', 'e'],
-    #     'gene2' => ['x', 'y', 'z', '-', 'w'],
-    #     'gene3' => ['p', 'q', 'r', '+', 's'],
-    #     'gene4' => ['m', 'n', 'o', '-', 'p'],
-    # );
-
-    # Partition the %orf_data hash into %orf_data_plus and %orf_data_minus
-    while (my ($key, $value) = each %orf_data) {
-        # Make sure the array has at least 4 elements (index 3 exists)
-        if (defined $value->[3]) {
-            if ($value->[3] eq '+') {
-                $orf_data_plus{$key} = $value;
-            }
-            elsif ($value->[3] eq '-') {
-                $orf_data_minus{$key} = $value;
-            }
-        }
-    }
-
-    # Sort the hashes, first by input nucleotide sequence then by start position of the ORF
-    my @sorted_keys = sort {
-        $orf_data_plus{$a}[0] cmp $orf_data_plus{$b}[0]   # seqname
-        or
-        $orf_data_plus{$a}[1] <=> $orf_data_plus{$b}[1]   # start position
-    } keys %orf_data_plus;
-
-    foreach my $key (@sorted_keys) {
-        print "$key: $orf_data_plus{$key}[0] - $orf_data_plus{$key}[1]\n";
-    }
-    exit;
->>>>>>> 33b0391a9c7568fa193e84f1cfa3ad87893a4ea0
-
-    close BED2;
+#    close BED2;
     close INTERPRO;
 }
 
