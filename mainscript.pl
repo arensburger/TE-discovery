@@ -1646,22 +1646,23 @@ if ($STEP == 5) { # check if this step should be performed or not
                                   # nucleotide sequence. [0] location 1, [1] location 2, [2] orientation
     my %orf_data; # orf name from interpro as key and as reference an array with information on input sequence name --> through Pfam annotation
     while (my $line = <INTERPRO>) {
-        if ($line =~ /^(\S+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us ORF position, orientation, and amino acid sequence
-            $orf_data{$2}[0]=$1; # input sequence name
-            $orf_data{$2}[1]=$3; # nucleotide location 1
-            $orf_data{$2}[2]=$4; # nucleotide location 2
-            $orf_data{$2}[3]=$5; # orientation
-            $orf_data{$2}[4]=$interpro_fasta{$6}; # amino acid sequence
+        if ($line =~ /^(\S+_(\d+?))_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us ORF position, orientation, and amino acid sequence
+            $orf_data{$3}[0]=$1; # input sequence name
+            $orf_data{$3}[1]=$2; # cluster number
+            $orf_data{$3}[2]=$4; # nucleotide location 1
+            $orf_data{$3}[3]=$5; # nucleotide location 2
+            $orf_data{$3}[4]=$6; # orientation
+            $orf_data{$3}[5]=$interpro_fasta{$7}; # amino acid sequence
         }
         if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match.+;ID=(\S+?);Name=(\S+?);/) { # Match to PANTHER annotation
-            $orf_data{$1}[5]=$interpro_fasta{$2}; # PANTHER amino acid sequence
-            $orf_data{$1}[6]=$3; # PANTHER feature name;
-            $orf_data{$1}[7]=fetch_description($3); # PANTHER description
+            $orf_data{$1}[6]=$interpro_fasta{$2}; # PANTHER amino acid sequence
+            $orf_data{$1}[7]=$3; # PANTHER feature name;
+            $orf_data{$1}[8]=fetch_description($3); # PANTHER description
         }
-        if ($line =~ /^\S+_(orf\d+)\sPfam\sprotein_match.+;ID=(\S+?);signature_desc=(.+?);Name=(\S+?);/) { # Match to PANTHER annotation
-            $orf_data{$1}[8]=$interpro_fasta{$2}; # Pfam amino acid sequence
-            $orf_data{$1}[9]=$4; # Pfam feature name;
-            $orf_data{$1}[10]=$3; # Pfam description
+        if ($line =~ /^\S+_(orf\d+)\sPfam\sprotein_match.+;ID=(\S+?);signature_desc=(.+?);Name=(\S+?);/) { # Match to Pfam annotation
+            $orf_data{$1}[9]=$interpro_fasta{$2}; # Pfam amino acid sequence
+            $orf_data{$1}[10]=$4; # Pfam feature name;
+            $orf_data{$1}[11]=$3; # Pfam description
         }
         
         #     # populate %orf_nucleotide_positions
@@ -1753,15 +1754,15 @@ if ($STEP == 5) { # check if this step should be performed or not
 #     'ORF004' => ['chr2', 200, 400],
 # );
 
-    # my @sorted_keys = sort {
-    #     $orf_data_plus{$a}[0] cmp $orf_data_plus{$b}[0]   # seqname
-    #     or
-    #     $orf_data_plus{$a}[1] <=> $orf_data_plus{$b}[1]   # start position
-    # } keys %orf_data_plus;
+    my @sorted_keys = sort {
+        $orf_data{$a}[1] cmp $orf_data{$b}[1]   # cluster number
+        # or
+        # $orf_data_plus{$a}[1] <=> $orf_data_plus{$b}[1]   # start position
+    } keys %orf_data;
 
-    # foreach my $key (@sorted_keys) {
-    #     print "$key: $orf_data_plus{$key}[0] - $orf_data_plus{$key}[1]\n";
-    # }
+    foreach my $key (@sorted_keys) {
+        print ">$key" , "_$orf_data{$key}[1]\n$orf_data{$key}[5]\n";
+    }
 
     close BED2;
     close INTERPRO;
@@ -1788,7 +1789,7 @@ sub fastatohash {
         $current_header = $1;
     }
     else {
-        die "ERROR: file $filename does not appear to be a FASTA formatted file (or there's a space in the header after the > sign), this in the fastatohash subroutine\n";
+        die "ERROR: file $filename does not appear to be a properly formatted FASTA file, this in the fastatohash subroutine\n";
     }
 
     while ($line = <INPUT>) {
