@@ -1547,8 +1547,12 @@ if ($STEP == 5) { # check if this step should be performed or not
         die "ERROR: this step expected the file $COMBINED_CLUSTERS_OUTPUT_FILENAME that contains the input for the interproscan run\n";
     }
 
+    print ANALYSIS "Running STEP 5\n";
+    print ANALYSIS "\tInterpo file name: $INTERPRO_FILENAME\n";
+    print ANALYSIS "\tCombined clusters output file name: $COMBINED_CLUSTERS_OUTPUT_FILENAME\n";
+    
     ## Identify any sequences that overlap in the input sequences. Write all the location data to a bed file,
-    ## use bedtools to identify overlaps pairs, then a graph to group the overlaping files. 
+    ## use bedtools to identify overlaps pairs, then a graph to group the overlapping files. 
     my %cluster_fasta = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); # get the raw data
     my $temp_bed_file = File::Temp->new(UNLINK => 1); # temporary bed file
     my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command   
@@ -1575,24 +1579,27 @@ if ($STEP == 5) { # check if this step should be performed or not
         }
     }
     close BED;
-    # identify overlaping pairs of sequences
+    # identify overlapping pairs of sequences
     `bedtools sort -i $temp_bed_file > $temp_bed_sorted_file`;
     if ($?) { die "ERROR running bedtools sort: error code $?\n"}
-    `bedtools intersect -a $temp_bed_sorted_file -b $temp_bed_sorted_file -wo > $temp_overlap_file`; # has all the overlaping including the sequence to itself
+    `bedtools intersect -a $temp_bed_sorted_file -b $temp_bed_sorted_file -wo > $temp_overlap_file`; # has all the overlapping including the sequence to itself
     if ($?) { die "ERROR running bedtools intersect: error code $?\n"}
-    # process the pairs of overalps put them into groups, non-overlaping sequences will be in a group by themselves
-    my $graph = Graph->new(undirected => 1); # this is a graph to join all the pairs of overlaping sequences
+
+    # put the names of the overlapping pairs of sequences into a graph, so that groups of overalping sequences
+    # can be identified.
+    my $graph = Graph->new(undirected => 1); # this is a graph to join all the pairs of overlapping sequences
     open (OVERLAP, $temp_overlap_file) or die "ERROR: Cannot open temporary overlap file $temp_overlap_file\n";
-    my @overlap_pairs; # this is an array of array with two elements, each a pair member
     while (my $line = <OVERLAP>) {
         my @data = split " ", $line;
-        if (($data[4] eq $data[10])) {  # this will be true if the overlaping sequences are in the same cluster
+        # adding sequences to the graph but only if they are 1) from the same cluster, 2) they are not the the same sequence
+        if (($data[4] eq $data[10]) and ($data[5] ne $data[11])) {  
             $graph->add_edge($data[5], $data[11]);                                               
         }
     }
-    my @groups = $graph->connected_components(); # @groups is an array of arrays with the overlaping sequences in one group 
+    my @groups = $graph->connected_components(); # @groups is an array of arrays with the overlapping sequences in one group 
+    
     # sort the groups by cluster
-    my %overlaping_sequences; # holds the cluster number as key and as value an array with groups of sequences in the cluster that overlap
+    my %overlapping_sequences; # holds the cluster number as key and as value an array with groups of sequences in the cluster that overlap
     foreach my $g (@groups) {
         # identify the current cluster of the current group by parsing the name of the first sequence
         my $cluster_number;
@@ -1604,9 +1611,32 @@ if ($STEP == 5) { # check if this step should be performed or not
         }
 
         if (scalar @$g > 1) {
-            push @{ $overlaping_sequences{$cluster_number}}, join(",", @$g);
+            push @{ $overlapping_sequences{$cluster_number}}, join(",", @$g);
         }
     }
+
+    # create report on overlapping sequences 
+    for my $cluster_number (keys %overlapping_sequences) {
+        my $overlapping_report_file_name = $current_directry . "/" . $CLUSTER_FOLDER . "/" . "cluster$cluster_number" . "/" . "cluster$cluster_number-overlapping_sequences.fa";
+        open (OUTPUT, ">", $overlapping_report_file_name) or die "ERROR: Cannot create file for overlapping sequences report\n";
+        for my $group (0 .. $#{ $overlapping_sequences{$cluster_number}}) {
+            my @sequence_names = split ",", $overlapping_sequences{$cluster_number}[$group];
+            print OUTPUT ">OVERLAPPING_SEQUENCES_$group\n";
+            print OUTPUT "NNNNNNNNNNNNNNNNNNNNNNNN\n";
+            foreach my $name (@sequence_names) {
+                print OUTPUT ">$name\n";
+                print OUTPUT "$cluster_fasta{$name}\n";
+            }
+        }
+        close OUTPUT;
+        # update the cluster README file
+        open (CLREADME, ">>", "$current_directry/$CLUSTER_FOLDER/cluster$cluster_number/README.txt") or die "ERROR: Cannot open README file for cluster $cluster_number, $!\n";
+        my $datestring = localtime();
+        print CLREADME "$datestring, Identifying overlapping sequences in this cluster\n";
+        print CLREADME "\tFile cluster$cluster_number-overlapping_sequences.fa contains groups of overlapping sequences in this cluster\n";
+        close CLREADME;
+    }
+    exit;
 
     ## Read the Interpro results file and record all the fasta sequences in it, this will be used later 
     ## to generate alignments and bed files with protein sequences
