@@ -1553,14 +1553,15 @@ if ($STEP == 5) { # check if this step should be performed or not
     
     ## Identify any sequences that overlap in the input sequences. Write all the location data to a bed file,
     ## use bedtools to identify overlaps pairs, then a graph to group the overlapping files. 
-    my %cluster_fasta = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); # get the raw data
+    my %all_nucleotides_fasta = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); # get the raw data
+    my %cluster_fasta; # same data as %all_nucleotides_fasta, but organized with cluster number as key and array of sequences with fasta titles
     my $temp_bed_file = File::Temp->new(UNLINK => 1); # temporary bed file
     my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command
     my %overlapping_sequences_by_name; # record of sequences that overlap with others, to be reported to the user   
     #create BED file
     open (BED, ">", $temp_bed_file) or die "ERROR: cannot created temporary bed file $temp_bed_file\n";
     my $temp_bed_sorted_file = File::Temp->new(UNLINK => 1); # temporary bed file sorted
-    foreach my $title (keys %cluster_fasta) {
+    foreach my $title (keys %all_nucleotides_fasta) {
         if ($title =~ /^(\S+):(\d+)-(\d+)_(\d+)_\d+_\d+/) {
             my $chromosome = $1;
             my $b1 = $2;
@@ -1574,6 +1575,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                 $b1 = $temp;
             }
             print BED "$chromosome\t$b1\t$b2\t$orientation\t$cluster\t$title\n"; # all the information about overlaps
+            push @{ $cluster_fasta{$cluster} }, ">$title\n$all_nucleotides_fasta{$title}"; # populate the hash organizing the data by cluster
         }
         else {
             die "ERROR: Cannot parse title $title\n";
@@ -1626,7 +1628,7 @@ if ($STEP == 5) { # check if this step should be performed or not
             print OUTPUT "NNNNNNNNNNNNNNNNNNNNNNNN\n";
             foreach my $name (@sequence_names) {
                 print OUTPUT ">$name\n";
-                print OUTPUT "$cluster_fasta{$name}\n";
+                print OUTPUT "$all_nucleotides_fasta{$name}\n";
                 $overlapping_sequences_by_name{$name} = 1; # update the name of sequences that overlap
             }
         }
@@ -1642,7 +1644,9 @@ if ($STEP == 5) { # check if this step should be performed or not
     ## Parse the protein information from the Interpro file
     # Read the Interpro results file and record all the fasta sequences in it, this will be used later 
     # to generate alignments and bed files with protein sequences
-    my $temp_fasta_file = File::Temp->new(UNLINK => 1); # temporary fasta fi file
+    my $temp_fasta_file = File::Temp->new(UNLINK => 1); # temporary fasta file
+    my %cluster_orientation;    # this will be used to determine the orientation of the nucleotide sequences based on ORFs 
+                                # cluster number is key and value is an array with [0] number of ORFs on the + strand, [1] ORFs on the - strand
     open (OUTPUT, ">", $temp_fasta_file) or die "ERROR: cannot create temporary file $temp_fasta_file $!\n";
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
     my $in_fasta_section = 0; # boolean, 0 until hit the fasta section of the file
@@ -1661,13 +1665,22 @@ if ($STEP == 5) { # check if this step should be performed or not
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
     my %orf_data; # orf name from interpro as key and as reference an array with information on input sequence name --> through Pfam annotation
     while (my $line = <INTERPRO>) {
-        if ($line =~ /^(\S+_(\d+?))_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us ORF position, orientation, and amino acid sequence
+        if ($line =~ /^(\S+_(\d+)_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us ORF position, orientation, and amino acid sequence
             $orf_data{$3}[0]=$1; # input sequence name
             $orf_data{$3}[1]=$2; # cluster number
             $orf_data{$3}[2]=$4; # nucleotide location 1
             $orf_data{$3}[3]=$5; # nucleotide location 2
             $orf_data{$3}[4]=$6; # orientation
             $orf_data{$3}[5]=$interpro_fasta{$7}; # amino acid sequence
+            if ($6 eq "+") {
+                $cluster_orientation{$2}[0] += 1;
+            }
+            elsif ($6 eq "-") {
+                $cluster_orientation{$2}[1] += 1;
+            }
+            else {
+                die "ERROR: In the interpro line below could not determine orientation\n$line";
+            }
         }
         if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match.+;ID=(\S+?);Name=(\S+?);/) { # Match to PANTHER annotation
             $orf_data{$1}[6]=$interpro_fasta{$2}; # PANTHER amino acid sequence
@@ -1682,7 +1695,21 @@ if ($STEP == 5) { # check if this step should be performed or not
     }
     close INTERPRO;
 
-    ## Determine the orientation of each cluster based on the orientation of the ORFs
+    ## Align the nucleotide sequences for each cluster and make a report
+    # create a temporary input file for the alignment, and align the sequences
+    foreach my $cluster_number (keys %cluster_fasta) {
+        my $cluster_alignment_input_file = File::Temp->new(UNLINK => 1); # temporary file for alignment input
+        my $cluster_alignment_output_file = File::Temp->new(UNLINK => 1); # temporary file for alignment output
+        open (OUTPUT, ">", $cluster_alignment_input_file) or die "ERROR: cannot create temporary file $cluster_alignment_input_file $!\n";
+        foreach my $sequence (@{ $cluster_fasta{$cluster_number} }) {
+            print OUTPUT $sequence, "\n";
+        }
+        close OUTPUT;
+        `mafft --quiet --thread -1 $cluster_alignment_input_file > $cluster_alignment_output_file`;
+        if ($?) { die "Error executing mafft, error code $?\n"}
+
+### continue here ####
+    }
 }
 
 close ANALYSIS;
