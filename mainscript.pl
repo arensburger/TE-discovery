@@ -1601,8 +1601,10 @@ if ($STEP == 5) { # check if this step should be performed or not
     }
     my @groups = $graph->connected_components(); # @groups is an array of arrays with the overlapping sequences in one group 
     
-    # sort the groups by cluster
-    my %overlapping_sequences_by_cluster; # holds the cluster number as key and as value an array with groups of sequences in the cluster that overlap
+
+    # combine cluster, group, and sequence names into a hash of hashes
+    my %cluster_group; # hash of hashes with cluster number --> unique group number --> sequence name, the group number is unique to a set of overalping sequences
+    my $unique_group_number; # index of sets of overlaping sequences
     foreach my $g (@groups) {
         # identify the current cluster of the current group by parsing the name of the first sequence
         my $cluster_number;
@@ -1613,91 +1615,111 @@ if ($STEP == 5) { # check if this step should be performed or not
             die "ERROR: Could not parse sequence name after grouping: @$g[0]\n";
         }
 
-        if (scalar @$g > 1) {
-            push @{ $overlapping_sequences_by_cluster{$cluster_number}}, join(",", @$g);
+        # add the sequences to the %cluster_group hash
+        $unique_group_number++; # set a new group number
+        foreach my $sequence_name (@$g) {
+            push @{ $cluster_group{$cluster_number}{$unique_group_number} }, $sequence_name;
         }
     }
 
-    # create report on overlapping sequences 
-    for my $cluster_number (keys %overlapping_sequences_by_cluster) {
-        my $overlapping_report_file_name = $current_directry . "/" . $CLUSTER_FOLDER . "/" . "cluster$cluster_number" . "/" . "cluster$cluster_number-overlapping_sequences.fa";
-        open (OUTPUT, ">", $overlapping_report_file_name) or die "ERROR: Cannot create file for overlapping sequences report\n";
-        for my $group (0 .. $#{ $overlapping_sequences_by_cluster{$cluster_number}}) {
-            my @sequence_names = split ",", $overlapping_sequences_by_cluster{$cluster_number}[$group];
-            print OUTPUT ">OVERLAPPING_SEQUENCES_$group\n";
-            print OUTPUT "NNNNNNNNNNNNNNNNNNNNNNNN\n";
-            foreach my $name (@sequence_names) {
-                print OUTPUT ">$name\n";
-                print OUTPUT "$all_nucleotides_fasta{$name}\n";
-                $overlapping_sequences_by_name{$name} = 1; # update the name of sequences that overlap
-            }
-        }
-        close OUTPUT;
-        # update the cluster README file
-        open (CLREADME, ">>", "$current_directry/$CLUSTER_FOLDER/cluster$cluster_number/README.txt") or die "ERROR: Cannot open README file for cluster $cluster_number, $!\n";
-        my $datestring = localtime();
-        print CLREADME "$datestring, Identifying overlapping sequences in this cluster\n";
-        print CLREADME "\tFile cluster$cluster_number-overlapping_sequences.fa contains groups of overlapping sequences in this cluster\n";
-        close CLREADME;
-    }
+    # # sort the groups by cluster
+    # my %overlapping_sequences_by_cluster; # holds the cluster number as key and as value an array with groups of sequences in the cluster that overlap
+    # foreach my $g (@groups) {
+    #     # identify the current cluster of the current group by parsing the name of the first sequence
+    #     my $cluster_number;
+    #     if(@$g[0] =~ /_(\d+)_\d+_\d+/) {
+    #         $cluster_number = $1;
+    #     }
+    #     else {
+    #         die "ERROR: Could not parse sequence name after grouping: @$g[0]\n";
+    #     }
 
-    ## Parse the protein information from the Interpro file
-    # Read the Interpro results file and record all the fasta sequences in it, this will be used later 
-    # to generate alignments and bed files with protein sequences
-    my $temp_fasta_file = File::Temp->new(UNLINK => 1); # temporary fasta file
-    my %cluster_orientation;    # this will be used to determine the orientation of the nucleotide sequences based on ORFs 
-                                # cluster number is key and value is an array with [0] number of ORFs on the + strand, [1] ORFs on the - strand
-    open (OUTPUT, ">", $temp_fasta_file) or die "ERROR: cannot create temporary file $temp_fasta_file $!\n";
-    open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
-    my $in_fasta_section = 0; # boolean, 0 until hit the fasta section of the file
-    while (my $line = <INTERPRO>) {
-        if ($in_fasta_section) {
-            print OUTPUT $line;
-        }
-        if ($line =~ /\#\#FASTA/) {
-            $in_fasta_section = 1;
-        }
-    }
-    close INTERPRO;
-    close OUTPUT;
-    my %interpro_fasta = fastatohash($temp_fasta_file);
-    # Parse the interpro results file, identify relevant information and put all of it into a single BED file
-    open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
-    my %orf_data; # orf name from interpro as key and as reference an array with information on input sequence name --> through Pfam annotation
-    while (my $line = <INTERPRO>) {
-        if ($line =~ /^(\S+_(\d+)_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us ORF position, orientation, and amino acid sequence
-            $orf_data{$3}[0]=$1; # input sequence name
-            $orf_data{$3}[1]=$2; # cluster number
-            $orf_data{$3}[2]=$4; # nucleotide location 1
-            $orf_data{$3}[3]=$5; # nucleotide location 2
-            $orf_data{$3}[4]=$6; # orientation
-            $orf_data{$3}[5]=$interpro_fasta{$7}; # amino acid sequence
-            if ($6 eq "+") {
-                $cluster_orientation{$2}[0] += 1;
-            }
-            elsif ($6 eq "-") {
-                $cluster_orientation{$2}[1] += 1;
-            }
-            else {
-                die "ERROR: In the interpro line below could not determine orientation\n$line";
-            }
-        }
-        if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match.+;ID=(\S+?);Name=(\S+?);/) { # Match to PANTHER annotation
-            $orf_data{$1}[6]=$interpro_fasta{$2}; # PANTHER amino acid sequence
-            $orf_data{$1}[7]=$3; # PANTHER feature name;
-            $orf_data{$1}[8]=fetch_description($3); # PANTHER description
-        }
-        if ($line =~ /^\S+_(orf\d+)\sPfam\sprotein_match.+;ID=(\S+?);signature_desc=(.+?);Name=(\S+?);/) { # Match to Pfam annotation
-            $orf_data{$1}[9]=$interpro_fasta{$2}; # Pfam amino acid sequence
-            $orf_data{$1}[10]=$4; # Pfam feature name;
-            $orf_data{$1}[11]=$3; # Pfam description
-        }   
-    }
-    close INTERPRO;
+    #     if (scalar @$g > 1) {
+    #         push @{ $overlapping_sequences_by_cluster{$cluster_number}}, join(",", @$g);
+    #     }
+    # }
+
+    # # create report on overlapping sequences 
+    # for my $cluster_number (keys %overlapping_sequences_by_cluster) {
+    #     my $overlapping_report_file_name = $current_directry . "/" . $CLUSTER_FOLDER . "/" . "cluster$cluster_number" . "/" . "cluster$cluster_number-overlapping_sequences.fa";
+    #     open (OUTPUT, ">", $overlapping_report_file_name) or die "ERROR: Cannot create file for overlapping sequences report\n";
+    #     for my $group (0 .. $#{ $overlapping_sequences_by_cluster{$cluster_number}}) {
+    #         my @sequence_names = split ",", $overlapping_sequences_by_cluster{$cluster_number}[$group];
+    #         print OUTPUT ">OVERLAPPING_SEQUENCES_$group\n";
+    #         print OUTPUT "NNNNNNNNNNNNNNNNNNNNNNNN\n";
+    #         foreach my $name (@sequence_names) {
+    #             print OUTPUT ">$name\n";
+    #             print OUTPUT "$all_nucleotides_fasta{$name}\n";
+    #             $overlapping_sequences_by_name{$name} = 1; # update the name of sequences that overlap
+    #         }
+    #     }
+    #     close OUTPUT;
+    #     # update the cluster README file
+    #     open (CLREADME, ">>", "$current_directry/$CLUSTER_FOLDER/cluster$cluster_number/README.txt") or die "ERROR: Cannot open README file for cluster $cluster_number, $!\n";
+    #     my $datestring = localtime();
+    #     print CLREADME "$datestring, Identifying overlapping sequences in this cluster\n";
+    #     print CLREADME "\tFile cluster$cluster_number-overlapping_sequences.fa contains groups of overlapping sequences in this cluster\n";
+    #     close CLREADME;
+    # }
+
+    # ## Parse the protein information from the Interpro file
+    # # Read the Interpro results file and record all the fasta sequences in it, this will be used later 
+    # # to generate alignments and bed files with protein sequences
+    # my $temp_fasta_file = File::Temp->new(UNLINK => 1); # temporary fasta file
+    # my %cluster_orientation;    # this will be used to determine the orientation of the nucleotide sequences based on ORFs 
+    #                             # cluster number is key and value is an array with [0] number of ORFs on the + strand, [1] ORFs on the - strand
+    # open (OUTPUT, ">", $temp_fasta_file) or die "ERROR: cannot create temporary file $temp_fasta_file $!\n";
+    # open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
+    # my $in_fasta_section = 0; # boolean, 0 until hit the fasta section of the file
+    # while (my $line = <INTERPRO>) {
+    #     if ($in_fasta_section) {
+    #         print OUTPUT $line;
+    #     }
+    #     if ($line =~ /\#\#FASTA/) {
+    #         $in_fasta_section = 1;
+    #     }
+    # }
+    # close INTERPRO;
+    # close OUTPUT;
+    # my %interpro_fasta = fastatohash($temp_fasta_file);
+    # # Parse the interpro results file, identify relevant information and put all of it into a single BED file
+    # open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
+    # my %orf_data; # orf name from interpro as key and as reference an array with information on input sequence name --> through Pfam annotation
+    # while (my $line = <INTERPRO>) {
+    #     if ($line =~ /^(\S+_(\d+)_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us ORF position, orientation, and amino acid sequence
+    #         $orf_data{$3}[0]=$1; # input sequence name
+    #         $orf_data{$3}[1]=$2; # cluster number
+    #         $orf_data{$3}[2]=$4; # nucleotide location 1
+    #         $orf_data{$3}[3]=$5; # nucleotide location 2
+    #         $orf_data{$3}[4]=$6; # orientation
+    #         $orf_data{$3}[5]=$interpro_fasta{$7}; # amino acid sequence
+    #         if ($6 eq "+") {
+    #             $cluster_orientation{$2}[0] += 1;
+    #         }
+    #         elsif ($6 eq "-") {
+    #             $cluster_orientation{$2}[1] += 1;
+    #         }
+    #         else {
+    #             die "ERROR: In the interpro line below could not determine orientation\n$line";
+    #         }
+    #     }
+    #     if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match.+;ID=(\S+?);Name=(\S+?);/) { # Match to PANTHER annotation
+    #         $orf_data{$1}[6]=$interpro_fasta{$2}; # PANTHER amino acid sequence
+    #         $orf_data{$1}[7]=$3; # PANTHER feature name;
+    #         $orf_data{$1}[8]=fetch_description($3); # PANTHER description
+    #     }
+    #     if ($line =~ /^\S+_(orf\d+)\sPfam\sprotein_match.+;ID=(\S+?);signature_desc=(.+?);Name=(\S+?);/) { # Match to Pfam annotation
+    #         $orf_data{$1}[9]=$interpro_fasta{$2}; # Pfam amino acid sequence
+    #         $orf_data{$1}[10]=$4; # Pfam feature name;
+    #         $orf_data{$1}[11]=$3; # Pfam description
+    #     }   
+    # }
+    # close INTERPRO;
 
     ## Align the nucleotide sequences for each cluster and make a report
-    # create a temporary input file for the alignment, and align the sequences
     foreach my $cluster_number (keys %cluster_fasta) {
+
+        # align the cluster sequences into a temporaray file
         my $cluster_alignment_input_file = File::Temp->new(UNLINK => 1); # temporary file for alignment input
         my $cluster_alignment_output_file = File::Temp->new(UNLINK => 1); # temporary file for alignment output
         open (OUTPUT, ">", $cluster_alignment_input_file) or die "ERROR: cannot create temporary file $cluster_alignment_input_file $!\n";
@@ -1707,6 +1729,19 @@ if ($STEP == 5) { # check if this step should be performed or not
         close OUTPUT;
         `mafft --quiet --thread -1 $cluster_alignment_input_file > $cluster_alignment_output_file`;
         if ($?) { die "Error executing mafft, error code $?\n"}
+        if (exists $cluster_group{$cluster_number}) {
+            foreach my $group_number (keys %{ $cluster_group{$cluster_number} }) {
+                foreach my $seq (@{$cluster_group{$cluster_number}{$group_number}}) {
+                    print "$cluster_number\t$group_number\t$seq\n";
+                }
+            }
+        }
+
+        # go through the alignment marking overlaping sequences and orienting it based on protein
+        # my %aligned_sequences = fastatohash($cluster_alignment_output_file);
+        # foreach my $key (keys %aligned_sequences) {
+        #     print ">$key\n$aligned_sequences{$key}\n";
+        # }        
 
 ### continue here ####
     }
