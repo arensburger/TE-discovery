@@ -1729,19 +1729,20 @@ if ($STEP == 5) { # check if this step should be performed or not
         close OUTPUT;
         `mafft --quiet --thread -1 $cluster_alignment_input_file > $cluster_alignment_output_file`;
         if ($?) { die "Error executing mafft, error code $?\n"}
+
+        # identify the names of all the overlaping sequences in this cluster
+        my %duplicated_sequences_by_group; # cluster specific, unique group number as key and string with sequence names as value
+        my %duplicated_sequences_list; # cluster specific, all the duplicated sequences, used for printing
         if (exists $cluster_group{$cluster_number}) {
             foreach my $group_number (keys %{ $cluster_group{$cluster_number} }) {
-                foreach my $seq (@{$cluster_group{$cluster_number}{$group_number}}) {
-                    print "$cluster_number\t$group_number\t$seq\n";
+                foreach my $sequence_name (@{$cluster_group{$cluster_number}{$group_number}}) {
+                    $duplicated_sequences_by_group{$group_number} .= " " . $sequence_name;
+                    $duplicated_sequences_list{$sequence_name} = 1;
                 }
             }
         }
 
-        # go through the alignment marking overlaping sequences and orienting it based on protein
-        # my %aligned_sequences = fastatohash($cluster_alignment_output_file);
-        # foreach my $key (keys %aligned_sequences) {
-        #     print ">$key\n$aligned_sequences{$key}\n";
-        # }        
+        # decide the orientation of the alignment based on protein sequences
 
 ### continue here ####
     }
