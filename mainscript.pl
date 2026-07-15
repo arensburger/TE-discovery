@@ -1662,59 +1662,59 @@ if ($STEP == 5) { # check if this step should be performed or not
     #     close CLREADME;
     # }
 
-    # ## Parse the protein information from the Interpro file
-    # # Read the Interpro results file and record all the fasta sequences in it, this will be used later 
-    # # to generate alignments and bed files with protein sequences
-    # my $temp_fasta_file = File::Temp->new(UNLINK => 1); # temporary fasta file
-    # my %cluster_orientation;    # this will be used to determine the orientation of the nucleotide sequences based on ORFs 
-    #                             # cluster number is key and value is an array with [0] number of ORFs on the + strand, [1] ORFs on the - strand
-    # open (OUTPUT, ">", $temp_fasta_file) or die "ERROR: cannot create temporary file $temp_fasta_file $!\n";
-    # open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
-    # my $in_fasta_section = 0; # boolean, 0 until hit the fasta section of the file
-    # while (my $line = <INTERPRO>) {
-    #     if ($in_fasta_section) {
-    #         print OUTPUT $line;
-    #     }
-    #     if ($line =~ /\#\#FASTA/) {
-    #         $in_fasta_section = 1;
-    #     }
-    # }
-    # close INTERPRO;
-    # close OUTPUT;
-    # my %interpro_fasta = fastatohash($temp_fasta_file);
-    # # Parse the interpro results file, identify relevant information and put all of it into a single BED file
-    # open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
-    # my %orf_data; # orf name from interpro as key and as reference an array with information on input sequence name --> through Pfam annotation
-    # while (my $line = <INTERPRO>) {
-    #     if ($line =~ /^(\S+_(\d+)_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us ORF position, orientation, and amino acid sequence
-    #         $orf_data{$3}[0]=$1; # input sequence name
-    #         $orf_data{$3}[1]=$2; # cluster number
-    #         $orf_data{$3}[2]=$4; # nucleotide location 1
-    #         $orf_data{$3}[3]=$5; # nucleotide location 2
-    #         $orf_data{$3}[4]=$6; # orientation
-    #         $orf_data{$3}[5]=$interpro_fasta{$7}; # amino acid sequence
-    #         if ($6 eq "+") {
-    #             $cluster_orientation{$2}[0] += 1;
-    #         }
-    #         elsif ($6 eq "-") {
-    #             $cluster_orientation{$2}[1] += 1;
-    #         }
-    #         else {
-    #             die "ERROR: In the interpro line below could not determine orientation\n$line";
-    #         }
-    #     }
-    #     if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match.+;ID=(\S+?);Name=(\S+?);/) { # Match to PANTHER annotation
-    #         $orf_data{$1}[6]=$interpro_fasta{$2}; # PANTHER amino acid sequence
-    #         $orf_data{$1}[7]=$3; # PANTHER feature name;
-    #         $orf_data{$1}[8]=fetch_description($3); # PANTHER description
-    #     }
-    #     if ($line =~ /^\S+_(orf\d+)\sPfam\sprotein_match.+;ID=(\S+?);signature_desc=(.+?);Name=(\S+?);/) { # Match to Pfam annotation
-    #         $orf_data{$1}[9]=$interpro_fasta{$2}; # Pfam amino acid sequence
-    #         $orf_data{$1}[10]=$4; # Pfam feature name;
-    #         $orf_data{$1}[11]=$3; # Pfam description
-    #     }   
-    # }
-    # close INTERPRO;
+    ## Parse the protein information from the Interpro file
+    # Read the Interpro results file and record all the fasta sequences in it, this will be used later 
+    # to generate alignments and bed files with protein sequences
+    my $temp_fasta_file = File::Temp->new(UNLINK => 1); # temporary fasta file
+    my %cluster_orientation;    # this will be used to determine the orientation of the nucleotide sequences based on ORFs 
+                                # cluster number is key and value is an array with [0] number of ORFs on the + strand, [1] ORFs on the - strand
+    open (OUTPUT, ">", $temp_fasta_file) or die "ERROR: cannot create temporary file $temp_fasta_file $!\n";
+    open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
+    my $in_fasta_section = 0; # boolean, 0 until hit the fasta section of the file
+    while (my $line = <INTERPRO>) {
+        if ($in_fasta_section) {
+            print OUTPUT $line;
+        }
+        if ($line =~ /\#\#FASTA/) {
+            $in_fasta_section = 1;
+        }
+    }
+    close INTERPRO;
+    close OUTPUT;
+    my %interpro_fasta = fastatohash($temp_fasta_file);
+    # Parse the interpro results file, identify relevant information and put all of it into a single BED file
+    open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
+    my %orf_data; # orf name from interpro as key and as reference an array with information on input sequence name --> through Pfam annotation
+    while (my $line = <INTERPRO>) {
+        if ($line =~ /^(\S+_(\d+)_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us ORF position, orientation, and amino acid sequence
+            $orf_data{$3}[0]=$1; # input sequence name
+            $orf_data{$3}[1]=$2; # cluster number
+            $orf_data{$3}[2]=$4; # nucleotide location 1
+            $orf_data{$3}[3]=$5; # nucleotide location 2
+            $orf_data{$3}[4]=$6; # orientation
+            $orf_data{$3}[5]=$interpro_fasta{$7}; # amino acid sequence
+            if ($6 eq "+") {
+                $cluster_orientation{$2}[0] += 1;
+            }
+            elsif ($6 eq "-") {
+                $cluster_orientation{$2}[1] += 1;
+            }
+            else {
+                die "ERROR: In the interpro line below could not determine orientation\n$line";
+            }
+        }
+        if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match.+;ID=(\S+?);Name=(\S+?);/) { # Match to PANTHER annotation
+            $orf_data{$1}[6]=$interpro_fasta{$2}; # PANTHER amino acid sequence
+            $orf_data{$1}[7]=$3; # PANTHER feature name;
+            $orf_data{$1}[8]=fetch_description($3); # PANTHER description
+        }
+        if ($line =~ /^\S+_(orf\d+)\sPfam\sprotein_match.+;ID=(\S+?);signature_desc=(.+?);Name=(\S+?);/) { # Match to Pfam annotation
+            $orf_data{$1}[9]=$interpro_fasta{$2}; # Pfam amino acid sequence
+            $orf_data{$1}[10]=$4; # Pfam feature name;
+            $orf_data{$1}[11]=$3; # Pfam description
+        }   
+    }
+    close INTERPRO;
 
     ## Align the nucleotide sequences for each cluster and make a report
     foreach my $cluster_number (keys %cluster_fasta) {
@@ -1743,7 +1743,31 @@ if ($STEP == 5) { # check if this step should be performed or not
         }
 
         # decide the orientation of the alignment based on protein sequences
-
+        my $alignment_orientation; # could be either + or -;
+        if (($cluster_orientation{$cluster_number}[0] == 0) && ($cluster_orientation{$cluster_number}[1] == 0)) { # this is true if neither orientation has ORFs
+            print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\t+ by default\n";
+        }
+        elsif (($cluster_orientation{$cluster_number}[0] > 0) && ($cluster_orientation{$cluster_number}[1] == 0)) { # this is true if + is defined - is not
+            print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\t+ orientation\n";
+        }
+        elsif (($cluster_orientation{$cluster_number}[0] == 0) && ($cluster_orientation{$cluster_number}[1] > 0)) { # this is true if + is defined - is not
+            print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\t- orientation\n";
+        }
+        else { # neither + nor - is zero value
+            print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\tcontrol\n";
+            my $ORF_orientation_proportion = $cluster_orientation{$cluster_number}[0] / $cluster_orientation{$cluster_number}[1];
+            if ($ORF_orientation_proportion > 1) {
+                print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\t+ orientation\n";
+            }
+            elsif ($ORF_orientation_proportion < 1) {
+                print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\t- orientation\n";
+            }
+            else { # both + and - are equal
+                print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\t+ orientation by default\n";
+            }
+        }
+        
+        
 ### continue here ####
     }
 }
