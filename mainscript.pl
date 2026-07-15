@@ -1857,7 +1857,7 @@ sub gettsd {
 sub gettir {
 	my ($seq, $loc1, $loc2, $min_tir_size, $max_number_mismatches) = @_;
 
-    my $min_tir_size = 10; # anything smaller than this will not be reported as a TIR
+#    my $min_tir_size = 10; # anything smaller than this will not be reported as a TIR
 
     my $endfound = 0; #boolean 0 until the end of the TIR is found
 	my $pos = 0; #current position in the sequence
