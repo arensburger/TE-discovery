@@ -1289,7 +1289,6 @@ if ($STEP == 3) { # check if this step should be performed or not
                     }            
                 }  
             }
-#            close README;         
         }
         else {
             print "No elements left that need review\n";
@@ -1719,7 +1718,7 @@ if ($STEP == 5) { # check if this step should be performed or not
     ## Align the nucleotide sequences for each cluster and make a report
     foreach my $cluster_number (keys %cluster_fasta) {
 
-        # align the cluster sequences into a temporaray file
+        # align the cluster sequences into a temporary file
         my $cluster_alignment_input_file = File::Temp->new(UNLINK => 1); # temporary file for alignment input
         my $cluster_alignment_output_file = File::Temp->new(UNLINK => 1); # temporary file for alignment output
         open (OUTPUT, ">", $cluster_alignment_input_file) or die "ERROR: cannot create temporary file $cluster_alignment_input_file $!\n";
@@ -1742,30 +1741,41 @@ if ($STEP == 5) { # check if this step should be performed or not
             }
         }
 
-        # decide the orientation of the alignment based on protein sequences
-        my $alignment_orientation; # could be either + or -;
+        # decide the orientation of the alignment based on protein sequences, record the reasosing for this decision in the cluster's README file
+        my $cluster_alignment_orientation; # orientation of the cluster based on ORFs, 1=+, 2=-
+        open (CLREADME, ">>", "$current_directry/$CLUSTER_FOLDER/cluster$cluster_number/README.txt") or die "ERROR: Cannot open README file for cluster $cluster_number, $!\n";
+        my $datestring = localtime();
+        print CLREADME "$datestring, Determining orientation of cluster $cluster_number based on ORF orientations (STEP $STEP)\n";
+
         if (($cluster_orientation{$cluster_number}[0] == 0) && ($cluster_orientation{$cluster_number}[1] == 0)) { # this is true if neither orientation has ORFs
-            print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\t+ by default\n";
+            $cluster_alignment_orientation=1;            
+            print CLREADME "\tDefaulting to + orientation because no ORFs mapped in either orientation\n";
         }
-        elsif (($cluster_orientation{$cluster_number}[0] > 0) && ($cluster_orientation{$cluster_number}[1] == 0)) { # this is true if + is defined - is not
-            print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\t+ orientation\n";
+        elsif (($cluster_orientation{$cluster_number}[0] > 0) && ($cluster_orientation{$cluster_number}[1] == 0)) { # this is true if + has ORFs - does not
+            $cluster_alignment_orientation=1;
+            print CLREADME "\tUsing + orientation, $cluster_orientation{$cluster_number}[0] ORFs mapped to + orientation and 0 to - orientation\n"; 
         }
-        elsif (($cluster_orientation{$cluster_number}[0] == 0) && ($cluster_orientation{$cluster_number}[1] > 0)) { # this is true if + is defined - is not
-            print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\t- orientation\n";
+        elsif (($cluster_orientation{$cluster_number}[0] == 0) && ($cluster_orientation{$cluster_number}[1] > 0)) { # this is true if - has no ORFs - does
+            $cluster_alignment_orientation=2;
+            print CLREADME "\tUsing - orientation, 0 ORFs mapped to + orientation, and $cluster_orientation{$cluster_number}[1] to - orientation\n"; 
         }
         else { # neither + nor - is zero value
-            print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\tcontrol\n";
             my $ORF_orientation_proportion = $cluster_orientation{$cluster_number}[0] / $cluster_orientation{$cluster_number}[1];
             if ($ORF_orientation_proportion > 1) {
-                print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\t+ orientation\n";
+                $cluster_alignment_orientation=1;
+                print CLREADME "\tUsing + orientation, $cluster_orientation{$cluster_number}[0] ORFs mapped to + orientation and $cluster_orientation{$cluster_number}[1] to - orientation\n";
             }
             elsif ($ORF_orientation_proportion < 1) {
-                print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\t- orientation\n";
+                $cluster_alignment_orientation=2;
+                print CLREADME "\tUsing - orientation, $cluster_orientation{$cluster_number}[0] ORFs mapped to + orientation and $cluster_orientation{$cluster_number}[1] to - orientation\n";
             }
             else { # both + and - are equal
+                $cluster_alignment_orientation=1;
+                print CLREADME "\tDefaulting to + orientation because $cluster_orientation{$cluster_number}[0] ORFs mapped to + orientation and $cluster_orientation{$cluster_number}[1] to - orientation\n";
                 print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\t+ orientation by default\n";
             }
         }
+        close CLREADME;
         
         
 ### continue here ####
