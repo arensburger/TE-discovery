@@ -1556,7 +1556,7 @@ if ($STEP == 5) { # check if this step should be performed or not
     my %cluster_fasta; # same data as %all_nucleotides_fasta, but organized with cluster number as key and array of sequences with fasta titles
     my $temp_bed_file = File::Temp->new(UNLINK => 1); # temporary bed file
     my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command
-    my %overlapping_sequences_by_name; # record of sequences that overlap with others, to be reported to the user   
+    my %overlapping_sequences_by_name; # record of sequences that overlap with others, to be reported to the user 
     #create BED file
     open (BED, ">", $temp_bed_file) or die "ERROR: cannot created temporary bed file $temp_bed_file\n";
     my $temp_bed_sorted_file = File::Temp->new(UNLINK => 1); # temporary bed file sorted
@@ -1621,45 +1621,46 @@ if ($STEP == 5) { # check if this step should be performed or not
         }
     }
 
-    # # sort the groups by cluster
-    # my %overlapping_sequences_by_cluster; # holds the cluster number as key and as value an array with groups of sequences in the cluster that overlap
-    # foreach my $g (@groups) {
-    #     # identify the current cluster of the current group by parsing the name of the first sequence
-    #     my $cluster_number;
-    #     if(@$g[0] =~ /_(\d+)_\d+_\d+/) {
-    #         $cluster_number = $1;
-    #     }
-    #     else {
-    #         die "ERROR: Could not parse sequence name after grouping: @$g[0]\n";
-    #     }
+    # sort the groups by cluster
+    my %overlapping_sequences_by_cluster; # holds the cluster number as key and as value an array with groups of sequences in the cluster that overlap
+    foreach my $g (@groups) {
+        # identify the current cluster of the current group by parsing the name of the first sequence
+        my $cluster_number;
+        if(@$g[0] =~ /_(\d+)_\d+_\d+/) {
+            $cluster_number = $1;
+        }
+        else {
+            die "ERROR: Could not parse sequence name after grouping: @$g[0]\n";
+        }
 
-    #     if (scalar @$g > 1) {
-    #         push @{ $overlapping_sequences_by_cluster{$cluster_number}}, join(",", @$g);
-    #     }
-    # }
+        if (scalar @$g > 1) {
+            push @{ $overlapping_sequences_by_cluster{$cluster_number}}, join(",", @$g);
+        }
+    }
 
-    # # create report on overlapping sequences 
-    # for my $cluster_number (keys %overlapping_sequences_by_cluster) {
-    #     my $overlapping_report_file_name = $current_directry . "/" . $CLUSTER_FOLDER . "/" . "cluster$cluster_number" . "/" . "cluster$cluster_number-overlapping_sequences.fa";
-    #     open (OUTPUT, ">", $overlapping_report_file_name) or die "ERROR: Cannot create file for overlapping sequences report\n";
-    #     for my $group (0 .. $#{ $overlapping_sequences_by_cluster{$cluster_number}}) {
-    #         my @sequence_names = split ",", $overlapping_sequences_by_cluster{$cluster_number}[$group];
-    #         print OUTPUT ">OVERLAPPING_SEQUENCES_$group\n";
-    #         print OUTPUT "NNNNNNNNNNNNNNNNNNNNNNNN\n";
-    #         foreach my $name (@sequence_names) {
-    #             print OUTPUT ">$name\n";
-    #             print OUTPUT "$all_nucleotides_fasta{$name}\n";
-    #             $overlapping_sequences_by_name{$name} = 1; # update the name of sequences that overlap
-    #         }
-    #     }
-    #     close OUTPUT;
-    #     # update the cluster README file
-    #     open (CLREADME, ">>", "$current_directry/$CLUSTER_FOLDER/cluster$cluster_number/README.txt") or die "ERROR: Cannot open README file for cluster $cluster_number, $!\n";
-    #     my $datestring = localtime();
-    #     print CLREADME "$datestring, Identifying overlapping sequences in this cluster\n";
-    #     print CLREADME "\tFile cluster$cluster_number-overlapping_sequences.fa contains groups of overlapping sequences in this cluster\n";
-    #     close CLREADME;
-    # }
+    # create report on overlapping sequences 
+    for my $cluster_number (keys %overlapping_sequences_by_cluster) {
+        my $overlapping_report_file_name = $current_directry . "/" . $CLUSTER_FOLDER . "/" . "cluster$cluster_number" . "/" . "cluster$cluster_number-overlapping_sequences.fa";
+        open (OUTPUT, ">", $overlapping_report_file_name) or die "ERROR: Cannot create file for overlapping sequences report\n";
+        for my $group (0 .. $#{ $overlapping_sequences_by_cluster{$cluster_number}}) {
+            my @sequence_names = split ",", $overlapping_sequences_by_cluster{$cluster_number}[$group];
+            print OUTPUT ">OVERLAPPING_SEQUENCES_$group\n";
+            print OUTPUT "NNNNNNNNNNNNNNNNNNNNNNNN\n";
+            foreach my $name (@sequence_names) {
+                print OUTPUT ">$name\n";
+                print OUTPUT "$all_nucleotides_fasta{$name}\n";
+                $overlapping_sequences_by_name{$name} = 1; # update the name of sequences that overlap
+            }
+        }
+        close OUTPUT;
+        # update the cluster README file
+        open (CLREADME, ">>", "$current_directry/$CLUSTER_FOLDER/cluster$cluster_number/README.txt") or die "ERROR: Cannot open README file for cluster $cluster_number, $!\n";
+        my $datestring = localtime();
+        print CLREADME "$datestring, Identifying overlapping sequences in this cluster\n";
+        print CLREADME "\tFile cluster$cluster_number-overlapping_sequences.fa contains groups of overlapping sequences in this cluster\n";
+        close CLREADME;
+    }
+
 
     ## Parse the protein information from the Interpro file
     # Read the Interpro results file and record all the fasta sequences in it, this will be used later 
@@ -1724,8 +1725,11 @@ if ($STEP == 5) { # check if this step should be performed or not
         my $cluster_alignment_input_file = File::Temp->new(UNLINK => 1); # temporary file for alignment input
         my $cluster_alignment_output_file = File::Temp->new(UNLINK => 1); # temporary file for alignment output
         open (OUTPUT, ">", $cluster_alignment_input_file) or die "ERROR: cannot create temporary file $cluster_alignment_input_file $!\n";
-        foreach my $sequence (@{ $cluster_fasta{$cluster_number} }) {
-            print OUTPUT $sequence, "\n";
+        foreach my $whole_sequence (@{ $cluster_fasta{$cluster_number} }) {            
+            my ($sequence_name) = $whole_sequence =~ /^>(\S+)/m; #parse out the sequence name
+            unless (exists $overlapping_sequences_by_name{$sequence_name}) { # remove any overlapping sequences from further analysis
+                print OUTPUT $whole_sequence, "\n";
+            }
         }
         close OUTPUT;
         `mafft --quiet --thread -1 $cluster_alignment_input_file > $cluster_alignment_output_file`;
@@ -1744,7 +1748,7 @@ if ($STEP == 5) { # check if this step should be performed or not
         }
 
         # decide the orientation of the alignment based on protein sequences, record the reasosing for this decision in the cluster's README file
-        my $cluster_alignment_orientation; # orientation of the cluster based on ORFs, 1=+, 2=-
+        my $cluster_alignment_orientation; # orientation of the cluster based on ORFs, 1 for + and -1 for minus
         open (CLREADME, ">>", "$current_directry/$CLUSTER_FOLDER/cluster$cluster_number/README.txt") or die "ERROR: Cannot open README file for cluster $cluster_number, $!\n";
         my $datestring = localtime();
         print CLREADME "$datestring, Determining orientation of cluster $cluster_number based on ORF orientations (STEP $STEP)\n";
@@ -1754,11 +1758,11 @@ if ($STEP == 5) { # check if this step should be performed or not
             print CLREADME "\tDefaulting to + orientation because no ORFs mapped in either orientation\n";
         }
         elsif (($cluster_orientation{$cluster_number}[0] > 0) && ($cluster_orientation{$cluster_number}[1] == 0)) { # this is true if + has ORFs - does not
-            $cluster_alignment_orientation=1;
+            $cluster_alignment_orientation=-1;
             print CLREADME "\tUsing + orientation, $cluster_orientation{$cluster_number}[0] ORFs mapped to + orientation and 0 to - orientation\n"; 
         }
         elsif (($cluster_orientation{$cluster_number}[0] == 0) && ($cluster_orientation{$cluster_number}[1] > 0)) { # this is true if - has no ORFs - does
-            $cluster_alignment_orientation=2;
+            $cluster_alignment_orientation=-1;
             print CLREADME "\tUsing - orientation, 0 ORFs mapped to + orientation, and $cluster_orientation{$cluster_number}[1] to - orientation\n"; 
         }
         else { # neither + nor - is zero value
@@ -1768,7 +1772,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                 print CLREADME "\tUsing + orientation, $cluster_orientation{$cluster_number}[0] ORFs mapped to + orientation and $cluster_orientation{$cluster_number}[1] to - orientation\n";
             }
             elsif ($ORF_orientation_proportion < 1) {
-                $cluster_alignment_orientation=2;
+                $cluster_alignment_orientation=-1;
                 print CLREADME "\tUsing - orientation, $cluster_orientation{$cluster_number}[0] ORFs mapped to + orientation and $cluster_orientation{$cluster_number}[1] to - orientation\n";
             }
             else { # both + and - are equal
@@ -1785,38 +1789,32 @@ if ($STEP == 5) { # check if this step should be performed or not
         my $nucleotide_report_file_name = $current_directry . "/" . $CLUSTER_FOLDER . "/" . "cluster$cluster_number" . "/" . "cluster$cluster_number-aligned_nucleotides.fa";
         open (OUTPUT, ">", $nucleotide_report_file_name) or die "ERROR: Cannot create file $nucleotide_report_file_name $!\n";
         
+        #if the cluster orientation is negative reverse complement all the sequences
+        if ($cluster_alignment_orientation < 0) {
+            foreach my $seq_name (keys %alignment_sequence_names) {
+                $alignment_sequences{$seq_name} = rc($alignment_sequences{$seq_name});
+            }
+        }
+
         # first print sequences that have ORFs and don't overlap
+        print OUTPUT ">Sequences_with_ORFs\nNNNNNNNNNN\n";
         foreach my $seqname (keys %alignment_sequence_names) {
             if ((exists $sequence_with_orf{$seqname}) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
-  #              print "cluster $cluster_number has orf not overlaping $seqname\n";
-                $alignment_sequence_names{$seqname} = 1;
+                print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
+                
             }
         }
 
         # second print sequences that don't have ORF and don't overlap
+        print OUTPUT ">Sequences_no_ORFs\nNNNNNNNNNN\n";
         foreach my $seqname (keys %alignment_sequence_names) {
             if ((!exists $sequence_with_orf{$seqname}) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
- #               print "cluster $cluster_number has no orf and not overlaping $seqname\n";
-                $alignment_sequence_names{$seqname} = 1;
+                print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
             }
         }
-
-        # thrid print sequences that overlap
-        foreach my $group (keys %overlaping_sequences_by_group) {
-#            print "cluster $cluster_number overlaping sequences $overlaping_sequences_by_group{$group}\n";
-            my @data = split " ", $overlaping_sequences_by_group{$group};
-            foreach my $n (@data) {
-                $alignment_sequence_names{$n} = 1;
-            }
-        }
-
-        foreach my $name (keys %alignment_sequence_names) {
-            unless ($alignment_sequence_names{$name} == 1) {
-                print "$cluster_number not all there\n";
-            }
-        } 
         close OUTPUT;
         
+        print "cluster: $cluster_number\n";
 ### continue here ####
     }
 }
