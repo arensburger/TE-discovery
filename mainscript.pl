@@ -424,7 +424,7 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
         my $aligned_sequences_file_name = "$ELEMENT_FOLDER/$element_name/$element_name.maf";
         `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences_file_name`;
         if ($?) { die "Error executing mafft, error code $?\n"}
-        my $datestring = localtime();
+        $datestring = localtime();
         print README "$datestring, Aligned extended BLAST sequences are in file $element_name.maf\n";
         
         # 2.2.3 determine the highest percentage of agreement on a single nucleotide at each position
@@ -1053,7 +1053,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                                     }
                                 }
                                 my $right_tsd = substr($right_whole_seq, 0, $TSD_size);
-                                my $i=0;
+                                $i=0;
                                 my $right_tir_seq;
                                 while ((length $right_tir_seq) < $TIR_bp) {
                                     unless ((substr $consensus_sequence, $TIR_b2-$i-1, 1) =~ /n/) {
@@ -1689,7 +1689,9 @@ if ($STEP == 5) { # check if this step should be performed or not
     while (my $line = <INTERPRO>) {
         if ($line =~ /^(\S+_(\d+)_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us ORF position, orientation, and amino acid sequence
             $orf_data{$3}[0]=$1; # input sequence name
-            $sequence_with_orf{$1} = 1; # recording that this sequence has an orf
+#            $sequence_with_orf{$1} = 1; # recording that this sequence has an orf
+            $sequence_with_orf{$1} = $interpro_fasta{$7}; # recording that this sequence has an orf
+
             $orf_data{$3}[1]=$2; # cluster number
             $orf_data{$3}[2]=$4; # nucleotide location 1
             $orf_data{$3}[3]=$5; # nucleotide location 2
@@ -1719,6 +1721,7 @@ if ($STEP == 5) { # check if this step should be performed or not
     close INTERPRO;
 
     ## Align the nucleotide sequences for each cluster and make a report
+    my @orf_order; # holds the names of the nucleotide sequences in the order they are printed, this is so that 
     foreach my $cluster_number (keys %cluster_fasta) {
 
         # align the cluster sequences into a temporary file
@@ -1801,7 +1804,7 @@ if ($STEP == 5) { # check if this step should be performed or not
         foreach my $seqname (keys %alignment_sequence_names) {
             if ((exists $sequence_with_orf{$seqname}) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
                 print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
-                
+                push @orf_order, $seqname; # update the order in which these have been printed
             }
         }
 
@@ -1813,8 +1816,14 @@ if ($STEP == 5) { # check if this step should be performed or not
             }
         }
         close OUTPUT;
+
+        ## Align the protein sequences for each cluster sequence and make a report
+        for (my $i=0; $i<scalar @orf_order; $i++) {
+            print ">$orf_order[$i]\n";
+            print "$sequence_with_orf{$orf_order[$i]}\n"
+        }
         
-        print "cluster: $cluster_number\n";
+        print "cluster: $cluster_number\n";exit;
 ### continue here ####
     }
 }
