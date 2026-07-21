@@ -1532,8 +1532,7 @@ if ($STEP == 4) { # check if this step should be performed or not
 
 ### PIPELINE STEP 5 
 ### Looking at the outcome of interpro, making a summary of element for the user for each cluster
-my %seen_descriptions; # holds the seen PANTHER or Pfam id as key and description as value
-                       # this is to speed up searches. Declaring it here so that it will available to the subroutines
+my %seen_descriptions; # holds the seen PANTHER as key and description as value, this is to speed up searches.
 
 if ($STEP == 5) { # check if this step should be performed or not  
     print STDERR "Working on STEP 5 ...\n";
@@ -1668,7 +1667,7 @@ if ($STEP == 5) { # check if this step should be performed or not
     my $temp_fasta_file = File::Temp->new(UNLINK => 1); # temporary fasta file
     my %cluster_orientation;    # this will be used to determine the orientation of the nucleotide sequences based on ORFs 
                                 # cluster number is key and value is an array with [0] number of ORFs on the + strand, [1] ORFs on the - strand
-    my %sequence_with_orf; # sequence name as key and 1 as value, this will be used to print sequences with ORFs
+    
     open (OUTPUT, ">", $temp_fasta_file) or die "ERROR: cannot create temporary file $temp_fasta_file $!\n";
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
     my $in_fasta_section = 0; # boolean, 0 until hit the fasta section of the file
@@ -1683,45 +1682,99 @@ if ($STEP == 5) { # check if this step should be performed or not
     close INTERPRO;
     close OUTPUT;
     my %interpro_fasta = fastatohash($temp_fasta_file);
-    # Parse the interpro results file, identify relevant information and put all of it into a single BED file
+    # Parse the interpro results file, identify relevant information into a series of hashes
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
+    # The 3 hashes below carry information about the nucleotide sequence --> orf from interpro --> pfam or PANTHER id --> start and stop on the amino acid sequence --> description
+    my %sequence_orfs; # nucleotide sequence as key and array of ORFs names as value
     my %orf_data; # orf name from interpro as key and as reference an array with information on input sequence name --> through Pfam annotation
-    while (my $line = <INTERPRO>) {
-        if ($line =~ /^(\S+_(\d+)_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us ORF position, orientation, and amino acid sequence
-            $orf_data{$3}[0]=$1; # input sequence name
-#            $sequence_with_orf{$1} = 1; # recording that this sequence has an orf
-            $sequence_with_orf{$1} = $interpro_fasta{$7}; # recording that this sequence has an orf
+    my %id_symbol_and_description; # unique symbol and description assigned to every Pfam or PANTHER id
+    
+    my @PANTHER_symbols; # all the PANTHER symbols are capital letters, populated with two symbols AA through ZZ
+    for my $c1 ('A'..'Z') {
+        for my $c2 ('A'..'Z') {
+            push @PANTHER_symbols, "$c1$c2";
+        }
+    }
+    my @Pfam_symbols; # all the Pfam symbols are lower case letters
+    for my $c1 ('a'..'z') {
+        for my $c2 ('a'..'z') {
+            push @Pfam_symbols, "$c1$c2";
+        }
+    }
 
-            $orf_data{$3}[1]=$2; # cluster number
-            $orf_data{$3}[2]=$4; # nucleotide location 1
-            $orf_data{$3}[3]=$5; # nucleotide location 2
-            $orf_data{$3}[4]=$6; # orientation
-            $orf_data{$3}[5]=$interpro_fasta{$7}; # amino acid sequence
-            if ($6 eq "+") {
+    while (my $line = <INTERPRO>) {
+        if ($line =~ /^(\S+_\d+_\d+_\d+)_(orf\d+)\sgetorf\sORF\s\d+\s\d+\s\.\s(\S).+Target=\S+\s/) { # This line will give us the larger ORF information
+            push @{ $sequence_orfs{$1} }, $2; # assign orf to a nucleotide sequence
+            # record orientation
+            if ($3 eq "+") {
                 $cluster_orientation{$2}[0] += 1;
             }
-            elsif ($6 eq "-") {
+            elsif ($3 eq "-") {
                 $cluster_orientation{$2}[1] += 1;
             }
             else {
                 die "ERROR: In the interpro line below could not determine orientation\n$line";
             }
         }
-        if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match.+;ID=(\S+?);Name=(\S+?);/) { # Match to PANTHER annotation
-            $orf_data{$1}[6]=$interpro_fasta{$2}; # PANTHER amino acid sequence
-            $orf_data{$1}[7]=$3; # PANTHER feature name;
-            $orf_data{$1}[8]=fetch_description($3); # PANTHER description
+
+        if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match\s+(\d+)\s+(\d+).+;Name=(\S+?);/) { # Match to PANTHER annotation
+            $orf_data{$1}[0] = $2; # PANTHER left bound
+            $orf_data{$1}[1] = $3; # PANTHER right bound
+            $orf_data{$1}[2] = $4; # PANTHER id
+            unless (exists $id_symbol_and_description{$orf_data{$1}[2]}[0]) { # this symbol has not been seen before need to assign unique symbol and fetch description
+               # fetch the description of this id on the web
+                my $url = "https://www.ebi.ac.uk/interpro/api/entry/panther/$orf_data{$1}[2]/?format=json";
+                my $ua = LWP::UserAgent->new(timeout => 30);
+                $ua->agent('Mozilla/5.0');
+                my $response = $ua->get($url);
+                if (!$response->is_success) {
+                    my $code = $response->code;
+                    if ($code == 404) {
+                        die "Error: PANTHER entry '$orf_data{$1}[2]' not found.\n";
+                    } else {
+                        die "Error: HTTP request failed with status $code in sub fetch_PANTHER_description: " . $response->status_line . "\n";
+                    }
+                }
+                my $data = decode_json($response->decoded_content);
+                my $fetched_description = $data->{metadata}{name}{name}  // 'N/A';
+
+                # populate %id_symbol_and_description with unique symbol and description
+                if (@PANTHER_symbols) { # check that there are symbols left, die otherwise
+                    my $unique_symbol = shift @PANTHER_symbols;
+                    $id_symbol_and_description{$orf_data{$1}[2]}[0] = $unique_symbol;
+                    $id_symbol_and_description{$orf_data{$1}[2]}[1] = $fetched_description;
+                }
+                else {
+                    die "ERROR: the array PANTHER_symbols is empty, did it run out of symbols?\n";
+                }
+
+            }
         }
-        if ($line =~ /^\S+_(orf\d+)\sPfam\sprotein_match.+;ID=(\S+?);signature_desc=(.+?);Name=(\S+?);/) { # Match to Pfam annotation
-            $orf_data{$1}[9]=$interpro_fasta{$2}; # Pfam amino acid sequence
-            $orf_data{$1}[10]=$4; # Pfam feature name;
-            $orf_data{$1}[11]=$3; # Pfam description
+        if ($line =~ /^\S+_(orf\d+)\sPfam\sprotein_match\s+(\d+)\s+(\d+).+;signature_desc=(.+?);Name=(\S+?);/) { # Match to Pfam annotation
+            $orf_data{$1}[3] = $2; # Pfam left bound
+            $orf_data{$1}[4] = $3; # Pfam right bound
+            $orf_data{$1}[5] = $5; # Pfam id
+            my $description = $4;
+            unless (exists $id_symbol_and_description{$orf_data{$1}[5]}[0]) { # this symbol has not been seen before need to assign unique symbol and fetch description
+                # populate %id_symbol_and_description with unique symbol and description
+                if (@Pfam_symbols) { # check that there are symbols left, die otherwise
+                    print "$Pfam_symbols[0]\t";
+                    my $unique_symbol = shift @Pfam_symbols;
+                    print "$unique_symbol\n";
+                    $id_symbol_and_description{$orf_data{$1}[5]}[0] = $unique_symbol;
+                    $id_symbol_and_description{$orf_data{$1}[5]}[1] = $description;
+                }
+                else {
+                    die "ERROR: the array Pfam_symbols is empty, did it run out of symbols?\n";
+                }
+                
+            }
         }   
     }
     close INTERPRO;
 
     ## Align the nucleotide sequences for each cluster and make a report
-    my @orf_order; # holds the names of the nucleotide sequences in the order they are printed, this is so that 
+    my @nucleotide_sequence_order; # holds the names of the nucleotide sequences in the order they are printed, this is so that 
     foreach my $cluster_number (keys %cluster_fasta) {
 
         # align the cluster sequences into a temporary file
@@ -1802,26 +1855,20 @@ if ($STEP == 5) { # check if this step should be performed or not
         # first print sequences that have ORFs and don't overlap
         print OUTPUT ">Sequences_with_ORFs\nNNNNNNNNNN\n";
         foreach my $seqname (keys %alignment_sequence_names) {
-            if ((exists $sequence_with_orf{$seqname}) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
+            if ((exists $sequence_orfs{$seqname}) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
                 print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
-                push @orf_order, $seqname; # update the order in which these have been printed
+                push @nucleotide_sequence_order, $seqname; # update the order in which these have been printed
             }
         }
 
         # second print sequences that don't have ORF and don't overlap
         print OUTPUT ">Sequences_no_ORFs\nNNNNNNNNNN\n";
         foreach my $seqname (keys %alignment_sequence_names) {
-            if ((!exists $sequence_with_orf{$seqname}) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
+            if ((!exists $sequence_orfs{$seqname}) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
                 print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
             }
         }
         close OUTPUT;
-
-        ## Align the protein sequences for each cluster sequence and make a report
-        for (my $i=0; $i<scalar @orf_order; $i++) {
-            print ">$orf_order[$i]\n";
-            print "$sequence_with_orf{$orf_order[$i]}\n"
-        }
         
         print "cluster: $cluster_number\n";exit;
 ### continue here ####
@@ -2156,99 +2203,63 @@ sub average_tir_number_and_length {
     return ($TIR_number, $average_TIR_length);
 }
 
-# take a nucleotide sequence and postion information and returns the translated
-# amino acid sequence as well as information about the presence of start and stop codons
-sub translate_nucleotide {
-    my ($nucleotide_sequence, $location1, $location2, $orientation) = @_;
-    my %genetic_code = (
-    'TTT' => 'F', 'TTC' => 'F', 'TTA' => 'L', 'TTG' => 'L',
-    'TCT' => 'S', 'TCC' => 'S', 'TCA' => 'S', 'TCG' => 'S',
-    'TAT' => 'Y', 'TAC' => 'Y', 'TAA' => '*', 'TAG' => '*',
-    'TGT' => 'C', 'TGC' => 'C', 'TGA' => '*', 'TGG' => 'W',
-    'CTT' => 'L', 'CTC' => 'L', 'CTA' => 'L', 'CTG' => 'L',
-    'CCT' => 'P', 'CCC' => 'P', 'CCA' => 'P', 'CCG' => 'P',
-    'CAT' => 'H', 'CAC' => 'H', 'CAA' => 'Q', 'CAG' => 'Q',
-    'CGT' => 'R', 'CGC' => 'R', 'CGA' => 'R', 'CGG' => 'R',
-    'ATT' => 'I', 'ATC' => 'I', 'ATA' => 'I', 'ATG' => 'M',
-    'ACT' => 'T', 'ACC' => 'T', 'ACA' => 'T', 'ACG' => 'T',
-    'AAT' => 'N', 'AAC' => 'N', 'AAA' => 'K', 'AAG' => 'K',
-    'AGT' => 'S', 'AGC' => 'S', 'AGA' => 'R', 'AGG' => 'R',
-    'GTT' => 'V', 'GTC' => 'V', 'GTA' => 'V', 'GTG' => 'V',
-    'GCT' => 'A', 'GCC' => 'A', 'GCA' => 'A', 'GCG' => 'A',
-    'GAT' => 'D', 'GAC' => 'D', 'GAA' => 'E', 'GAG' => 'E',
-    'GGT' => 'G', 'GGC' => 'G', 'GGA' => 'G', 'GGG' => 'G',
-    );
+# # take a nucleotide sequence and postion information and returns the translated
+# # amino acid sequence as well as information about the presence of start and stop codons
+# sub translate_nucleotide {
+#     my ($nucleotide_sequence, $location1, $location2, $orientation) = @_;
+#     my %genetic_code = (
+#     'TTT' => 'F', 'TTC' => 'F', 'TTA' => 'L', 'TTG' => 'L',
+#     'TCT' => 'S', 'TCC' => 'S', 'TCA' => 'S', 'TCG' => 'S',
+#     'TAT' => 'Y', 'TAC' => 'Y', 'TAA' => '*', 'TAG' => '*',
+#     'TGT' => 'C', 'TGC' => 'C', 'TGA' => '*', 'TGG' => 'W',
+#     'CTT' => 'L', 'CTC' => 'L', 'CTA' => 'L', 'CTG' => 'L',
+#     'CCT' => 'P', 'CCC' => 'P', 'CCA' => 'P', 'CCG' => 'P',
+#     'CAT' => 'H', 'CAC' => 'H', 'CAA' => 'Q', 'CAG' => 'Q',
+#     'CGT' => 'R', 'CGC' => 'R', 'CGA' => 'R', 'CGG' => 'R',
+#     'ATT' => 'I', 'ATC' => 'I', 'ATA' => 'I', 'ATG' => 'M',
+#     'ACT' => 'T', 'ACC' => 'T', 'ACA' => 'T', 'ACG' => 'T',
+#     'AAT' => 'N', 'AAC' => 'N', 'AAA' => 'K', 'AAG' => 'K',
+#     'AGT' => 'S', 'AGC' => 'S', 'AGA' => 'R', 'AGG' => 'R',
+#     'GTT' => 'V', 'GTC' => 'V', 'GTA' => 'V', 'GTG' => 'V',
+#     'GCT' => 'A', 'GCC' => 'A', 'GCA' => 'A', 'GCG' => 'A',
+#     'GAT' => 'D', 'GAC' => 'D', 'GAA' => 'E', 'GAG' => 'E',
+#     'GGT' => 'G', 'GGC' => 'G', 'GGA' => 'G', 'GGG' => 'G',
+#     );
 
-    my $subseq;
-    if ($orientation eq "+" ) {
-        if (($location2 - $location1) > 3) {
-            $subseq = uc(substr($nucleotide_sequence, $location1-1, ($location2 - $location1 + 6)));
-        }
-        else {
-            $subseq = uc(substr($nucleotide_sequence, $location1-1, ($location2 - $location1 + 3)));
-        }
-    }
-    elsif ($orientation eq "-") {
-        if ($location1 > 3) {
-            $subseq = rc(uc(substr($nucleotide_sequence, $location1-4, ($location2 - $location1 + 1))));
-        }
-        else {
-            $subseq = rc(uc(substr($nucleotide_sequence, $location1-1, ($location2 - $location1 + 1))));
-        }
-    }
-    else {
-        die "ERROR: expecting orientation to be + or - but got $orientation in sub translate_nucleotide\n";
-    }
+#     my $subseq;
+#     if ($orientation eq "+" ) {
+#         if (($location2 - $location1) > 3) {
+#             $subseq = uc(substr($nucleotide_sequence, $location1-1, ($location2 - $location1 + 6)));
+#         }
+#         else {
+#             $subseq = uc(substr($nucleotide_sequence, $location1-1, ($location2 - $location1 + 3)));
+#         }
+#     }
+#     elsif ($orientation eq "-") {
+#         if ($location1 > 3) {
+#             $subseq = rc(uc(substr($nucleotide_sequence, $location1-4, ($location2 - $location1 + 1))));
+#         }
+#         else {
+#             $subseq = rc(uc(substr($nucleotide_sequence, $location1-1, ($location2 - $location1 + 1))));
+#         }
+#     }
+#     else {
+#         die "ERROR: expecting orientation to be + or - but got $orientation in sub translate_nucleotide\n";
+#     }
 
-    my $protein = '';
-    for (my $i = 0; $i < length($subseq); $i += 3) {
-        my $codon = substr($subseq, $i, 3);
-        last if length($codon) < 3;  # Skip incomplete codons
+#     my $protein = '';
+#     for (my $i = 0; $i < length($subseq); $i += 3) {
+#         my $codon = substr($subseq, $i, 3);
+#         last if length($codon) < 3;  # Skip incomplete codons
         
-        my $aa = $genetic_code{$codon};
-        if (!defined $aa) {
-            $protein .= "X";
-        }
-        else {
-            $protein .= $aa;
-        }
-    }
+#         my $aa = $genetic_code{$codon};
+#         if (!defined $aa) {
+#             $protein .= "X";
+#         }
+#         else {
+#             $protein .= $aa;
+#         }
+#     }
 
-    return ($protein);
-}
-
-sub fetch_description {
-    my ($id) = @_;
-    my $url;
-
-    # this is to speed the searches up, by recording what's already been seen
-    if (exists $seen_descriptions{$id}) {
-        return($seen_descriptions{$id});
-    }
-
-    if ($id =~ /(PTHR\d+)/) {
-        $url = "https://www.ebi.ac.uk/interpro/api/entry/panther/$1/?format=json";
-    }
-    elsif ($id =~ /(PF\d+)/) {
-        $url = "https://www.ebi.ac.uk/interpro/api/entry/pfam/$1/?format=json";
-    }
-    else {
-        die "ERROR: do not recognize protein id $id\n";
-    }
-    my $ua = LWP::UserAgent->new(timeout => 30);
-    $ua->agent('Mozilla/5.0');
-    my $response = $ua->get($url);
-    if (!$response->is_success) {
-        my $code = $response->code;
-        if ($code == 404) {
-            die "Error: PANTHER entry '$id' not found.\n";
-        } else {
-            die "Error: HTTP request failed with status $code in sub fetch_PANTHER_description: " . $response->status_line . "\n";
-        }
-    }
-    my $data = decode_json($response->decoded_content);
-    my $description = $data->{metadata}{name}{name}  // 'N/A';
-
-    $seen_descriptions{$id} = $description;
-    return ($description);
-}
+#     return ($protein);
+# }
