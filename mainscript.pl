@@ -1703,8 +1703,9 @@ if ($STEP == 5) { # check if this step should be performed or not
     }
 
     while (my $line = <INTERPRO>) {
-        if ($line =~ /^(\S+_\d+_\d+_\d+)_(orf\d+)\sgetorf\sORF\s\d+\s\d+\s\.\s(\S).+Target=\S+\s/) { # This line will give us the larger ORF information
+        if ($line =~ /^(\S+_\d+_\d+_\d+)_(orf\d+)\sgetorf\sORF\s\d+\s\d+\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us the larger ORF information
             push @{ $sequence_orfs{$1} }, $2; # assign orf to a nucleotide sequence
+            $orf_data{$2}[0] = $interpro_fasta{$4}; # record the ORF amino acid sequence
             # record orientation
             if ($3 eq "+") {
                 $cluster_orientation{$2}[0] += 1;
@@ -1718,19 +1719,19 @@ if ($STEP == 5) { # check if this step should be performed or not
         }
 
         if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match\s+(\d+)\s+(\d+).+;Name=(\S+?);/) { # Match to PANTHER annotation
-            $orf_data{$1}[0] = $2; # PANTHER left bound
-            $orf_data{$1}[1] = $3; # PANTHER right bound
-            $orf_data{$1}[2] = $4; # PANTHER id
-            unless (exists $id_symbol_and_description{$orf_data{$1}[2]}[0]) { # this symbol has not been seen before need to assign unique symbol and fetch description
+            $orf_data{$1}[1] = $2; # PANTHER left bound
+            $orf_data{$1}[2] = $3; # PANTHER right bound
+            $orf_data{$1}[3] = $4; # PANTHER id
+            unless (exists $id_symbol_and_description{$orf_data{$1}[3]}[0]) { # this symbol has not been seen before need to assign unique symbol and fetch description
                # fetch the description of this id on the web
-                my $url = "https://www.ebi.ac.uk/interpro/api/entry/panther/$orf_data{$1}[2]/?format=json";
+                my $url = "https://www.ebi.ac.uk/interpro/api/entry/panther/$orf_data{$1}[3]/?format=json";
                 my $ua = LWP::UserAgent->new(timeout => 30);
                 $ua->agent('Mozilla/5.0');
                 my $response = $ua->get($url);
                 if (!$response->is_success) {
                     my $code = $response->code;
                     if ($code == 404) {
-                        die "Error: PANTHER entry '$orf_data{$1}[2]' not found.\n";
+                        die "Error: PANTHER entry '$orf_data{$1}[3]' not found.\n";
                     } else {
                         die "Error: HTTP request failed with status $code in sub fetch_PANTHER_description: " . $response->status_line . "\n";
                     }
@@ -1741,8 +1742,8 @@ if ($STEP == 5) { # check if this step should be performed or not
                 # populate %id_symbol_and_description with unique symbol and description
                 if (@PANTHER_symbols) { # check that there are symbols left, die otherwise
                     my $unique_symbol = shift @PANTHER_symbols;
-                    $id_symbol_and_description{$orf_data{$1}[2]}[0] = $unique_symbol;
-                    $id_symbol_and_description{$orf_data{$1}[2]}[1] = $fetched_description;
+                    $id_symbol_and_description{$orf_data{$1}[3]}[0] = $unique_symbol;
+                    $id_symbol_and_description{$orf_data{$1}[3]}[1] = $fetched_description;
                 }
                 else {
                     die "ERROR: the array PANTHER_symbols is empty, did it run out of symbols?\n";
@@ -1751,18 +1752,16 @@ if ($STEP == 5) { # check if this step should be performed or not
             }
         }
         if ($line =~ /^\S+_(orf\d+)\sPfam\sprotein_match\s+(\d+)\s+(\d+).+;signature_desc=(.+?);Name=(\S+?);/) { # Match to Pfam annotation
-            $orf_data{$1}[3] = $2; # Pfam left bound
-            $orf_data{$1}[4] = $3; # Pfam right bound
-            $orf_data{$1}[5] = $5; # Pfam id
+            $orf_data{$1}[4] = $2; # Pfam left bound
+            $orf_data{$1}[5] = $3; # Pfam right bound
+            $orf_data{$1}[6] = $5; # Pfam id
             my $description = $4;
-            unless (exists $id_symbol_and_description{$orf_data{$1}[5]}[0]) { # this symbol has not been seen before need to assign unique symbol and fetch description
+            unless (exists $id_symbol_and_description{$orf_data{$1}[6]}[0]) { # this symbol has not been seen before need to assign unique symbol and fetch description
                 # populate %id_symbol_and_description with unique symbol and description
                 if (@Pfam_symbols) { # check that there are symbols left, die otherwise
-                    print "$Pfam_symbols[0]\t";
                     my $unique_symbol = shift @Pfam_symbols;
-                    print "$unique_symbol\n";
-                    $id_symbol_and_description{$orf_data{$1}[5]}[0] = $unique_symbol;
-                    $id_symbol_and_description{$orf_data{$1}[5]}[1] = $description;
+                    $id_symbol_and_description{$orf_data{$1}[6]}[0] = $unique_symbol;
+                    $id_symbol_and_description{$orf_data{$1}[6]}[1] = $description;
                 }
                 else {
                     die "ERROR: the array Pfam_symbols is empty, did it run out of symbols?\n";
@@ -1869,10 +1868,26 @@ if ($STEP == 5) { # check if this step should be performed or not
             }
         }
         close OUTPUT;
-        
+
+        # Align the amino acid sequences
+        if (@nucleotide_sequence_order) { # check that there are sequences to align
+            my $aa_alignment_input_file = File::Temp->new(UNLINK => 1); # temporary file for alignment input
+            my $aa_alignment_output_file = File::Temp->new(UNLINK => 1); # temporary file for alignment output
+            open (ALI_IN, ">", $aa_alignment_input_file) or die "ERROR: cannot create temporary file $aa_alignment_input_file $!\n";
+            for (my $i=0; $i<scalar @nucleotide_sequence_order; $i++) {
+                foreach my $orf (@{ $sequence_orfs{$nucleotide_sequence_order[$i]} }) { # scroll through the ORFs               
+                    print ALI_IN ">$orf\n$orf_data{$orf}[0]\n";
+                };
+            }
+            close ALI_IN;
+            `mafft --quiet --thread -1 $aa_alignment_input_file > $aa_alignment_output_file`;
+            if ($?) { die "Error executing mafft when aligning proteins, error code $?\n"}
+            `cp $aa_alignment_output_file /home/peter/Desktop/temp.maf`;
+            
+        }
         print "cluster: $cluster_number\n";exit;
-### continue here ####
     }
+    
 }
 
 close ANALYSIS;
