@@ -1703,15 +1703,14 @@ if ($STEP == 5) { # check if this step should be performed or not
     }
 
     while (my $line = <INTERPRO>) {
-        if ($line =~ /^(\S+_\d+_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s\d+\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us the larger ORF information
-            push @{ $sequence_orfs{$1} }, $2; # assign orf to a nucleotide sequence <-- need to add to this where ORF starts and ends
-            $orf_data{$2}[0] = $interpro_fasta{$5}; # record the ORF amino acid sequence
-            $orf_data{$2}[1] = $3; # record the left bound (don't need this)
+        if ($line =~ /^(\S+_\d+_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us the ORF information
+            push @{ $sequence_orfs{$1} }, "$2 $3 $4"; # assign orf and location information to a nucleotide sequence 
+            $orf_data{$2}[0] = $interpro_fasta{$6}; # record the ORF amino acid sequence
             # record orientation
-            if ($4 eq "+") {
+            if ($5 eq "+") {
                 $cluster_orientation{$2}[0] += 1;
             }
-            elsif ($4 eq "-") {
+            elsif ($5 eq "-") {
                 $cluster_orientation{$2}[1] += 1;
             }
             else {
@@ -1875,12 +1874,19 @@ if ($STEP == 5) { # check if this step should be performed or not
             my $aa_alignment_input_file = File::Temp->new(UNLINK => 1); # temporary file for alignment input
             my $aa_alignment_output_file = File::Temp->new(UNLINK => 1); # temporary file for alignment output
 #            open (ALI_IN, ">", $aa_alignment_input_file) or die "ERROR: cannot create temporary file $aa_alignment_input_file $!\n";
+            my %sort_orfs; # for the current nucleotide sequence, this hash has the ORFs and bounds as key and the left bound as value, this is used to sort the orfs in increasing order of the left bound for the alignment
             for (my $i=0; $i<scalar @nucleotide_sequence_order; $i++) {
-                print "$nucleotide_sequence_order[$i]\t";
-                foreach my $orf (@{ $sequence_orfs{$nucleotide_sequence_order[$i]} }) { # scroll through the ORFs               
-                    print "$orf ";
+                print "$nucleotide_sequence_order[$i]\n";
+                foreach my $orf_info (@{ $sequence_orfs{$nucleotide_sequence_order[$i]} }) { # scroll through the ORFs  
+                    my @parse_orf_info = split " ", $orf_info;             
+                    $sort_orfs{$orf_info} = $parse_orf_info[1];
                 };
-                print "\n";
+
+                # sort the orfs by left bound and print amino acid sequence
+                for my $key (sort { $sort_orfs{$a} <=> $sort_orfs{$b} } keys %sort_orfs) {
+                    print "$key\n";
+                }
+  
             }
             # close ALI_IN;
             # `mafft --quiet --thread -1 $aa_alignment_input_file > $aa_alignment_output_file`;
