@@ -1874,8 +1874,8 @@ if ($STEP == 5) { # check if this step should be performed or not
             my $aa_alignment_input_file = File::Temp->new(UNLINK => 1); # temporary file for alignment input
             my $aa_alignment_output_file = File::Temp->new(UNLINK => 1); # temporary file for alignment output
 #            open (ALI_IN, ">", $aa_alignment_input_file) or die "ERROR: cannot create temporary file $aa_alignment_input_file $!\n";
-            my %sort_orfs; # for the current nucleotide sequence, this hash has the ORFs and bounds as key and the left bound as value, this is used to sort the orfs in increasing order of the left bound for the alignment
             for (my $i=0; $i<scalar @nucleotide_sequence_order; $i++) {
+                my %sort_orfs; # for the current nucleotide sequence, this hash has the ORFs and bounds as key and the left bound as value, this is used to sort the orfs in increasing order of the left bound for the alignment
                 print "$nucleotide_sequence_order[$i]\n";
                 foreach my $orf_info (@{ $sequence_orfs{$nucleotide_sequence_order[$i]} }) { # scroll through the ORFs  
                     my @parse_orf_info = split " ", $orf_info;             
@@ -1894,7 +1894,7 @@ if ($STEP == 5) { # check if this step should be performed or not
             # `cp $aa_alignment_output_file /home/peter/Desktop/temp.maf`;
             
         }
-        print "cluster: $cluster_number\n";exit;
+        print "cluster: $cluster_number\n";
     }
     
 }
