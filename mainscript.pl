@@ -1546,7 +1546,7 @@ if ($STEP == 5) { # check if this step should be performed or not
     }
 
     print ANALYSIS "Running STEP 5\n";
-    print ANALYSIS "\tInterpo file name: $INTERPRO_FILENAME\n";
+    print ANALYSIS "\tInterpro file name: $INTERPRO_FILENAME\n";
     print ANALYSIS "\tCombined clusters output file name: $COMBINED_CLUSTERS_OUTPUT_FILENAME\n";
     
     ## Identify any sequences that overlap in the input sequences. Write all the location data to a bed file,
@@ -1685,7 +1685,7 @@ if ($STEP == 5) { # check if this step should be performed or not
     # Parse the interpro results file, identify relevant information into a series of hashes
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
     # The 3 hashes below carry information about the nucleotide sequence --> orf from interpro --> pfam or PANTHER id --> start and stop on the amino acid sequence --> description
-    my %sequence_orfs; # nucleotide sequence as key and array of ORFs names as value
+    my %nucleotide_orf; # nucleotide locus name as key and ORF name as value, assume there is only one ORF per locus
     my %orf_data; # orf name from interpro as key and as reference an array with information on input sequence name --> through Pfam annotation
     my %id_symbol_and_description; # unique symbol and description assigned to every Pfam or PANTHER id
     
@@ -1702,76 +1702,144 @@ if ($STEP == 5) { # check if this step should be performed or not
         }
     }
 
+    # Store the data from the Interpro file into hash, this makes sure that duplicate records are not recorded more than once
+    open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
+    my %interpro_data; # has the genomic location as key (assumed to be unique) and as value an array with [0] getorf line (only 1), [1] all PANTHER lines, [2] all Pfam lines
+    my $total_records_number; # count of total records
+    my $duplicated_records_number; # count that keeps track of how many duplicated records were identified
+    my $current_genomic_location; 
     while (my $line = <INTERPRO>) {
-        if ($line =~ /^(\S+_\d+_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us the ORF information
-            push @{ $sequence_orfs{$1} }, "$2 $3 $4"; # assign orf and location information to a nucleotide sequence 
-            $orf_data{$2}[0] = $interpro_fasta{$6}; # record the ORF amino acid sequence
-            # record orientation
-            if ($5 eq "+") {
-                $cluster_orientation{$2}[0] += 1;
-            }
-            elsif ($5 eq "-") {
-                $cluster_orientation{$2}[1] += 1;
+        if ($line =~ /##sequence-region\s(\S+)\s\d+\s\d+/) { 
+            $total_records_number++; 
+            $current_genomic_location = $1;
+            # if (exists $interpro_data{$current_genomic_location}[0]) { # test if a getorf line has been seen at this genomic location already
+            #     $duplicated_records_number++;
+            # }
+        }
+        if ($line =~ /$current_genomic_location.(orf\d+)\sgetorf\sORF\s/){
+            $interpro_data{$current_genomic_location}[0] .= $line;
+        }
+        if ($line =~ /$current_genomic_location\S+\s+PANTHER\sprotein_match\s/) {
+            $interpro_data{$current_genomic_location}[1] .= $line;
+        }
+        if ($line =~ /$current_genomic_location\S+\sPfam\sprotein_match\s/) {
+            $interpro_data{$current_genomic_location}[2] .= $line;
+        }
+    }    
+    close INTERPRO;
+    # update the analysis README with stats on how many records were ignored
+    print ANALYSIS "\tInterpro file analysis: identified a total of $total_records_number genomic location of which $duplicated_records_number are duplicates. Duplicates are treated as a single entry from here on.\n";
+
+    # Detailed analysis of loci in the interpro file
+    foreach my $locus (keys %interpro_data) {
+        my @lines = split "\n", $interpro_data{$locus}[0];
+        foreach my $line (@lines) {
+            if ($line =~ /^(\S+_\d+_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us the ORF information
+                $nucleotide_orf{$locus} .= "$2 ";
+                $orf_data{$2}[0] .= "$interpro_fasta{$6} "; # record the ORF amino acid sequence
+                $orf_data{$2}[1] .= "$3 "; # record ORF nucleotide position (may not need this, but just in case)
+                $orf_data{$2}[2] .= "$4 "; # record ORF nucleotide position (may not need this, but just in case)
+                # record orientation
+                if ($5 eq "+") {
+                    $cluster_orientation{$2}[0] += 1;
+                }
+                elsif ($5 eq "-") {
+                    $cluster_orientation{$2}[1] += 1;
+                }
+                else {
+                    die "ERROR: In the interpro getorf line below the orientation could not be determined\n$interpro_data{$locus}[0]";
+                }
             }
             else {
-                die "ERROR: In the interpro line below could not determine orientation\n$line";
+                die "ERROR: The Interpro getorf line below could not be parsed\n$interpro_data{$locus}[0]";
             }
         }
 
-        if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match\s+(\d+)\s+(\d+).+;Name=(\S+?);/) { # Match to PANTHER annotation
-            $orf_data{$1}[1] = $2; # PANTHER left bound
-            $orf_data{$1}[2] = $3; # PANTHER right bound
-            $orf_data{$1}[3] = $4; # PANTHER id
-            unless (exists $id_symbol_and_description{$orf_data{$1}[3]}[0]) { # this symbol has not been seen before need to assign unique symbol and fetch description
-               # fetch the description of this id on the web
-                my $url = "https://www.ebi.ac.uk/interpro/api/entry/panther/$orf_data{$1}[3]/?format=json";
-                my $ua = LWP::UserAgent->new(timeout => 30);
-                $ua->agent('Mozilla/5.0');
-                my $response = $ua->get($url);
-                if (!$response->is_success) {
-                    my $code = $response->code;
-                    if ($code == 404) {
-                        die "Error: PANTHER entry '$orf_data{$1}[3]' not found.\n";
-                    } else {
-                        die "Error: HTTP request failed with status $code in sub fetch_PANTHER_description: " . $response->status_line . "\n";
+        # PANTHER lines, go through all the lines
+        my @lines = split "\n", $interpro_data{$locus}[1];
+        foreach my $line (@lines) {
+            if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match\s+(\d+)\s+(\d+).+;Name=(\S+?);/) { # Match to PANTHER annotation
+                my $current_left_bound = $2;
+                my $current_right_bound = $3;
+                my $current_panther_id = $4;
+                $orf_data{$1}[3] .= "$current_left_bound "; # PANTHER left bounds in order
+                $orf_data{$1}[4] .= "$current_right_bound "; # PANTHER right bounds in order
+                $orf_data{$1}[5] .= "$current_panther_id "; # PANTHER ids in order
+                unless (exists $id_symbol_and_description{$current_panther_id}[0]) { # this symbol has not been seen before need to assign unique symbol and fetch description
+                # fetch the description of this id on the web
+                    my $url = "https://www.ebi.ac.uk/interpro/api/entry/panther/$current_panther_id/?format=json";
+                    my $ua = LWP::UserAgent->new(timeout => 30);
+                    $ua->agent('Mozilla/5.0');
+                    my $response = $ua->get($url);
+                    if (!$response->is_success) {
+                        my $code = $response->code;
+                        if ($code == 404) {
+                            die "Error: PANTHER entry '$current_panther_id' not found.\n";
+                        } else {
+                            die "Error: HTTP request failed with status $code in sub fetch_PANTHER_description: " . $response->status_line . "\n";
+                        }
                     }
-                }
-                my $data = decode_json($response->decoded_content);
-                my $fetched_description = $data->{metadata}{name}{name}  // 'N/A';
+                    my $data = decode_json($response->decoded_content);
+                    my $fetched_description = $data->{metadata}{name}{name}  // 'N/A';
 
-                # populate %id_symbol_and_description with unique symbol and description
-                if (@PANTHER_symbols) { # check that there are symbols left, die otherwise
-                    my $unique_symbol = shift @PANTHER_symbols;
-                    $id_symbol_and_description{$orf_data{$1}[3]}[0] = $unique_symbol;
-                    $id_symbol_and_description{$orf_data{$1}[3]}[1] = $fetched_description;
-                }
-                else {
-                    die "ERROR: the array PANTHER_symbols is empty, did it run out of symbols?\n";
-                }
+                    # populate %id_symbol_and_description with unique symbol and description
+                    if (@PANTHER_symbols) { # check that there are symbols left, die otherwise
+                        my $unique_symbol = shift @PANTHER_symbols;
+                        $id_symbol_and_description{$current_panther_id}[0] = $unique_symbol;
+                        $id_symbol_and_description{$current_panther_id}[1] = $fetched_description;
+                    }
+                    else {
+                        die "ERROR: the array PANTHER_symbols is empty, did it run out of symbols?\n";
+                    }
 
+                }
+            }
+            else {
+                die "ERROR: The Interpro PANTHER line below could not be parsed\n$interpro_data{$locus}[1]";
             }
         }
-        if ($line =~ /^\S+_(orf\d+)\sPfam\sprotein_match\s+(\d+)\s+(\d+).+;signature_desc=(.+?);Name=(\S+?);/) { # Match to Pfam annotation
-            $orf_data{$1}[4] = $2; # Pfam left bound
-            $orf_data{$1}[5] = $3; # Pfam right bound
-            $orf_data{$1}[6] = $5; # Pfam id
-            my $description = $4;
-            unless (exists $id_symbol_and_description{$orf_data{$1}[6]}[0]) { # this symbol has not been seen before need to assign unique symbol and fetch description
-                # populate %id_symbol_and_description with unique symbol and description
-                if (@Pfam_symbols) { # check that there are symbols left, die otherwise
-                    my $unique_symbol = shift @Pfam_symbols;
-                    $id_symbol_and_description{$orf_data{$1}[6]}[0] = $unique_symbol;
-                    $id_symbol_and_description{$orf_data{$1}[6]}[1] = $description;
-                }
-                else {
-                    die "ERROR: the array Pfam_symbols is empty, did it run out of symbols?\n";
-                }
-                
-            }
-        }   
-    }
-    close INTERPRO;
 
+        # # Pfam line, check if it exists first, then if it's formated correctly 
+        # if (exists $interpro_data{$locus}[2]) {
+        #     if ($interpro_data{$locus}[2] =~ /^\S+_(orf\d+)\sPfam\sprotein_match\s+(\d+)\s+(\d+).+;signature_desc=(.+?);Name=(\S+?);/) { # Match to Pfam annotation
+        #         $orf_data{$1}[6] = $2; # Pfam left bound
+        #         $orf_data{$1}[7] = $3; # Pfam right bound
+        #         $orf_data{$1}[8] = $5; # Pfam id
+        #         my $description = $4;
+        #         unless (exists $id_symbol_and_description{$orf_data{$1}[8]}[0]) { # this symbol has not been seen before need to assign unique symbol and fetch description
+        #             # populate %id_symbol_and_description with unique symbol and description
+        #             if (@Pfam_symbols) { # check that there are symbols left, die otherwise
+        #                 my $unique_symbol = shift @Pfam_symbols;
+        #                 $id_symbol_and_description{$orf_data{$1}[8]}[0] = $unique_symbol;
+        #                 $id_symbol_and_description{$orf_data{$1}[8]}[1] = $description;
+        #             }
+        #             else {
+        #                 die "ERROR: the array Pfam_symbols is empty, did it run out of symbols?\n";
+        #             }
+                    
+        #         }
+        #     } 
+        #     else {
+        #         die "ERROR: The Interpro Pfam line below could not be parsed\n$interpro_data{$locus}[2]";
+        #     } 
+        # } 
+    }
+  
+foreach my $locus (keys %interpro_data) {
+    my $orf = $nucleotide_orf{$locus};
+    print "$locus\t$orf\n";
+    my @data = split " ", $orf;
+    foreach my $d (@data) {
+        print "$orf_data{$d}[1]\n";
+        print "$orf_data{$d}[2]\n";
+    }
+    # print "PANTHER:\n";
+    # print "$orf_data{$orf}[3]\n";
+    # print "$orf_data{$orf}[4]\n";
+    # print "$orf_data{$orf}[5]\n";
+
+} 
+exit;
     ## Align the nucleotide sequences for each cluster and make a report
     my @nucleotide_sequence_order; # holds the names of the nucleotide sequences in the order they are printed, this is so that 
     foreach my $cluster_number (keys %cluster_fasta) {
@@ -1851,22 +1919,22 @@ if ($STEP == 5) { # check if this step should be performed or not
             }
         }
 
-        # first print sequences that have ORFs and don't overlap
-        print OUTPUT ">Sequences_with_ORFs\nNNNNNNNNNN\n";
-        foreach my $seqname (keys %alignment_sequence_names) {
-            if ((exists $sequence_orfs{$seqname}) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
-                print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
-                push @nucleotide_sequence_order, $seqname; # update the order in which these have been printed
-            }
-        }
+        # # first print sequences that have ORFs and don't overlap
+        # print OUTPUT ">Sequences_with_ORFs\nNNNNNNNNNN\n";
+        # foreach my $seqname (keys %alignment_sequence_names) {
+        #     if ((exists $sequence_orfs{$seqname}) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
+        #         print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
+        #         push @nucleotide_sequence_order, $seqname; # update the order in which these have been printed
+        #     }
+        # }
 
-        # second print sequences that don't have ORF and don't overlap
-        print OUTPUT ">Sequences_no_ORFs\nNNNNNNNNNN\n";
-        foreach my $seqname (keys %alignment_sequence_names) {
-            if ((!exists $sequence_orfs{$seqname}) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
-                print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
-            }
-        }
+        # # second print sequences that don't have ORF and don't overlap
+        # print OUTPUT ">Sequences_no_ORFs\nNNNNNNNNNN\n";
+        # foreach my $seqname (keys %alignment_sequence_names) {
+        #     if ((!exists $sequence_orfs{$seqname}) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
+        #         print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
+        #     }
+        # }
         close OUTPUT;
 
         # Align the amino acid sequences
@@ -1877,10 +1945,10 @@ if ($STEP == 5) { # check if this step should be performed or not
             for (my $i=0; $i<scalar @nucleotide_sequence_order; $i++) {
                 my %sort_orfs; # for the current nucleotide sequence, this hash has the ORFs and bounds as key and the left bound as value, this is used to sort the orfs in increasing order of the left bound for the alignment
                 print "$nucleotide_sequence_order[$i]\n";
-                foreach my $orf_info (@{ $sequence_orfs{$nucleotide_sequence_order[$i]} }) { # scroll through the ORFs  
-                    my @parse_orf_info = split " ", $orf_info;             
-                    $sort_orfs{$orf_info} = $parse_orf_info[1];
-                };
+                # foreach my $orf_info (@{ $sequence_orfs{$nucleotide_sequence_order[$i]} }) { # scroll through the ORFs  
+                #     my @parse_orf_info = split " ", $orf_info;             
+                #     $sort_orfs{$orf_info} = $parse_orf_info[1];
+                # };
 
                 # sort the orfs by left bound and print amino acid sequence
                 for my $key (sort { $sort_orfs{$a} <=> $sort_orfs{$b} } keys %sort_orfs) {
