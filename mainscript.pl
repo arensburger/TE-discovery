@@ -1732,8 +1732,10 @@ if ($STEP == 5) { # check if this step should be performed or not
 
     # Detailed analysis of loci in the interpro file
     foreach my $locus (keys %interpro_data) {
-        my @lines = split "\n", $interpro_data{$locus}[0];
-        foreach my $line (@lines) {
+
+        # go through the Interpro "getorf" lines for this genomic location
+        my @orf_lines = split "\n", $interpro_data{$locus}[0];
+        foreach my $line (@orf_lines) {
             if ($line =~ /^(\S+_\d+_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us the ORF information
                 $nucleotide_orf{$locus} .= "$2 ";
                 $orf_data{$2}[0] .= "$interpro_fasta{$6} "; # record the ORF amino acid sequence
@@ -1755,9 +1757,9 @@ if ($STEP == 5) { # check if this step should be performed or not
             }
         }
 
-        # PANTHER lines, go through all the lines
-        my @lines = split "\n", $interpro_data{$locus}[1];
-        foreach my $line (@lines) {
+        # go through PANTHER lines at this genomic location
+        my @PANTHER_lines = split "\n", $interpro_data{$locus}[1];
+        foreach my $line (@PANTHER_lines) {
             if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match\s+(\d+)\s+(\d+).+;Name=(\S+?);/) { # Match to PANTHER annotation
                 my $current_left_bound = $2;
                 my $current_right_bound = $3;
@@ -1799,45 +1801,47 @@ if ($STEP == 5) { # check if this step should be performed or not
             }
         }
 
-        # # Pfam line, check if it exists first, then if it's formated correctly 
-        # if (exists $interpro_data{$locus}[2]) {
-        #     if ($interpro_data{$locus}[2] =~ /^\S+_(orf\d+)\sPfam\sprotein_match\s+(\d+)\s+(\d+).+;signature_desc=(.+?);Name=(\S+?);/) { # Match to Pfam annotation
-        #         $orf_data{$1}[6] = $2; # Pfam left bound
-        #         $orf_data{$1}[7] = $3; # Pfam right bound
-        #         $orf_data{$1}[8] = $5; # Pfam id
-        #         my $description = $4;
-        #         unless (exists $id_symbol_and_description{$orf_data{$1}[8]}[0]) { # this symbol has not been seen before need to assign unique symbol and fetch description
-        #             # populate %id_symbol_and_description with unique symbol and description
-        #             if (@Pfam_symbols) { # check that there are symbols left, die otherwise
-        #                 my $unique_symbol = shift @Pfam_symbols;
-        #                 $id_symbol_and_description{$orf_data{$1}[8]}[0] = $unique_symbol;
-        #                 $id_symbol_and_description{$orf_data{$1}[8]}[1] = $description;
-        #             }
-        #             else {
-        #                 die "ERROR: the array Pfam_symbols is empty, did it run out of symbols?\n";
-        #             }
+        # go through Pfam lines at this genomic location
+        my @Pfam_lines = split "\n", $interpro_data{$locus}[2];
+        foreach my $line (@Pfam_lines) {           
+            if ($line =~ /^\S+_(orf\d+)\sPfam\sprotein_match\s+(\d+)\s+(\d+).+;signature_desc=(.+?);Name=(\S+?);/) { # Match to Pfam annotation
+                my $current_left_bound = $2;
+                my $current_right_bound = $3;
+                my $current_pfam_id = $5;
+                $orf_data{$1}[6] .= "$current_left_bound "; # Pfam left bound
+                $orf_data{$1}[7] .= "$current_right_bound "; # Pfam right bound
+                $orf_data{$1}[8] .= "$current_pfam_id "; # Pfam id
+                my $pfam_description = $4;
+                unless (exists $id_symbol_and_description{$current_pfam_id}) { # if this symbol has not been seen before need to assign unique symbol and fetch description
+                    # populate %id_symbol_and_description with unique symbol and description
+                    if (@Pfam_symbols) { # check that there are symbols left, die otherwise
+                        my $unique_symbol = shift @Pfam_symbols;
+                        $id_symbol_and_description{$current_pfam_id}[0] = $unique_symbol;
+                        $id_symbol_and_description{$current_pfam_id}[1] = $pfam_description;
+                    }
+                    else {
+                        die "ERROR: the array Pfam_symbols is empty, did it run out of symbols?\n";
+                    }
                     
-        #         }
-        #     } 
-        #     else {
-        #         die "ERROR: The Interpro Pfam line below could not be parsed\n$interpro_data{$locus}[2]";
-        #     } 
-        # } 
+                }
+            } 
+            else {
+                die "ERROR: The Interpro Pfam line below could not be parsed\n$line";
+            } 
+        } 
     }
-  
+
 foreach my $locus (keys %interpro_data) {
     my $orf = $nucleotide_orf{$locus};
-    print "$locus\t$orf\n";
+    print "$locus\n";
     my @data = split " ", $orf;
     foreach my $d (@data) {
-        print "$orf_data{$d}[1]\n";
-        print "$orf_data{$d}[2]\n";
-    }
-    # print "PANTHER:\n";
-    # print "$orf_data{$orf}[3]\n";
-    # print "$orf_data{$orf}[4]\n";
-    # print "$orf_data{$orf}[5]\n";
-
+        $orf_data{$d}[5] =~ s/\s//g; # remove extra spaces from PANTHER ID
+        $orf_data{$d}[8] =~ s/\s//g; # remove extra spaces from Pfam ID
+        print "\t$d\t$orf_data{$d}[1]\t$orf_data{$d}[2]\n";
+        print "\t$orf_data{$d}[3]\t$orf_data{$d}[4]\t$id_symbol_and_description{$orf_data{$d}[5]}[0]\t$id_symbol_and_description{$orf_data{$d}[5]}[1]\n";
+        print "\t$orf_data{$d}[6]\t$orf_data{$d}[7]\t$id_symbol_and_description{$orf_data{$d}[8]}[0]\t$id_symbol_and_description{$orf_data{$d}[8]}[1]\n";
+    }    
 } 
 exit;
     ## Align the nucleotide sequences for each cluster and make a report
