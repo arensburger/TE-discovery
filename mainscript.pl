@@ -1736,16 +1736,16 @@ if ($STEP == 5) { # check if this step should be performed or not
         # go through the Interpro "getorf" lines for this genomic location
         my @orf_lines = split "\n", $interpro_data{$locus}[0];
         foreach my $line (@orf_lines) {
-            if ($line =~ /^(\S+_\d+_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us the ORF information
-                $nucleotide_orf{$locus} .= "$2 ";
-                $orf_data{$2}[0] .= "$interpro_fasta{$6} "; # record the ORF amino acid sequence
-                $orf_data{$2}[1] .= "$3 "; # record ORF nucleotide position (may not need this, but just in case)
-                $orf_data{$2}[2] .= "$4 "; # record ORF nucleotide position (may not need this, but just in case)
+            if ($line =~ /^(\S+_(\d+)_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us the ORF information
+                $nucleotide_orf{$locus} .= "$3 ";
+                $orf_data{$3}[0] .= "$interpro_fasta{$7} "; # record the ORF amino acid sequence
+                $orf_data{$3}[1] .= "$4 "; # record ORF nucleotide position 
+                $orf_data{$3}[2] .= "$5 "; # record ORF nucleotide position 
                 # record orientation
-                if ($5 eq "+") {
+                if ($6 eq "+") {
                     $cluster_orientation{$2}[0] += 1;
                 }
-                elsif ($5 eq "-") {
+                elsif ($6 eq "-") {
                     $cluster_orientation{$2}[1] += 1;
                 }
                 else {
@@ -1831,19 +1831,19 @@ if ($STEP == 5) { # check if this step should be performed or not
         } 
     }
 
-foreach my $locus (keys %interpro_data) {
-    my $orf = $nucleotide_orf{$locus};
-    print "$locus\n";
-    my @data = split " ", $orf;
-    foreach my $d (@data) {
-        $orf_data{$d}[5] =~ s/\s//g; # remove extra spaces from PANTHER ID
-        $orf_data{$d}[8] =~ s/\s//g; # remove extra spaces from Pfam ID
-        print "\t$d\t$orf_data{$d}[1]\t$orf_data{$d}[2]\n";
-        print "\t$orf_data{$d}[3]\t$orf_data{$d}[4]\t$id_symbol_and_description{$orf_data{$d}[5]}[0]\t$id_symbol_and_description{$orf_data{$d}[5]}[1]\n";
-        print "\t$orf_data{$d}[6]\t$orf_data{$d}[7]\t$id_symbol_and_description{$orf_data{$d}[8]}[0]\t$id_symbol_and_description{$orf_data{$d}[8]}[1]\n";
-    }    
-} 
-exit;
+# foreach my $locus (keys %interpro_data) {
+#     my $orf = $nucleotide_orf{$locus};
+#     print "$locus\n";
+#     my @data = split " ", $orf;
+#     foreach my $d (@data) {
+#         $orf_data{$d}[5] =~ s/\s//g; # remove extra spaces from PANTHER ID
+#         $orf_data{$d}[8] =~ s/\s//g; # remove extra spaces from Pfam ID
+#         print "\t$d\t$orf_data{$d}[1]\t$orf_data{$d}[2]\n";
+#         print "\t$orf_data{$d}[3]\t$orf_data{$d}[4]\t$id_symbol_and_description{$orf_data{$d}[5]}[0]\t$id_symbol_and_description{$orf_data{$d}[5]}[1]\n";
+#         print "\t$orf_data{$d}[6]\t$orf_data{$d}[7]\t$id_symbol_and_description{$orf_data{$d}[8]}[0]\t$id_symbol_and_description{$orf_data{$d}[8]}[1]\n";
+#     }    
+# } 
+
     ## Align the nucleotide sequences for each cluster and make a report
     my @nucleotide_sequence_order; # holds the names of the nucleotide sequences in the order they are printed, this is so that 
     foreach my $cluster_number (keys %cluster_fasta) {
@@ -1923,43 +1923,58 @@ exit;
             }
         }
 
-        # # first print sequences that have ORFs and don't overlap
-        # print OUTPUT ">Sequences_with_ORFs\nNNNNNNNNNN\n";
-        # foreach my $seqname (keys %alignment_sequence_names) {
-        #     if ((exists $sequence_orfs{$seqname}) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
-        #         print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
-        #         push @nucleotide_sequence_order, $seqname; # update the order in which these have been printed
-        #     }
-        # }
+        # first print sequences that have ORFs and don't overlap
+        print OUTPUT ">Sequences_with_ORFs\nNNNNNNNNNN\n";
+        foreach my $seqname (keys %alignment_sequence_names) {
+            if ((exists $interpro_data{$seqname}[0]) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
+                print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
+                push @nucleotide_sequence_order, $seqname; # update the order in which these have been printed
+            }
+        }
 
-        # # second print sequences that don't have ORF and don't overlap
-        # print OUTPUT ">Sequences_no_ORFs\nNNNNNNNNNN\n";
-        # foreach my $seqname (keys %alignment_sequence_names) {
-        #     if ((!exists $sequence_orfs{$seqname}) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
-        #         print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
-        #     }
-        # }
+        # second print sequences that don't have ORF and don't overlap
+        print OUTPUT ">Sequences_no_ORFs\nNNNNNNNNNN\n";
+        foreach my $seqname (keys %alignment_sequence_names) {
+            if ((!exists $interpro_data{$seqname}[0]) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
+                print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
+            }
+        }
         close OUTPUT;
 
         # Align the amino acid sequences
         if (@nucleotide_sequence_order) { # check that there are sequences to align
-            my $aa_alignment_input_file = File::Temp->new(UNLINK => 1); # temporary file for alignment input
+#            my $aa_alignment_input_file = File::Temp->new(UNLINK => 1); # temporary file for alignment input
             my $aa_alignment_output_file = File::Temp->new(UNLINK => 1); # temporary file for alignment output
-#            open (ALI_IN, ">", $aa_alignment_input_file) or die "ERROR: cannot create temporary file $aa_alignment_input_file $!\n";
-            for (my $i=0; $i<scalar @nucleotide_sequence_order; $i++) {
-                my %sort_orfs; # for the current nucleotide sequence, this hash has the ORFs and bounds as key and the left bound as value, this is used to sort the orfs in increasing order of the left bound for the alignment
-                print "$nucleotide_sequence_order[$i]\n";
-                # foreach my $orf_info (@{ $sequence_orfs{$nucleotide_sequence_order[$i]} }) { # scroll through the ORFs  
-                #     my @parse_orf_info = split " ", $orf_info;             
-                #     $sort_orfs{$orf_info} = $parse_orf_info[1];
-                # };
 
-                # sort the orfs by left bound and print amino acid sequence
-                for my $key (sort { $sort_orfs{$a} <=> $sort_orfs{$b} } keys %sort_orfs) {
-                    print "$key\n";
+            for (my $i=0; $i<scalar @nucleotide_sequence_order; $i++) { # cycle through the nucleotide sequences for this cluster
+                print "$nucleotide_sequence_order[$i]\t";
+                my @orfs = split " ", $nucleotide_orf{$nucleotide_sequence_order[$i]}; 
+                my %sort_orfs; # used to sort orfs by their order on the nucleotide sequence; orf name as key and left bound as value
+                for (my $j=0; $j<scalar @orfs; $j++) { # cycle through the orfs for this nucleotide sequence to populate %sort_orfs
+                    $sort_orfs{$orfs[$j]} = $orf_data{$orfs[$j]}[1];
+ #                   print "$orfs[$j]\t$orf_data{$orfs[$j]}[1]\n";
                 }
-  
+                for my $orf (sort { $sort_orfs{$a} <=> $sort_orfs{$b} } keys %sort_orfs) { # sort the orfs by value, i.e. left bound
+                    print "$orf\t$orf_data{$orf}[1]\t";
+                }
+                print "\n";
             }
+
+#            open (ALI_IN, ">", $aa_alignment_input_file) or die "ERROR: cannot create temporary file $aa_alignment_input_file $!\n";
+            # for (my $i=0; $i<scalar @nucleotide_sequence_order; $i++) {
+            #     my %sort_orfs; # for the current nucleotide sequence, this hash has the ORFs and bounds as key and the left bound as value, this is used to sort the orfs in increasing order of the left bound for the alignment
+            #     print "$nucleotide_sequence_order[$i]\n";
+            #     # foreach my $orf_info (@{ $sequence_orfs{$nucleotide_sequence_order[$i]} }) { # scroll through the ORFs  
+            #     #     my @parse_orf_info = split " ", $orf_info;             
+            #     #     $sort_orfs{$orf_info} = $parse_orf_info[1];
+            #     # };
+
+            #     # sort the orfs by left bound and print amino acid sequence
+            #     for my $key (sort { $sort_orfs{$a} <=> $sort_orfs{$b} } keys %sort_orfs) {
+            #         print "$key\n";
+            #     }
+  
+            # }
             # close ALI_IN;
             # `mafft --quiet --thread -1 $aa_alignment_input_file > $aa_alignment_output_file`;
             # if ($?) { die "Error executing mafft when aligning proteins, error code $?\n"}
