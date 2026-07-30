@@ -1947,7 +1947,7 @@ if ($STEP == 5) { # check if this step should be performed or not
             my $aa_alignment_output_file = File::Temp->new(UNLINK => 1); # temporary file for alignment output
             open (ALI_IN, ">", $aa_alignment_input_file) or die "ERROR: cannot create temporary file $aa_alignment_input_file $!\n";
 
-            # Create the alignment input file for amimo acids. Eeach nucleotide sequence will have the Interpro ORF translations merged
+            # Create the alignment input file for amimo acids. Eeach nucleotide sequence will have the Interpro ORFs (from "getorf") translations merged
             # in order. The sequence order will be the same as for the nucleotide sequence
             for (my $i=0; $i<scalar @nucleotide_sequence_order; $i++) { # cycle through the nucleotide sequences for this cluster
                 my @orfs = split " ", $nucleotide_orf{$nucleotide_sequence_order[$i]}; 
@@ -1957,6 +1957,8 @@ if ($STEP == 5) { # check if this step should be performed or not
                 }
                 print ALI_IN ">$nucleotide_sequence_order[$i]\n"; # print the sequence name title
                 for my $orf (sort { $sort_orfs{$a} <=> $sort_orfs{$b} } keys %sort_orfs) { # sort the orfs by value, i.e. left bound
+                    $orf_data{$orf}[0] =~ s/\s//g; # clean up any remaining white spaces
+# make the PANTHER ID here
                     print ALI_IN "$orf_data{$orf}[0]";
                 }
                 print ALI_IN "\n";
@@ -1967,24 +1969,21 @@ if ($STEP == 5) { # check if this step should be performed or not
             `mafft --quiet --thread -1 $aa_alignment_input_file > $aa_alignment_output_file`;
             if ($?) { die "Error executing mafft when aligning proteins, error code $?\n"}
             my %aligned_orfs = fastatohash($aa_alignment_output_file);
-
+my %unaligned_orfs = fastatohash($aa_alignment_input_file);
             # Add to the alignment file sequences with PANTHER and Pfam information
             for (my $i=0; $i<scalar @nucleotide_sequence_order; $i++) { # cycle through the nucleotide sequences for this cluster
-                print ">$nucleotide_sequence_order[$i]\n";
+                my $PANTHER_sequence = ">$nucleotide_sequence_order[$i]\n"; # sequence of the PANTHER to print later                
                 my @orfs = split " ", $nucleotide_orf{$nucleotide_sequence_order[$i]};
                 my $offset = 0;
+print ">$nucleotide_sequence_order[$i]\n";                 
                 for (my $j=0; $j<scalar @orfs; $j++) { # cycle through the ORFs for this nucleotide sequence
-                    # print "$orfs[$j]\n";
-                    # print "$orf_data{$orfs[$j]}[0]\n";
-                    # print "$orf_data{$orfs[$j]}[3]\n";
-                    # print "$orf_data{$orfs[$j]}[4]\n";
-                    # print "$orf_data{$orfs[$j]}[5]\n";
+print "$orfs[$j]\n";
                     $orf_data{$orfs[$j]}[5] =~ s/\s//g; # clean up the PANTHER id
                     my $symbol_letter_index = 1; # can be 1 or 2, indicates if the 1st or 2nd letter of the symbol is next to be displayed
                     my $one_letter_symbol = substr ($id_symbol_and_description{$orf_data{$orfs[$j]}[5]}[0],0,1); # current single letter of the PANTHER 2 letter symbol to display
                     for (my $k=1; $k<length $orf_data{$orfs[$j]}[0]; $k++) {
                         if (($k >= $offset + $orf_data{$orfs[$j]}[3]) and ($k <= $offset + $orf_data{$orfs[$j]}[4])) {
-                            print "$one_letter_symbol";
+                            $PANTHER_sequence .= "$one_letter_symbol";
                             if ($symbol_letter_index == 1) {
                                 $one_letter_symbol = substr ($id_symbol_and_description{$orf_data{$orfs[$j]}[5]}[0],1,1);
                                 $symbol_letter_index = 2;
@@ -1995,16 +1994,20 @@ if ($STEP == 5) { # check if this step should be performed or not
                             }
                         }
                         else {
-                            print "-";
+                            $PANTHER_sequence .= "-";
                         }
                     }
                     $offset = length $orf_data{$orfs[$j]}[0];   
-                    print "\n";
                 }
-                # print ">$nucleotide_sequence_order[$i]\n";
-                # for (my $l=1; $l<length $aligned_orfs{$nucleotide_sequence_order[$i]}; $l++) { # cycle through each position of the aligned amino acid sequence
-                
+
+                print ">$nucleotide_sequence_order[$i]\n";
+                print "$unaligned_orfs{$nucleotide_sequence_order[$i]}\n";
+                print "$PANTHER_sequence\n";
+                # for (my $l=1; $l<=length $unaligned_orfs{$nucleotide_sequence_order[$i]}; $l++) { # cycle through each position of the aligned amino acid sequence
+                #     my $aa = substr ($unaligned_orfs{$nucleotide_sequence_order[$i]}, $l-1, 1);
+                #     print "$aa"
                 # }
+                # print "\n"; exit;
             }
         }
     }
