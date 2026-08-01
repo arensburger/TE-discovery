@@ -1952,6 +1952,7 @@ if ($STEP == 5) { # check if this step should be performed or not
             my @aa_sequences;   # two dimensional array that holds the amino acid sequence in order to be printed(the same order as the nucleotides)
                                 # the elements are [0] name of the sequence, [1] amino acid sequence, [2] PANTHER sequence, [3] Pfam sequence
             for (my $i=0; $i<scalar @nucleotide_sequence_order; $i++) { # cycle through the nucleotide sequences for this cluster
+                print "$nucleotide_sequence_order[$i]\n";
                 my $aa_sequence; # current aa_sequenc
                 my $PANTHER_sequence; # current PANTHER sequence
                 my $Pfam_sequence; # current Pfam sequence
@@ -1965,64 +1966,73 @@ if ($STEP == 5) { # check if this step should be performed or not
                     $orf_data{$orf}[0] =~ s/\s//g; # clean up any remaining white spaces
                     $aa_sequence .= $orf_data{$orf}[0]; # add the current ORF sequence to the amino acid sequence
                     
-                    # create the PANTHER and Pfam lines matching the current ORF
-                    $orf_data{$orf}[5] =~ s/\s//g; # clean up the PANTHER id
-                    my $PANTHER_symbol1 = substr ($id_symbol_and_description{$orf_data{$orf}[5]}[0],0,1); # first character of PANTHER symbol
-                    my $PANTHER_symbol2 = substr ($id_symbol_and_description{$orf_data{$orf}[5]}[0],1,1);
-                    my $current_PANTHER_symbol = $PANTHER_symbol1;
-                    $orf_data{$orf}[8] =~ s/\s//g; # clean up the Pfam id
-                    my $Pfam_symbol1 = substr ($id_symbol_and_description{$orf_data{$orf}[8]}[0],0,1);
-                    my $Pfam_symbol2 = substr ($id_symbol_and_description{$orf_data{$orf}[8]}[0],1,1);
-                    my $current_Pfam_symbol = $Pfam_symbol1;
+                    # go through all the PANTHER and Pfam annotations associated with this ORF
+                    my @PANTHER_ids = split " ", $orf_data{$orf}[5]; 
+                    my @PANTHER_start = split " ", $orf_data{$orf}[3];
+                    my @PANTHER_end = split " ", $orf_data{$orf}[4];
+                    my @Pfam_ids = split " ", $orf_data{$orf}[8]; 
+                    my @Pfam_start = split " ", $orf_data{$orf}[6];
+                    my @Pfam_end = split " ", $orf_data{$orf}[7];
 
-                    for (my $k=1; $k<=length $orf_data{$orf}[0]; $k++) {
-
-                        # Update the PANTHER sequence
-                        if (($k >=$orf_data{$orf}[3]) and ($k <= $orf_data{$orf}[4])) {
-                            $PANTHER_sequence .= $current_PANTHER_symbol; # assign the current symbol
-                            if ($current_PANTHER_symbol eq $PANTHER_symbol1) { # switch the current PANTHER symbol to the other symbol
-                                $current_PANTHER_symbol = $PANTHER_symbol2;
-                            }
-                            else {
-                                $current_PANTHER_symbol = $PANTHER_symbol1;
-                            }
-                        }
-                        else {
-                            $PANTHER_sequence .= "-";
-                        }
-
-                        # Update the Pfam sequence
-                        if (($k >=$orf_data{$orf}[6]) and ($k <= $orf_data{$orf}[7])) {
-if (length $current_Pfam_symbol == 0) {
-    print "$nucleotide_sequence_order[$i]\n";
-    print "id: $orf_data{$orf}[8]\n";
-    print "bounds1: $orf_data{$orf}[6]\n";
-    print "bounds2: $orf_data{$orf}[7]\n";
-    exit;
-}
-                            $Pfam_sequence .= $current_Pfam_symbol; # assign the current symbol
-                            if ($current_Pfam_symbol eq $Pfam_symbol1) { # switch the current Pfam symbol to the other symbol
-                                $current_Pfam_symbol = $Pfam_symbol2;
-                            }
-                            else {
-                                $current_Pfam_symbol = $Pfam_symbol1;
-                            }
-                        }
-                        else {
-                            $Pfam_sequence .= "-";
-                        }
+                    print "$orf\n";
+                    for (my $s=0; $s < scalar @Pfam_ids; $s++) {
+                        print "id = $Pfam_ids[$s]\t$Pfam_start[$s]\t$Pfam_end[$s]\n"
                     }
-#                    print "current $current_Pfam_symbol\t$current_PANTHER_symbol\n";
+
+
+
+#                     $orf_data{$orf}[5] =~ s/\s//g; # clean up the PANTHER id
+#                     my $PANTHER_symbol1 = substr ($id_symbol_and_description{$orf_data{$orf}[5]}[0],0,1); # first character of PANTHER symbol
+#                     my $PANTHER_symbol2 = substr ($id_symbol_and_description{$orf_data{$orf}[5]}[0],1,1);
+#                     my $current_PANTHER_symbol = $PANTHER_symbol1;
+#                     $orf_data{$orf}[8] =~ s/\s//g; # clean up the Pfam id
+#                     my $Pfam_symbol1 = substr ($id_symbol_and_description{$orf_data{$orf}[8]}[0],0,1);
+#                     my $Pfam_symbol2 = substr ($id_symbol_and_description{$orf_data{$orf}[8]}[0],1,1);
+#                     my $current_Pfam_symbol = $Pfam_symbol1;
+
+#                     for (my $k=1; $k<=length $orf_data{$orf}[0]; $k++) {
+
+#                         # Update the PANTHER sequence
+#                         if (($k >=$orf_data{$orf}[3]) and ($k <= $orf_data{$orf}[4])) {
+#                             $PANTHER_sequence .= $current_PANTHER_symbol; # assign the current symbol
+#                             if ($current_PANTHER_symbol eq $PANTHER_symbol1) { # switch the current PANTHER symbol to the other symbol
+#                                 $current_PANTHER_symbol = $PANTHER_symbol2;
+#                             }
+#                             else {
+#                                 $current_PANTHER_symbol = $PANTHER_symbol1;
+#                             }
+#                         }
+#                         else {
+#                             $PANTHER_sequence .= "-";
+#                         }
+
+#                         # Update the Pfam sequence
+#                         if (($k >=$orf_data{$orf}[6]) and ($k <= $orf_data{$orf}[7])) {
+# if (length $current_Pfam_symbol == 0) {
+#     print "$nucleotide_sequence_order[$i]\n";
+#     print "id: $orf_data{$orf}[8]\n";
+#     print "bounds1: $orf_data{$orf}[6]\n";
+#     print "bounds2: $orf_data{$orf}[7]\n";
+#     exit;
+# }
+#                             $Pfam_sequence .= $current_Pfam_symbol; # assign the current symbol
+#                             if ($current_Pfam_symbol eq $Pfam_symbol1) { # switch the current Pfam symbol to the other symbol
+#                                 $current_Pfam_symbol = $Pfam_symbol2;
+#                             }
+#                             else {
+#                                 $current_Pfam_symbol = $Pfam_symbol1;
+#                             }
+#                         }
+#                         else {
+#                             $Pfam_sequence .= "-";
+#                         }
+#                     }
+# #                    print "current $current_Pfam_symbol\t$current_PANTHER_symbol\n";
                 }
-                # if (length $PANTHER_sequence != length $Pfam_sequence ) {
-                #     print "$nucleotide_sequence_order[$i]\n";
-                #     print "$nucleotide_orf{$nucleotide_sequence_order[$i]}\n";
-                #     print "$PANTHER_sequence\n";
-                #     print "$Pfam_sequence\n";
-                # }
                 # update the array
                 push @aa_sequences, [$nucleotide_sequence_order[$i], $aa_sequence, $PANTHER_sequence, $Pfam_sequence];
             }
+exit;
 # for my $row (@aa_sequences) {
 #     print "@$row[0]\n";
 #     print "@$row[1]\n";
