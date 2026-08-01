@@ -1975,9 +1975,24 @@ if ($STEP == 5) { # check if this step should be performed or not
                     my @Pfam_end = split " ", $orf_data{$orf}[7];
 
                     print "$orf\n";
-                    for (my $s=0; $s < scalar @Pfam_ids; $s++) {
-                        print "id = $Pfam_ids[$s]\t$Pfam_start[$s]\t$Pfam_end[$s]\n"
+                    my $orf_sequence_length = length $orf_data{$orf}[0];
+                    my $orf_PANTHER_sequence = '-' x $orf_sequence_length; # PANTHER sequence just for this ORF assign it to just '-' so there's always something assigned
+                    for (my $s=0; $s < scalar @PANTHER_ids; $s++) {
+                        my $symbol = $id_symbol_and_description{$PANTHER_ids[$s]}[0];
+                            $orf_PANTHER_sequence = update_annotation_sequence($orf_PANTHER_sequence, $PANTHER_start[$s], $PANTHER_end[$s], $symbol, $orf_sequence_length);
+#                        print "$orf_Pfam_sequence\n";
                     }
+                    $PANTHER_sequence .= $orf_PANTHER_sequence;
+
+                    my $orf_Pfam_sequence = '-' x $orf_sequence_length; # Pfam sequence just for this ORF assign it to just '-' so there's always something assigned
+                    for (my $s=0; $s < scalar @Pfam_ids; $s++) {
+                        my $symbol = $id_symbol_and_description{$Pfam_ids[$s]}[0];
+#                        my $sequence_length = length $orf_data{$orf}[0];
+                        print "id = $Pfam_ids[$s]\t$Pfam_start[$s]\t$Pfam_end[$s]\t$symbol\t$orf_sequence_length\n";
+                        $orf_Pfam_sequence = update_annotation_sequence($orf_Pfam_sequence, $Pfam_start[$s], $Pfam_end[$s], $symbol, $orf_sequence_length);
+#                        print "$orf_Pfam_sequence\n";
+                    }
+                    $Pfam_sequence .= $orf_Pfam_sequence;
 
 
 
@@ -2030,6 +2045,7 @@ if ($STEP == 5) { # check if this step should be performed or not
 # #                    print "current $current_Pfam_symbol\t$current_PANTHER_symbol\n";
                 }
                 # update the array
+                print "$aa_sequence\n$PANTHER_sequence\n$Pfam_sequence\n";
                 push @aa_sequences, [$nucleotide_sequence_order[$i], $aa_sequence, $PANTHER_sequence, $Pfam_sequence];
             }
 exit;
@@ -2479,3 +2495,30 @@ sub average_tir_number_and_length {
 
 #     return ($protein);
 # }
+
+# Takes a sequence and add the Pfam or PANTHER annotation to the specified bounds
+sub update_annotation_sequence {
+    my ($sequence, $start, $end, $symbol, $length) = @_;
+    my @seq = split "", $sequence; # easier to modify an array
+    my $symbol1 = substr ($symbol, 0, 1);
+    my $symbol2 = substr ($symbol, 1, 1);
+    my $current_symbol = $symbol1;
+    for (my $i=0; $i < $length; $i++) {
+        if ($i>=($start-1) and $i<=($end-1)) {
+            $seq[$i] = $current_symbol;
+            # switch symbol letter for next time
+            if ($current_symbol eq $symbol1) { 
+                $current_symbol = $symbol2;
+            }
+            else {
+                $current_symbol = $symbol1;
+            }
+        }
+        # else {
+        #     unless (exists $seq[$i]) { # this prevent overwriting an existing annotation
+        #         $seq[$i] = "-";
+        #     }
+#        }
+    }
+    return(join "", @seq);
+}
