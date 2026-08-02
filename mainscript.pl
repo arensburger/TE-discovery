@@ -1992,7 +1992,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                 push @aa_annotation, [$nucleotide_sequence_order[$i], $aa_sequence, $PANTHER_sequence, $Pfam_sequence];
             }
             close ALI_IN;
-
+ 
             # Align the merged, translated ORFs. Put the aligned file into memory.
             `mafft --quiet --thread -1 $aa_alignment_input_file > $aa_alignment_output_file`;
             if ($?) { die "Error executing mafft when aligning proteins, error code $?\n"}
