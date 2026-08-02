@@ -1838,9 +1838,10 @@ if ($STEP == 5) { # check if this step should be performed or not
     }
 
     ## Align the nucleotide sequences for each cluster and make a report
-    my @nucleotide_sequence_order; # holds the names of the nucleotide sequences in the order they are printed, this is so that 
-    foreach my $cluster_number (keys %cluster_fasta) {
+    #my @nucleotide_sequence_order; # holds the names of the nucleotide sequences in the order they are printed 
+    foreach my $cluster_number (keys %cluster_fasta) {   
         print "cluster: $cluster_number\n";
+        my @nucleotide_sequence_order; # holds the names of the nucleotide sequences in the order they are printed
         # align the cluster sequences into a temporary file
         my $cluster_alignment_input_file = File::Temp->new(UNLINK => 1); # temporary file for alignment input
         my $cluster_alignment_output_file = File::Temp->new(UNLINK => 1); # temporary file for alignment output
