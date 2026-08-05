@@ -117,9 +117,6 @@ my $rejection_file_name = "$ANALYSIS_FOLDER/Rejected_sequences.txt"; # file to s
 open (ANALYSIS,'>>', $analysis_parameters_file_name) or die "ERROR: cannot open file $analysis_parameters_file_name\n"; # create or append to file
 open (REJECT, '>>', $rejection_file_name) or die "ERROR, cannot create output file $rejection_file_name\n"; # create or append to file
 
-my $datestring = localtime();
-print ANALYSIS "\nSTARTING ANALYSIS on $datestring\n";
-
 ### PIPELINE STEP 1 identify proteins that match the genome with parameters specified above under
 ###     The output is a list of proteins for further analysis recorded in the file $output_file_name
 
@@ -139,7 +136,8 @@ if (($STEP == 1) or ($STEP == 12)) { # check if this step should be performed or
     print STDERR "Working on STEP 1 ...\n";
 
     ## update the analysis file with what is going on
-    print ANALYSIS "Running STEP 1\n";
+    my $datestring = localtime();
+    print ANALYSIS "Running STEP 1 on $datestring\n";
     print ANALYSIS "\tGENOME_IDENTITY = $GENOME_IDENTITY\n";
     print ANALYSIS "\tCOVERAGE_RATIO = $COVERAGE_RATIO\n";
     print ANALYSIS "\tCOPY_NUMBER = $COPY_NUMBER\n";
@@ -313,7 +311,8 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
     print STDERR "Working on STEP 2 ...\n";
 
     ## update the analysis file with what is being done and paramter values
-    print ANALYSIS "Running STEP 2\n";
+    my $datestring = localtime();
+    print ANALYSIS "Running STEP 2 on $datestring\n";
     print ANALYSIS "\tBLAST_EXTEND = $BLAST_EXTEND\n";
     print ANALYSIS "\tMAX_SEQUENCE_NUMBER = $MAX_SEQUENCE_NUMBER\n";
     print ANALYSIS "\tCONSLEVEL = $CONSLEVEL\n";
@@ -677,7 +676,8 @@ if ($STEP == 3) { # check if this step should be performed or not
     print STDERR "Working on STEP 3 ...\n";
 
      ## update the analysis file with what is going on
-    print ANALYSIS "Running STEP 3\n";
+     my $datestring = localtime();
+    print ANALYSIS "Running STEP 3 on $datestring\n";
 
     my $pkey; # pressed key, used for input from user
     my $elements_left_to_review=1; # number of elements left to review, set to a non-zero value initially so that an initial evaluation will be done
@@ -844,6 +844,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                     my $tir1 = $known_tsdtirs{$l}[2];
                     my $tir2 = $known_tsdtirs{$l}[3];
                     open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
+                    my $datestring = localtime();
                     print README "$datestring, Automated Review 1 result: This is an element, TSD $tsd, TIRs $tir1 and $tir2\n";
                     close README;
                 }
@@ -927,6 +928,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                             if ($?) { die "ERROR: could not create folder $FURTHER_REVIEW_FOLDER_NAME: error code $?\n"}
                         }
                         open (README, ">>$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
+                        my $datestring = localtime();
                         print README "$datestring, in STEP 3 manual review 1, reviewer moved this element to the folder $FURTHER_REVIEW_FOLDER_NAME for further review\n";
                         close README;
                         `mv $ELEMENT_FOLDER/$element_name $FURTHER_REVIEW_FOLDER_NAME`;
@@ -1314,7 +1316,8 @@ if ($STEP == 4) { # check if this step should be performed or not
     }
 
     ## update the analysis file with what is going on
-    print ANALYSIS "Running STEP 4\n";
+    my $datestring = localtime();
+    print ANALYSIS "Running STEP 4 on $datestring\n";
     print ANALYSIS "\tGenome: $INPUT_GENOME\n";
     print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
     print ANALYSIS "\tCombined cluster nucleotide sequences printed to file $COMBINED_CLUSTERS_OUTPUT_FILENAME\n";
@@ -1520,12 +1523,30 @@ if ($STEP == 4) { # check if this step should be performed or not
         }
         else { # this means that no genomic sequences were found for this cluster
             my $datestring = localtime();
-            print REJECT "$datestring\t$clustering_info{$cluster_number}[0]\tSTEP 4\tNo genomic location were found for this (these) element(s)\n";
+            print REJECT "$datestring\t$clustering_info{$cluster_number}[0]\tSTEP 4\tNo genomic location were found for this (these) element(s) where the identified TIRs are properly positioned.\n";
+            # move the elments into the rejected folder
+            my @data = split " ", $clustering_info{$cluster_number}[0];
+            foreach my $element_name (@data) {
+                `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+                if ($?) { die "ERROR moving folder $ELEMENT_FOLDER/$element_name to $reject_folder_path $?\n"}
+            }
+
         }
     }
     close (COMBINED_CLUSTERS_OUTPUT);
 
-    # report what to do next
+    # Clean up folders, move the -element and -further_review folders into the -analysis folder and make a record of this
+    `mv $ELEMENT_FOLDER $ANALYSIS_FOLDER`;
+    if ($?) { die "ERROR moving folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER $?\n"}
+    print ANALYSIS "\tMoving the folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER, the work should now be done on clusters\n";
+    
+    if (-d $FURTHER_REVIEW_FOLDER_NAME) { # check if a further review folder exists
+        `mv $FURTHER_REVIEW_FOLDER_NAME $ANALYSIS_FOLDER`;
+        if ($?) { die "ERROR moving folder $FURTHER_REVIEW_FOLDER_NAME to $ANALYSIS_FOLDER $?\n"}
+        print ANALYSIS "\tMoving the folder $FURTHER_REVIEW_FOLDER_NAME to $ANALYSIS_FOLDER\n";
+    }
+    
+    # Report what to do next
     print colored("STEP $STEP is complete, clusters have been determined. The next step is to search for translated regions in these sequences using interproscan. Run the following search:", 'bold'), "\n";
     print colored("interproscan.sh -i $COMBINED_CLUSTERS_OUTPUT_FILENAME -appl Pfam,Panther -t n -f GFF3 -o $ANALYSIS_NAME-Interpro.gff3", 'italic'), "\n";
 }
@@ -1545,7 +1566,8 @@ if ($STEP == 5) { # check if this step should be performed or not
         die "ERROR: this step expected the file $COMBINED_CLUSTERS_OUTPUT_FILENAME that contains the input for the interproscan run\n";
     }
 
-    print ANALYSIS "Running STEP 5\n";
+    my $datestring = localtime();
+    print ANALYSIS "Running STEP 5 on $datestring\n";
     print ANALYSIS "\tInterpro file name: $INTERPRO_FILENAME\n";
     print ANALYSIS "\tCombined clusters output file name: $COMBINED_CLUSTERS_OUTPUT_FILENAME\n";
     
