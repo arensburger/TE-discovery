@@ -4,36 +4,48 @@ These scripts form a pipeline used to identify novel transposable element sequen
  
 ![](images/Transposon_picture.png)
 
-The innovation of these scripts, compared to alternative methods (e.g. RepeatModeler), is that rather than partially identify all the transposable elements in a genome, these script do a much more in-depth search and produce much more complete transposable ements sequnces (i.e. including TSD, TIR, Transposase, elements shown in the figure above). This can be acheive because 1) they focus their search on a more limited starting set of sequences than the entire nucleotide genome, 2) these scripts are not fully automated, they depend on an active interaction between the scripts and the human user at multiple critical steps in the analysis pipeline. This interaction between script and human minimizes the chances that the scripts will missidentify non-transposable element sequences. In brief, the pipeline starts with a set of translated sequences that could potentially be transposase proteins. This set need not be too specific, typically all the identified proteins from a genome is good starting set. The pipeline then maps each of these proteins to the genome, a transposase protein would be expected to match to more than one locus in the genome. Finally, the pipeline does extensive searching in the nucleotide genome surrounding selected mapped loci, looking for the signature structures of a transposon (see figure above). The advantage of this method over purely homology based methods is that transposons with no homology to known sequences could potentially be discovered this way. The incorporation of human reviews maximizes the probability of high quality results at the end of the pipeline. As a result, identified transposons are described in detail and are very unlikely to be artefacts. However, a downside of this methodology is that it is unlikely to discover all elements present in the genome. Therefore, this pipeline should be treated as a complement, rather than a replacement, for similar methodologies.
+The innovation of these scripts compared to alternative methods (e.g. RepeatModeler), is that rather than partially identifying all the transposable elements in a genome, these script assist in doing a more in-depth search and produce much more complete transposable ements seqeunces (i.e. including TSD, TIR, and Transposase, sequences shown in the figure above). This can be acheive because 1) the scripts their search on a more limited starting set of sequences than the entire nucleotide genome, 2) these scripts are not fully automated, they depend on an active interaction between the scripts and the human user at multiple steps in the analysis pipeline. This interaction between script and human minimizes the chances that the scripts will missidentify non-transposable element sequences.
+What this pipeline does is to start with a set of translated sequences that could potentially be transposase proteins. This set need not be too specific, for example all the identified proteins sequence from a genome sequencing project could bea starting set. The pipeline then maps each of these proteins to the genome. Since a transposase protein would be expected to match to more than one locus in the genome, the pipeline will focus on those proteins that map to mulitple locations. Finally, the pipeline does extensive searching in the nucleotide genome surrounding selected mapped loci, looking for the signature structures of a transposon (see figure above). The advantage of this method over purely homology based methods is that transposons with no homology to known sequences could potentially be discovered this way. Furthermore, the incorporation of human reviews maximizes the probability of high quality results at the end of the pipeline producing a detailed and likely accurate picture of existing transposable elements. However, a downside of this methodology is that it is unlikely to discover *all* the transposalbe elements present in the genome. Therefore, this pipeline should be treated as a complement, rather than a replacement, for other methods.
 
-The pipeline is run as a series of steps. Every step assumes that the previous step has been successfully executed first, but the steps do not all have to be executed on the same machine. The output of each step is written to files and the next step picks collects these data from the previous step. This allows the pipeline to have individual steps run on diffrent machine, giving the user some flexibility in optimizing the resources of the available machines to the computation requirements of individual steps.
+
+The pipeline is run as a series of steps. Every step assumes that the previous step has been successfully executed first, but the steps do not all have to be executed on the same machine. The output of each step is written to files the next step can use. This allows the pipeline to have individual steps run on diffrent machine, giving the user some flexibility in optimizing the resources of the available machines to the computation requirements of individual steps.
 
 ### Pipeline Overview
-The pipeline inputs are: 1) a genome DNA sequence, 2) a list of protein sequences from that genome that could potentially be transposases. This second file could be the sequences of all identified proteins from that genome.
+The pipeline inputs are: 1) a genome DNA sequence, 2) a list of protein sequences from that genome that could potentially be transposases.
 
 ***STEP 1 Map proteins to the genome***
 
 All the input proteins are mapped to the genome using [BLAST+ tblastn](https://pubmed.ncbi.nlm.nih.gov/20003500/). The resulting output is filtered to remove input amino acid sequences that have one or more the following features: 1) map to too few loci (transposons are expected to occur at multiple loci), 2) don't map with sufficient length and identity, 3) map exclusively to the genomic neighberhood of a single locus in the genome (a transposon is expected be found in dispersed loci). These steps are inspired from the transposable element discovery pipeline described by [Goubert et al. 2022](https://mobilednajournal.biomedcentral.com/articles/10.1186/s13100-021-00259-7).
 
 ***STEP 2 Scan around the proteins matches for TSD-TIR patterns***
-The genome region surrounding each of the tblastn hits (after filtering by STEP 1) is scanned for the signature structure of TSDs and TIRs. Input amino acid sequences that don't show the signatures of TSD-TIR structures in engough of their genomic copies are filtered from further analysis.
+The genome region surrounding each of the tblastn hits (after filtering by STEP 1) is scanned for the signature structure of TSDs and TIRs. Input sequences sequences that don't show the signatures of TSD-TIR structures in engough of their genomic copies are filtered away from further analysis.
 
 ***STEP 3 Manual review of TSD-TIR structure for potential transposable elements***
-Grouped by the input protein sequences, the TSD-TIR structure of the remaining sequences is reviewed by a human. The human user determines: 1) if the TSD-TIR junctions appear to be those of a genuine transposable element, 2) what the most likely length of TSDs and TIRs appears to be for each potential transposon. 
+Grouped by the input protein sequences, the TSD-TIR structure of the remaining sequences is reviewed by the human user. The user determines: 1) if the TSD-TIR junctions appear to be those of a genuine transposable element, 2) what the most likely length of TSDs and TIRs appears to be for each potential transposon. 
 
 ***STEP 4 Clustering and preparing for transposase analysis***
-Up to this point the pipeline has treated each input protein sequence as a different transposon, but of course this is often wrong, the same transposase may be found at multiple loci. In this step the output of STEP 3 is clustered by TIR sequences, rather than by transposase sequence. Clustering by TIR minimizes the chances that a single transposon will end up in two different clusters. After the clustering, the genomic sequences of all potential transposons are written to a single file as a FASTA formatted file.
+Up to this point the pipeline has treated each input protein sequence as a different transposon, but of course this is often wrong since the same transposase may be found at multiple loci. In this step the output of STEP 3 is clustered by TIR sequences, rather than by transposase sequence. Clustering by TIR minimizes the chances that a single transposon will end up in two different clusters. After clustering, the genomic sequences of all potential transposons are written to a single file as a FASTA formatted file.
 
 ***Evaluating transposase sequences***
 This step is not performed by the pipeline, but rather by another specialized software suite. The genomic sequences from STEP 4 are examined using EMBL's [Interproscan](https://interproscan-docs.readthedocs.io). This will will identify possible ORFs and possible transpoase motifs, such as [DDE](https://pmc.ncbi.nlm.nih.gov/articles/PMC2991504/). 
 
 ***STEP 5 Combining all evidence in human readable form***
-The data from the clusters in STEP 4 is combined with evidence from Interproscan, aligned and presented in a human readable from for the human evaluation of the most likely transposable element sequence. 
+The data from the clusters in STEP 4 is combined with evidence from Interproscan, aligned and presented in a human readable from for the user to evaluate. 
 
 ***Human review of the pipeline data***
-Based on the output of STEP 5, the human operator makes the final call of the most likely sequence of the original transposable element sequences that gave rise to all the partial sequences observed in the genome today.
+Based on the output of STEP 5, the user makes the final call of the most likely sequence of the original transposable element sequences that gave rise to all the partial sequences observed in the genome.
 
 ## Running the pipeline 
+**Prerequisites**
+The scripts are written in Perl, and require a number of libraries to be installed (using CPAN for example), details of the required libraries can be found at the head of the file *mainscript.pl*. 
+In addition to this, the script will call on a number of external programs that should be installed and put into the path of the directory where the Perl script is executed. These external programs in include:
+- [cd-hit](https://github.com/weizhongli/cdhit/blob/master/doc/cdhit-user-guide.wiki)
+- [NCBI-BLAST+](https://blast.ncbi.nlm.nih.gov/doc/blast-help/downloadblastdata.html)
+- [bedtools](https://github.com/arq5x/bedtools2)
+- [samtools](https://www.htslib.org/doc/)
+- [mafft](https://mafft.cbrc.jp/alignment/software/)
+- [aliview](https://ormbunkar.se/aliview/)
+- [gnome-text-editor](https://apps.gnome.org/TextEditor/)
 
 **Requirements for All Steps**
 
@@ -46,10 +58,10 @@ Where:
 	-n is the name of the current analysis 
 	-s is one of the steps to execute (step 12 can be used to execute both steps 1 and 2 consecutively)
 
-This name specified by the -n parameter can be any non-whitespace string, and will be used to identify this a particular run of the pipeline. The pipeline will assume that it is always excuted from the same location in the filesystem. If the Perl script is executed from two different folders between steps, an error will be thrown that expected folders cannot be found. A number of folders will be created by the pipeline during the execution at various stages. These include:
+This name specified by the -n parameter can be any non-whitespace string, and will be used to identify s particular run of the pipeline. A number of folders will be created by the pipeline during the execution at various stages. These include:
 
 1. a folder called <analysis name>-element: this will contain sub-folders for each input protein sequence that makes it through filters in STEPS 1 and 2.
-2. a folder called  <analysis name>-analysis: this contain files and subfolders with information about the analysis such as parameters, detailed pipeline output, and rejeced elements (i.e. analysis of input proteins that did not pass the filters in STEPS 1 and 2).
+2. a folder called  <analysis name>-analysis: this contain files and subfolders with information about the analysis such as parameters, detailed pipeline output, and rejeced elements (i.e. analysis of input proteins that did not pass the filters in STEPS 1 and 2), as well as intermediary sequences no longer used by the pipeline.
 3. a folder called  <analysis name>-clusters: contains a subfolder for each cluster of sequences from the <analysis name>-element folder, this will be generated in STEP 4.
 
 Other folders may also be created, some of them as subfolders of the ones above, the data in those subfolders is explained below.
