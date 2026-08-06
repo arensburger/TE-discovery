@@ -2046,15 +2046,16 @@ if ($STEP == 5) { # check if this step should be performed or not
             print CLREADME "\tFile: cluster$cluster_number-aligned_nucleotides.fa contains the aligned nucleotide sequences\n";
             print CLREADME "\tFile: cluster$cluster_number-aligned-aa.fa contains the aligned amino acids sequences\n";
             print CLREADME "\tKey to PANTHER and Pfam annotations of amino acid alignments\n";
-            foreach my $key (keys %PANTHER_ids) {
-                print CLREADME "\t\t$id_symbol_and_description{$key}[0]\t$id_symbol_and_description{$key}[1]\n";
+            foreach my $id (keys %PANTHER_ids) {
+                print CLREADME "\t\t$id_symbol_and_description{$id}[0]\t$id\t$id_symbol_and_description{$id}[1]\n";
             }
-            foreach my $key (keys %Pfam_ids) {
-                print CLREADME "\t\t$id_symbol_and_description{$key}[0]\t$id_symbol_and_description{$key}[1]\n";
+            foreach my $id (keys %Pfam_ids) {
+                print CLREADME "\t\t$id_symbol_and_description{$id}[0]\t$id\t$id_symbol_and_description{$id}[1]\n";
             }
         }
         close CLREADME;
-    }  
+    } 
+
 }
 
 close ANALYSIS;

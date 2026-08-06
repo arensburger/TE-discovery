@@ -120,14 +120,6 @@ Every subfolder in both the *-element* folder contains a `<sequence name>-README
 3) A statement of how the element performed on the "edge test". A true transposable element is expected to have a sharp transition in the multiple sequence alignment, between sequences outside the element and TSD-TIR sequences inside the element. If such a sharp transition is too close the edge of the alignment the script assumes no such transition is present and the sequences are not considered to be from transposable elements.
 4) A statement from the manual review in STEP 3, including notes from the reviewer.
 
-### README files (in -clusters subfolder)
-Similar to the README files in the *<analysis name>-analysis*folder, but this contains information specific to the cluster analysis (i.e. after STEP 4).
-
-1) Which elements from the *<analysis name>-analysis* folder were combined to create this cluster. Note that a single element can be used to make a cluster
-2) A statement regarding the orientation of the nucleotide sequence. Prior to the identification of ORFs the nucleotide sequences are aligned in the same orientation, but it cannot be determined if it's in the positive or negative orientation. If ORFs are identified then the orientation can be determined.
-3) The output of STEP5 uses a two letter code to identify where PANTHER and Pfam domains were found on the protein alignment, the README file contain a key to these codes that includes a short description of the domain
- 
-
 ### .bed files (in -element subfolder)
 The output of tblastn is converted to a .bed file
 
@@ -136,6 +128,17 @@ These files that contains the multiple sequence alignment of all the extended bl
 
 ### .tirtsd files (in -element subfolder)
 This file is meant to be used along with the .maf file. This .tirtsd file specifies positions in the alignment that delimit the outside locations of TIR positions (in the .tirtsd file these are `loc1` and `loc2`). Each line also specifies a success code (see below), the number of alignment sequences that have intact TIRs, and the number of intact TSDs (TSD categories are TA, 2bp., 3bp, ... , 10bp.).
+
+#### Success codes
+The .tirtsd file includes a 4 digit success code that reports on TSD and TIR sequences in the alignment. The pipeline can be tailored to consider only certain success codes as being associated with true transposable elements. The README.txt file will report how many TIR-TSD combinations were rejected because they did not have an acceptable success code.
+
+**first digit** is 1 if the proportion of sequences with TIRs in the current multiple sequence alignment (the .maf file) higher than the proportion specified in the perl script by the $MIN_PROPORTION_SEQ_WITH_TIR variable. It is 0 otherwise.
+
+**second digit** is 1 if the specific TIR is one of the most common ones in this alignment. It is 0 otherwise.
+
+**third digit** is 1 if the first few and last few, bases of the TIRs are (almost) the same between TIRs in this alignment. It is 0 otherwise.
+
+**fourth digit** is 1 if the current TIR is associated with one of the highest number of identified TSDs in the alignment. It is 0 otherwise.
 
 ### Analysis_run_and_parameters.txt file (in -analysis subolder)
 This file contains a list of parameters used by the steps in the pipeline run. Most of these paramters can be modified directly in the perl script in subsequent analyses
@@ -149,14 +152,44 @@ Output of the tblastn analysis
 ### Rejected_elements folder (in -analysis subolder)
 This folder contains sub folders for all the input proteins that were not filtered in STEP 1, but were rejected subsequently as not being transposable elements.
 
-## Success codes
-The .tirtsd file includes a 4 digit success code that reports on TSD and TIR sequences in the alignment. The pipeline can be tailored to consider only certain success codes as being associated with true transposable elements. The README.txt file will report how many TIR-TSD combinations were rejected because they did not have an acceptable success code.
+### README files (in -clusters subfolder)
+Similar to the README files in the *<analysis name>-analysis*folder, but this contains information specific to the cluster analysis (i.e. after STEP 4).
 
-**first digit** is 1 if the proportion of sequences with TIRs in the current multiple sequence alignment (the .maf file) higher than the proportion specified in the perl script by the $MIN_PROPORTION_SEQ_WITH_TIR variable. It is 0 otherwise.
+1) Which elements from the *<analysis name>-analysis* folder were combined to create this cluster. Note that a single element can be used to make a cluster
+2) A statement regarding the orientation of the nucleotide sequence. Prior to the identification of ORFs the nucleotide sequences are aligned in the same orientation, but it cannot be determined if it's in the positive or negative orientation. If ORFs are identified then the orientation can be determined.
+3) The output of STEP5 uses a two letter code to identify where PANTHER and Pfam domains were found on the protein alignment, the README file contain a key to these codes that includes a short description of the domain
 
-**second digit** is 1 if the specific TIR is one of the most common ones in this alignment. It is 0 otherwise.
+### cluster\<number\>.fa (in -clusters subfolder)
+Includes all the sequence that have been determined to belong to the same cluster in STEP 4. The sequences are not aligned but they are all oriented in the same direction using *mafft --adjustdirection*. Later, if open reading frames are identified, they may all be reversed so the open reading frame is on the + strand.
 
-**third digit** is 1 if the first few and last few, bases of the TIRs are (almost) the same between TIRs in this alignment. It is 0 otherwise.
+### cluster\<number\>-aligned-nucleotides.fa (in -clusters subfolder)
+This is the aligned version the sequences in cluster<number>.fa but not including any overlaping sequences. If ORFs are found the sequences are oriented based on the majority of open reading frames. Sequences are divided into sequence with and without open reading frames.
 
-**fourth digit** is 1 if the current TIR is associated with one of the highest number of identified TSDs in the alignment. It is 0 otherwise.
+### cluster\<number\>-aligned-aa.fa (in -clusters subfolder)
+Aligned open reading frames of the sequences in cluster<number>-aligned-nucleotides.fa. They are in the same order between the two files. Furthermore, this file includes two letter codes indicating where either Pfam or PANTHER annotations were indentified during the Interproscan step. A key to these two letter codes is found in the README.txt file in the same folder. 
 
+### cluster\<number\>-overlapping_sequences.fa (in -clusters subfolder)
+Groups of sequences that were identified in STEP 5 as overalping each other. These sequences are not present in any of the other files in this subfolder.
+
+## A detailed description of the mechanics
+Below is a more mechanistic description of the scripts and what they do, most useful for people who are trying to understand how the script functions in detail. It's a guide to the source code.
+
+### STEP 3
+In this step the user interacts with the script to decide on the bounds of each transposable element, as well as the most likely TIR and TSD sequences. As the user interacts with the script the user's decisions are recorded in the *README.txt* file associated with an element. Every time the user is ready to ready to review a new element, all the *README.txt* files are scanned to determine which ones still need to be reviwed. This way the user can stop and restart their analysis any time they choose. 
+Each time an element is determined to require a review, it is first checked to see if a the TSD and TIRs of the current element have already been identified previously. This will happen when the same transposable element is identified by two separate intial proteins. If this is case the sequences are annotated automatically without requiring user review, this saves time for the user.
+If the element requires a user review (a.k.a. a manual review) the user is presented with a series of menus on the command line using the Term::Prompt library. The script checks 
+
+### STEP 4 
+In STEP 3 the user identified TIR sequences, in this step those TIR sequence are read and sequences are clustered by TIR sequences using *cd-hit-est*. Next, for each cluster the genomic sequence of each sequence is extracted from the genome and the resulting sequences oriented in the same direction using *mafft --adjustdirection*. For the moment it's not yet clear if the sequences are oriented in the 5' to 3' orientation of the transposase, but that will be determined in STEP 5 once the ORFs are identified. This step creates the *<analysis name>-clusters* folder.
+
+### STEP 5
+#### Overlapping sequences
+The file *<analysis name>-combined-clusters-nucleotide-sequences.fa* that was created in STEP 4 may include overlapping sequences, in this context it means that identified sequences ending in TIRs and TSDs overlap with another sequence in the same cluster. These may be the result of transposable elements inserting into copies of themselves for example. How to merge these is not automatically clear, so it's left to the user to make that call. The first part of STEP5 is it to identify these sequences so they can be presented to the user as a separate group.
+The mechanics here are to first to create a *.bed* file with the start and end positions of every sequence accross all clusters, then use *bedtools intersect* to identify overlaping sequences. Because there are many possible combinations of pairs to compare, the Perl library "Graph" is used to efficiently create a graph of overlapping pairs. This graph is then filtered to only report sequences overlapping withing the same cluster. Any overlaping sequences within a cluster are written to a separate file (cluster\<number\>-overlapping_sequences.fa) for the user to merge an perhaps reintegrate into the rest of the analysis.
+#### Parsing the Interproscan output file
+The Interpro output file is read, and the following information is recorded: 1) the genomic location of any identified open reading frames, 2) the unique ORF number for each open reading fram assigned by Interpropscan, 3) the location within the identified open reading frams of Pfam and PANTHER annotations. Only for the PANTHER annotations, the script also fetches a short description of each annotation. This is unecessary for Pfam, the short description is part of the Interproscan output file,
+#### Aligning the nucleotide sequences and deciding on the orientation
+All the nucleotide sequences are aligned using *mafft*. Following this the orientation of open reading frames in this cluster are evaluted, and the whole alignment is either reversed complemented or kept as-is, based on the orientation of the open reading frames. This works because the input sequences had all be put in the same orientation using the *mafft --adjustdirection* option, so they may all be assumed to be in the same direction to begin with. Finally the oriented, ordered, and non-overalapping sequences are written to the cluster\<number\>-aligned-nucleotides.fa file.
+#### Aligning the protein sequences along with Pfam and PANTHER annotations
+For each sequence with an open reading frame new "dummy" sequences are created with Pfam and PANTHER two letter codes. These dummy sequences have the same length a open reading frame amino acid sequences, but have either a "-" or the two letter code at the positions where Pfam or PANTHER annotations were identified.
+The protein sequence are then aligned, and the dummy sequences are adjust to match all the gaps inserted by the alignment. The whole is then written to the file cluster\<number\>-aligned-aa.fa.
