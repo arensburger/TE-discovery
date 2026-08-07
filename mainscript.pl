@@ -338,7 +338,6 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
     ## VARIABLES, variable for this step
     my @elements; # name of all the elements that will be anlaysed in this step
 
-    ## STEP 2.1
     ## figure out the elements that we're working with 
     ## (for the sake of being modular, redoing this instead of just taking the data from the previous step,
     ## this also ensures that a folder has been created for each element).
@@ -353,7 +352,6 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
         die "ERROR: No elements to analyze were found in the folder $ELEMENT_FOLDER\n";
     }
 
-    ## STEP 2.2
     ## identify TSD-TIR combinations for each element
     my $i=1; # counter of which element is currently being analyzed 
     foreach my $element_name (@elements) {
@@ -366,7 +364,7 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
         # create or open the README file for this element
         open (README, ">$ELEMENT_FOLDER/$element_name/$element_name-README.txt") or die "ERROR: Could not open or create README file $ELEMENT_FOLDER/$element_name/$element_name-README.txt\n";
 
-        # STEP 2.2.1
+        # STEP 2.1
         # for each sequence of this element extend it by $BLAST_EXTEND bps on both sides of the sequence
         my @blastlines = (); # holds all the relevant blast lines for this element
         my $j; # counter of the number of blast lines for this element
@@ -419,14 +417,14 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
         `bedtools getfasta -fi $INPUT_GENOME -fo $extended_fasta_name -bed $slopfile2 -s`;
         if ($?) { die "ERROR executing bedtools: error code $?\n"}
 
-        # 2.2.2 Align the sequences
+        # 2.2 Align the sequences
         my $aligned_sequences_file_name = "$ELEMENT_FOLDER/$element_name/$element_name.maf";
         `mafft --quiet --thread -1 $extended_fasta_name > $aligned_sequences_file_name`;
         if ($?) { die "Error executing mafft, error code $?\n"}
         $datestring = localtime();
         print README "$datestring, Aligned extended BLAST sequences are in file $element_name.maf\n";
         
-        # 2.2.3 determine the highest percentage of agreement on a single nucleotide at each position
+        # 2.3 determine the highest percentage of agreement on a single nucleotide at each position
         # go through the alignment to record positions that have high agreement on a single nucleotide.
         my %aliseq = fastatohash($aligned_sequences_file_name); # aligned sequences
         my $alignment_length = length($aliseq{(keys %aliseq)[rand keys %aliseq]}); # pick a random sequence to get the length of the alignment (assuming all are the same length)
@@ -476,7 +474,7 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
         `cat $aligned_sequences_file_name >> $temp_consensus_file`;
         `mv $temp_consensus_file $aligned_sequences_file_name`;
 
-        # 2.2.4 Find location with highest likelihood of being the transition. The methodology here is go through each position of the alignment and compare a
+        # 2.4 Find location with highest likelihood of being the transition. The methodology here is go through each position of the alignment and compare a
         # window of length $SEARCH_WINDOW_SIZE upstream of that position to another window of the same size downstream. For both windows determine if the alignment 
         # agrees on a single sequence for that window. The pair of upstream and downstream windows that 1) differ the highly from each other in alignment agreement measure, and
         # 2) are closest to the edges of the alignment, are identified as the transition positions.
@@ -520,7 +518,7 @@ if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or
             }
         }
          
-        # STEP 2.2.5 
+        # STEP 2.5 
         # identify the TIR and TSD locations around the edges of transitions (if transtions were found)
         if (($left_highest_transition_position and $right_highest_transition_position) and ($left_highest_transition_position < $right_highest_transition_position)) { # only continue if transitions were found positioned correctly
             # go up and down the length of $TIR_SEARCH_RANGE from the transition locations and identify the combinations of TIRs and TSDs. The TIRs are identified 
