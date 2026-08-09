@@ -1,0 +1,120 @@
+#!/usr/bin/ perl
+use strict;
+use Getopt::Long;
+
+### CONSTANTS
+my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must agree to call a position
+my $MIN_FOR_POSITION = 2; # minumum number of nucleotides or amino acids to call a position (not ignore it)
+
+### check for input parameters and update defaults if necessary
+GetOptions(
+	'c:s'   => \$CONSENSUS_LEVEL,
+    'p:s'   => \$MIN_FOR_POSITION,
+);
+
+### Read the clipboard for fasta formatted sequences and verify that all is ok
+my $text = `xclip -selection clipboard -o 2>/dev/null`;
+if (!defined $text || $text eq '') {
+    die "Could not read clipboard. Make sure 'xclip' is installed.\n";
+}
+die "Clipboard is empty or could not be read.\n" unless defined $text && length $text;
+
+### Parse the fasta sequence
+my %sequences;
+my $header;
+for my $line (split /\r?\n/, $text) {
+    if ($line =~ /^(>\S+)/) {
+        $header = $1;
+        $sequences{$header} = '';
+    }
+    elsif (defined $header && $line =~ /\S/) {
+        $sequences{$header} .= $line;
+    }
+}
+
+### Check the content of %sequences
+if (!%sequences) { # check if FASTA sequences were read
+    die "ERROR: No FASTA formated sequences were found in the clipboard.\n";
+}
+elsif (scalar keys %sequences == 1) { # check if there's more than one sequence
+    my ($header) = keys %sequences;
+    die "ERROR: The clipboard only appears to have a single FASTA formatted entry, here's what was read\n$header\n$sequences{$header}\n";
+}
+## check if the sequences all have the same length
+my @lengths = map { length $_ } values %sequences;
+my %unique_lengths = map { $_ => 1 } @lengths;
+unless (scalar keys %unique_lengths == 1) {
+    die  "ERROR: The input FASTA sequences don't all have the same length, need to have aligned sequences as input\n";
+} 
+
+### figure out if these are nucleotides or proteins 
+my $single_sequence; 
+foreach my $s (keys %sequences) {
+    $single_sequence .= $sequences{$s};
+}
+my $type = guess_seq_type($single_sequence);
+
+### Create consensus sequence
+my $consensus; 
+for (my $i=0; $i < $lengths[0]; $i++ ) { # go through each position one at a time
+    
+    ## Store the characters at this postion into an arry
+    my @chars; # array that holds all the characters at this position
+    for my $header (keys %sequences) { # go through each sequence at this position
+        my $c = substr $sequences{$header}, $i, 1; # current character
+        unless ($c eq "-") { # don't add gap characters
+            push @chars, $c;
+        }
+    } 
+
+    ## Identify the most abundant character
+    my %count;
+    $count{$_}++ for @chars;
+    my ($top_char) = sort { $count{$b} <=> $count{$a} } keys %count;
+    my $total_characters = scalar @chars;
+    my $proportion = $count{$top_char} / $total_characters;
+
+    ## decide if this character should be printed or not
+    if(($total_characters >= $MIN_FOR_POSITION) and ($proportion >= $CONSENSUS_LEVEL)) { # condiditions to report a non N consensus
+        $consensus .= "$top_char";
+    }
+    elsif (($total_characters >= $MIN_FOR_POSITION) and ($proportion < $CONSENSUS_LEVEL)) { # conditions to report N or x
+        if ($type eq 'nucleotide') {
+            $consensus .= "N";
+        }
+        else {
+            $consensus .= "X";
+        }
+    }
+}
+
+### print the consensus to the terminal
+if ($consensus) {
+    my $cons_length = length $consensus;
+    my $num_input_seq = keys %sequences;
+    print "Alignment length: $lengths[0], Consensus length $cons_length, Number of input sequences: $num_input_seq\n";
+    print ">consensus\n";
+    print "$consensus\n";
+}
+else {
+    print "No consensus found for these input sequences:\n";
+    for my $header (keys %sequences) {
+        print "$header\n$sequences{$header}\n";
+    }
+}
+
+# figure out type
+sub guess_seq_type {
+    my ($seq) = @_;
+    $seq = uc $seq;
+    $seq =~ s/[^A-Z]//g;  # strip non-letters (gaps, whitespace, etc.)
+
+    my $len = length $seq;
+    return 'unknown' unless $len;
+
+    my $nt_chars = ($seq =~ tr/ACGTNacgtn//);
+    my $nt_fraction = $nt_chars / $len;
+
+    # Nucleotide sequences are almost entirely A/C/G/T/N
+    return $nt_fraction >= 0.9 ? 'nucleotide' : 'protein';
+}
