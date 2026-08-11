@@ -16,7 +16,7 @@ GetOptions(
     'h'     => \$SHOW_HELP,
 );
 if ($SHOW_HELP) {
-    print STDERR "This script takes aligned fasta formatted sequences in the clipboard as input and produces a consensus sequence. Optionally it can ouptut TSDs and TIR sequences as well\n";
+    print STDERR "This script takes aligned fasta formatted sequences in the clipboard as input and produces a consensus sequence. Optionally it can ouptut TSDs and TIR sequences as well. If the TSD and TIR sequences are requested, the consensus ouput sequence does not include TSD sequences.\n";
     print STDERR "usage: perl consensus.pl <-t display TIR and TSD information based on sequence name OPTIONAL> <-c set consensus level, default $CONSENSUS_LEVEL OPTIONAL> <-p set mininum number of sequences for consensus, default $MIN_FOR_POSITION OPTIONAL>\n";
     exit;
 }
@@ -99,34 +99,45 @@ for (my $i=0; $i < $lengths[0]; $i++ ) { # go through each position one at a tim
 }
 
 ### Print output
-
+my $TSDseq;
+my $TSDlength;
+my $TIR1seq; 
+my $TIR2seq;
 if ($TIRTSD and $consensus) { # user has requested the TIR and TSD information be displayed, and a consensus must have been created
-    my ($header) = keys %sequences; # random header with the TSD and TIR information
-    my $TSDseq;
-    my $TIR1seq; 
-    my $TIR2seq;
+    my ($header) = keys %sequences; # random header with the TSD and TIR information   
     if ($header =~ /\d+_(\d+)_(\d+)$/) {
         $TSDseq = uc(substr $consensus, 0, $1);
         $TIR1seq = uc(substr $consensus, $1, $2);
         $TIR2seq = uc(substr $consensus, -$1-$2, $2);     
-        unless ($TSDseq eq "TA") { # adjust the $TSDseq 
-            $TSDseq = (length $TSDseq) . "bp";
+        if ($TSDseq eq "TA") { 
+            print "TSD: TA\n";
+            $TSDlength = 2;
+        } 
+        else {
+            $TSDlength = length $TSDseq;
+            print "TSD: $TSDseq.bp\n";
         }
-        print "TSD: $TSDseq\n";
         print "TIR1: $TIR1seq\n";
         print "TIR2: $TIR2seq\n";
     }
     else {
-        warn "WARNING: Could not extract TSD and TIR information from header: $header\n";
+        die "WARNING: Could not extract TSD and TIR information from header: $header\n";
     }
 }
 
-if ($consensus) {
-    my $cons_length = length $consensus;
+if ($consensus) { # print the consensus sequence if the TSD and TIR was requested then don't print the TSDs
+    my $ali_length = $lengths[0] - (2*$TSDlength);
+    my $cons_length = (length $consensus) - (2*$TSDlength);
     my $num_input_seq = keys %sequences;
-    print "Alignment length: $lengths[0], Consensus length $cons_length, Number of input sequences: $num_input_seq\n";
+    print "Alignment length: $ali_length, Consensus length $cons_length, Number of input sequences: $num_input_seq\n";
     print ">consensus\n";
-    print "$consensus\n";
+    if ($TIRTSD) { 
+        my $no_tsd_cons = substr $consensus, $TSDlength, (length $consensus) - (2*$TSDlength);
+        print "$no_tsd_cons\n";
+    }
+    else {
+        print "$consensus\n";
+    }
 }
 else {
     print "No consensus found for these input sequences:\n";
