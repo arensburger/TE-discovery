@@ -6,18 +6,20 @@ use Getopt::Long;
 my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must agree to call a position
 my $MIN_FOR_POSITION = 2; # minumum number of nucleotides or amino acids to call a position (not ignore it)
 my $TIRTSD; # optional, report the TSDs and TIRs based on the sequence names
+my $RVCMP; # optionl, reverse complement the fasta file input
 my $SHOW_HELP; # call for help 
 
 ### Set up input parameters
 GetOptions(
 	'c:s'   => \$CONSENSUS_LEVEL,
     'p:s'   => \$MIN_FOR_POSITION,
+    'r'   => \$RVCMP,
     't'   => \$TIRTSD,
     'h'     => \$SHOW_HELP,
 );
 if ($SHOW_HELP) {
     print STDERR "This script takes aligned fasta formatted sequences in the clipboard as input and produces a consensus sequence. Optionally it can ouptut TSDs and TIR sequences as well. If the TSD and TIR sequences are requested, the consensus ouput sequence does not include TSD sequences.\n";
-    print STDERR "usage: perl consensus.pl <-t display TIR and TSD information based on sequence name OPTIONAL> <-c set consensus level, default $CONSENSUS_LEVEL OPTIONAL> <-p set mininum number of sequences for consensus, default $MIN_FOR_POSITION OPTIONAL>\n";
+    print STDERR "usage: perl consensus.pl <-t display TIR and TSD information based on sequence name OPTIONAL> <-r reverse complement the consensus> <-c set consensus level, default $CONSENSUS_LEVEL OPTIONAL> <-p set mininum number of sequences for consensus, default $MIN_FOR_POSITION OPTIONAL>\n";
     exit;
 }
 
@@ -97,12 +99,16 @@ for (my $i=0; $i < $lengths[0]; $i++ ) { # go through each position one at a tim
         }
     }
 }
+if ($RVCMP) { # if the user wanted to reverse complement the output
+    $consensus = rc($consensus);
+}
 
 ### Print output
 my $TSDseq;
 my $TSDlength;
 my $TIR1seq; 
 my $TIR2seq;
+
 if ($TIRTSD and $consensus) { # user has requested the TIR and TSD information be displayed, and a consensus must have been created
     my ($header) = keys %sequences; # random header with the TSD and TIR information   
     if ($header =~ /\d+_(\d+)_(\d+)$/) {
@@ -160,4 +166,12 @@ sub guess_seq_type {
 
     # Nucleotide sequences are almost entirely A/C/G/T/N
     return $nt_fraction >= 0.9 ? 'nucleotide' : 'protein';
+}
+
+#reverse complement
+sub rc {
+    my ($sequence) = @_;
+    $sequence = reverse $sequence;
+    $sequence =~ tr/ACGTRYMKSWacgtrymksw/TGCAYRKMWStgcayrkmws/;
+    return ($sequence);
 }
