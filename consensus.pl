@@ -5,12 +5,22 @@ use Getopt::Long;
 ### CONSTANTS
 my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must agree to call a position
 my $MIN_FOR_POSITION = 2; # minumum number of nucleotides or amino acids to call a position (not ignore it)
+my $TIRTSD; # optional, report the TSDs and TIRs based on the sequence names
+my $SHOW_HELP; # call for help 
 
-### check for input parameters and update defaults if necessary
+### Set up input parameters
 GetOptions(
 	'c:s'   => \$CONSENSUS_LEVEL,
     'p:s'   => \$MIN_FOR_POSITION,
+    't'   => \$TIRTSD,
+    'h'     => \$SHOW_HELP,
 );
+if ($SHOW_HELP) {
+    print STDERR "This script takes aligned fasta formatted sequences in the clipboard as input and produces a consensus sequence. Optionally it can ouptut TSDs and TIR sequences as well\n";
+    print STDERR "usage: perl consensus.pl <-t display TIR and TSD information based on sequence name OPTIONAL> <-c set consensus level, default $CONSENSUS_LEVEL OPTIONAL> <-p set mininum number of sequences for consensus, default $MIN_FOR_POSITION OPTIONAL>\n";
+    exit;
+}
+
 
 ### Read the clipboard for fasta formatted sequences and verify that all is ok
 my $text = `xclip -selection clipboard -o 2>/dev/null`;
@@ -74,7 +84,7 @@ for (my $i=0; $i < $lengths[0]; $i++ ) { # go through each position one at a tim
     my $total_characters = scalar @chars;
     my $proportion = $count{$top_char} / $total_characters;
 
-    ## decide if this character should be printed or not
+    ## Decide if this character should be printed or not
     if(($total_characters >= $MIN_FOR_POSITION) and ($proportion >= $CONSENSUS_LEVEL)) { # condiditions to report a non N consensus
         $consensus .= "$top_char";
     }
@@ -88,7 +98,29 @@ for (my $i=0; $i < $lengths[0]; $i++ ) { # go through each position one at a tim
     }
 }
 
-### print the consensus to the terminal
+### Print output
+
+if ($TIRTSD and $consensus) { # user has requested the TIR and TSD information be displayed, and a consensus must have been created
+    my ($header) = keys %sequences; # random header with the TSD and TIR information
+    my $TSDseq;
+    my $TIR1seq; 
+    my $TIR2seq;
+    if ($header =~ /\d+_(\d+)_(\d+)$/) {
+        $TSDseq = uc(substr $consensus, 0, $1);
+        $TIR1seq = uc(substr $consensus, $1, $2);
+        $TIR2seq = uc(substr $consensus, -$1-$2, $2);     
+        unless ($TSDseq eq "TA") { # adjust the $TSDseq 
+            $TSDseq = (length $TSDseq) . "bp";
+        }
+        print "TSD: $TSDseq\n";
+        print "TIR1: $TIR1seq\n";
+        print "TIR2: $TIR2seq\n";
+    }
+    else {
+        warn "WARNING: Could not extract TSD and TIR information from header: $header\n";
+    }
+}
+
 if ($consensus) {
     my $cons_length = length $consensus;
     my $num_input_seq = keys %sequences;
