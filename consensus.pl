@@ -86,7 +86,7 @@ for (my $i=0; $i < $lengths[0]; $i++ ) { # go through each position one at a tim
 
     ## Decide if this character should be printed or not
     if(($total_characters >= $MIN_FOR_POSITION) and ($proportion >= $CONSENSUS_LEVEL)) { # condiditions to report a non N consensus
-        $consensus .= "$top_char";
+        $consensus .= uc("$top_char");
     }
     elsif (($total_characters >= $MIN_FOR_POSITION) and ($proportion < $CONSENSUS_LEVEL)) { # conditions to report N or x
         if ($type eq 'nucleotide') {
