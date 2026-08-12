@@ -17,6 +17,7 @@ use LWP::UserAgent;
 use JSON;
 use Graph; # use sudo apt install libgraph-perl to install this
 use Term::ANSIColor qw(colored);
+use URI::Escape; # this is to handle weird characters
 
 ### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
@@ -102,7 +103,7 @@ elsif ($STEP == 4) {
         die "ERROR: Expecting folders $current_directry/$ANALYSIS_FOLDER and $current_directry/$ELEMENT_FOLDER would have been created prior to running step $STEP\n"
     }
 }
-elsif ($STEP == 5) {
+elsif (($STEP == 5) or ($STEP == 6)) {
     unless (-d $CLUSTER_FOLDER) {
         die "ERROR: Expecting folder $current_directry/$CLUSTER_FOLDER would have been created prior to running step $STEP\n"
     }
@@ -883,8 +884,8 @@ if ($STEP == 3) { # check if this step should be performed or not
                         display_base => 0,
                         return_base => 0,
                         accept_multiple_selections => 0,
-                    items  => [@menu1_items],
-                    separator => '[,/\s]',
+                        items  => [@menu1_items],
+                        separator => '[,/\s]',
                     },'', 2);
         
                     # process answer to menu 1
@@ -2056,6 +2057,185 @@ if ($STEP == 5) { # check if this step should be performed or not
 
 }
 
+### PIPELINE STEP 6 
+### Identify the most likely representative sequence for each cluster, and create final report
+### CONSTANTS applicable only for STEP 6
+my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must agree to call a position
+my $MIN_FOR_POSITION = 2; # minumum number of nucleotides or amino acids to call a position (not ignore it)
+my $RVCMP; # optional, reverse complement the fasta file input
+
+if ($STEP == 6) { # check if this step should be performed or not  
+    ## update the analysis file with what is going on
+    my $datestring = localtime();
+    print ANALYSIS "Running STEP 6 on $datestring\n";
+    my $pkey; # pressed key, used for input from user
+    my $clusters_left_to_review=1; # boolean, number of clusters left to review, set to a non-zero value initially so that an initial evaluation will be done
+    while ($clusters_left_to_review) {
+        # determine how many clusters are left to review, record a name of a cluster to review
+        $clusters_left_to_review = 0; # recheck that there are still clusters to review
+        opendir(my $dh, $CLUSTER_FOLDER) or die "ERROR: Cannot open cluster folder $CLUSTER_FOLDER, $!";
+        my %seen_tirs; # hash of arrays that has the unique tsd-tir1-tir2 string as key, and array of with data on this combination
+        while (readdir $dh) {
+            unless ($_ =~ /^\./) { # prevents reading invisible files or the . and .. files 
+
+                # Constants, reset for each cluster
+                my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must agree to call a position
+                my $MIN_FOR_POSITION = 2; # minumum number of nucleotides or amino acids to call a position (not ignore it)
+                my $RVCMP=0; # boolean, set 1 if the nucleotide sequences should be reverse-complemented
+
+                # Setup cluster specific variables
+                my $cluster_name = $_;
+                my $current_cluster_folder = $CLUSTER_FOLDER . "/" . $cluster_name ; # folder with specific element of interest   
+                my $cluster_report_path = $current_cluster_folder . "/" . $cluster_name . "_report.md"; # if it exists this would be the full path to the report for this cluster
+                my $consensus_sequence; # latest consensus sequence
+                my $tsd_length;  
+                my $tir_length;
+                unless (-e $cluster_report_path) { # only continue if this cluster does not have a report yet
+                    # Cluster specifie file names
+                    my $nuc_alignment_file_name = $current_cluster_folder . "/" . $cluster_name . "-aligned_nucleotides.fa";
+
+                    print ANALYSIS "\tReview of cluster $cluster_report_path\n";
+                    `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
+
+                    # Setup and display menu 1
+                    my @menu1_items; # holds the text of menu 1 choices
+                    push @menu1_items, "Quit the program"; # item 0
+                    push @menu1_items, "Move to the next cluster"; # item 1
+                    push @menu1_items, "View the nucleotide alignment file"; # item 2
+                    push @menu1_items, "Change consensus sequence parameters"; # item 3
+                    push @menu1_items, "Calculate consensus sequence based on all sequences"; # item 4
+                    push @menu1_items, "Calculate consensus sequence based on selected sequences"; # item 5
+                    push @menu1_items, "Launch NCBI BLASTn search"; # item 6
+                    push @menu1_items, "Launch NCBI BLASTx search"; # item 7
+                    push @menu1_items, "Search for sequence with best fit to protein"; # item 8
+                    
+                    my $menu1 = 1; # boolean, set to one until the user is done with menu 1
+                    my $move_to_menu2 = 0; # boolean, set to zero until the user is ready to move on to menu 2
+                    while ($menu1) {
+                        my $menu1_choice = prompt('m', {
+                            title => "MENU1 of $cluster_name\n",
+                            prompt => 'What would you like to do?',
+                            display_base => 0,
+                            return_base => 0,
+                            accept_multiple_selections => 0,
+                            items  => [@menu1_items],
+                            separator => '[,/\s]',
+                        },'', 2);
+
+                        # process answer to menu 1
+                        if ($menu1_choice == 0) {
+                            `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
+                            close ANALYSIS;
+                            exit;
+                        }
+                        if ($menu1_choice == 1) { # the user is done with this cluster
+                            $menu1 = 0;
+                        }
+                        if ($menu1_choice == 2) { # the user wants to see the nucleotide alignment
+                            `aliview $nuc_alignment_file_name `;
+                            if ($?) { die "ERROR: Could not open program aliview: error code $?\n"}
+                        }
+                        if ($menu1_choice == 3) { # the wants to change the consensus sequence parameter
+                            $RVCMP = prompt('y', "Should the nucletides be reverse complemented:", '', $RVCMP); 
+                            $CONSENSUS_LEVEL = prompt('f', "Consensus level:", '', $CONSENSUS_LEVEL);
+                            $MIN_FOR_POSITION = prompt('f', "Minumum number for position:", '', $MIN_FOR_POSITION);
+                        }
+                        if ($menu1_choice == 4) { # the wants make a consensus based on all the sequences in the alignment
+                            my %alignment_sequences = fastatohash($nuc_alignment_file_name); # load the existing alignments
+                            
+                            # turn this fasta file into a single text file, this is so that it's consistent with the clipboard entry of fasta files
+                            my $fasta_text; 
+                            foreach my $sequence_name (keys %alignment_sequences){ 
+                                if ($sequence_name =~ /\d_(\d+)_\d+$/) { # only add sequences that have DNA and record the TSD length
+                                    $fasta_text .= ">$sequence_name\n" . "$alignment_sequences{$sequence_name}\n";
+                                }
+                            }
+                            if (defined $fasta_text && length $fasta_text) { 
+                                ($consensus_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
+                                # print the consensus for the user, minus the TSD sequences
+                                my $printed_consensus_sequence = substr $consensus_sequence, $tsd_length, (length $consensus_sequence) - (2*$tsd_length);
+                                print "\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$printed_consensus_sequence\n\n";
+                            }
+                            else {
+                                warn "File $nuc_alignment_file_name does not contain fasta formated sequences.\n"; 
+                            }
+                        }
+
+                        if ($menu1_choice == 5) { # user want to select lines for the consensus
+                            my $fasta_text = `xclip -selection clipboard -o 2>/dev/null`;
+                            if (!defined $fasta_text || $fasta_text eq '') {
+                                warn "Could not read clipboard. Make sure 'xclip' is installed.\n";
+                            }
+                            else { 
+                                ($consensus_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
+                                # print the consensus for the user, minus the TSD sequences
+                                if ($consensus_sequence) {
+                                    my $printed_consensus_sequence = substr $consensus_sequence, $tsd_length, (length $consensus_sequence) - (2*$tsd_length);
+                                    print "\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$printed_consensus_sequence\n\n";
+                                }
+                                else {
+
+                                }
+                            }
+                        }
+
+                        if ($menu1_choice == 6) { # user wants to search with BLASTn
+                            if ($consensus_sequence) { # if a consensus has been determined then use that as the input sequence
+                                my $program  = "blastn";
+                                my $database = "nt";
+                                my $sequence = $consensus_sequence;
+                                my $query = uri_escape($consensus_sequence);
+                                my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?" .
+                                        "CMD=Put&PROGRAM=$program&DATABASE=$database&QUERY=$query";
+                                # Launch Firefox with this URL
+                                system("firefox", $url);
+                            }
+                            else {
+                                my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastn&PAGE_TYPE=BlastSearch&LINK_LOC=blasthome";
+                                system("firefox", $url);
+                            }
+                        }
+
+                        if ($menu1_choice == 7) { # user wants to search with BLASTn
+                            if ($consensus_sequence) { # if a consensus has been determined then use that as the input sequence
+                                my $program  = "blastx";
+                                my $database = "nt";
+                                my $sequence = $consensus_sequence;
+                                my $query = uri_escape($consensus_sequence);
+                                my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?" .
+                                        "CMD=Put&PROGRAM=$program&DATABASE=$database&QUERY=$query";
+                                # Launch Firefox with this URL
+                                system("firefox", $url);
+                            }
+                            else {
+                                my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastn&PAGE_TYPE=BlastSearch&LINK_LOC=blasthome";
+                                system("firefox", $url);
+                            }
+                        }
+
+                        if ($menu1_choice == 8) { # user wants blast protein sequence to alignment
+                            my $protein_sequence = prompt('a', "Enter protein sequence:", "", "");
+                            # Copy protein sequence to temporary file
+                            my $protein_inputfile_name = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); 
+                            open (OUTPUT, '>', $protein_inputfile_name) or die "ERROR: Cannot create tempoary file $protein_inputfile_name\n";
+                            print OUTPUT ">protein\n$protein_sequence\n";
+                            close OUTPUT;
+                            `cp $protein_inputfile_name /home/peter/Desktop/prot.fas`;
+                        }
+                    }
+                    
+
+                    # load all the nucleotide sequences into memory
+                    
+                    
+
+                }
+            }
+        }
+    }
+
+
+}
 close ANALYSIS;
 close REJECT;
 
@@ -2418,4 +2598,107 @@ sub adjust_alignment {
         }
     }
     return ($output_sequence);
+}
+
+# Take a fasta file as a single text file as input and returns a consensus sequence
+sub consensus {
+
+    my ($text, $consensus_level, $min_for_position, $reverse_complement, $type) = @_; # text with fasta file and parameters
+        
+    ### Parse the fasta text
+    my %sequences;
+    my $header;
+    for my $line (split /\r?\n/, $text) {
+        if ($line =~ /^(>\S+)/) {
+            $header = $1;
+            $sequences{$header} = '';
+        }
+        elsif (defined $header && $line =~ /\S/) {
+            $sequences{$header} .= $line;
+        }
+    }
+
+    ### Check the content of %sequences
+    if (!%sequences) { # check if FASTA sequences were read
+        print "\nERROR: No FASTA formated sequences were found in the clipboard.\n\n";
+        return (0);
+    }
+    elsif (scalar keys %sequences == 1) { # check if there's more than one sequence
+        my ($header) = keys %sequences;
+        print "\nERROR: There only appears to be a single FASTA formatted entry, here's what was read\n$header\n$sequences{$header}\n\n";
+        return (0)
+    }
+    ## check if the sequences all have the same length
+    my @lengths = map { length $_ } values %sequences;
+    my %unique_lengths = map { $_ => 1 } @lengths;
+    unless (scalar keys %unique_lengths == 1) {
+        print "\nERROR: The input FASTA sequences don't all have the same length, need to have aligned sequences as input\n\n";
+        return (0);
+    } 
+
+    ### Create consensus sequence
+    my $consensus; 
+    for (my $i=0; $i < $lengths[0]; $i++ ) { # go through each position one at a time
+        
+        ## Store the characters at this postion into an arry
+        my @chars; # array that holds all the characters at this position
+        for my $header (keys %sequences) { # go through each sequence at this position
+            my $c = substr $sequences{$header}, $i, 1; # current character
+            chomp $c;
+            if ($c !~ /[-n]/i) { # don't add gap characters
+                push @chars, $c;
+            }
+        } 
+
+        ## Identify the most abundant character
+        my %count;
+        my $proportion;
+        $count{$_}++ for @chars;
+        my ($top_char) = sort { $count{$b} <=> $count{$a} } keys %count;
+        my $total_characters = scalar @chars;
+        if ($total_characters) {
+            $proportion = $count{$top_char} / $total_characters;
+        }
+        else {
+            $proportion = 0;
+        }
+
+        ## Decide if this character should be printed or not
+        if(($total_characters >= $MIN_FOR_POSITION) and ($proportion >= $CONSENSUS_LEVEL)) { # condiditions to report a non N consensus
+            $consensus .= uc("$top_char");
+        }
+        elsif (($total_characters >= $MIN_FOR_POSITION) and ($proportion < $CONSENSUS_LEVEL)) { # conditions to report N or x
+            if ($type eq 'n') {
+                $consensus .= "N";
+            }
+            elsif ($type eq 'p') {
+                $consensus .= "X";
+            }
+            else {
+                print "\nERROR: sequence type $type is unknown.\n";
+                return (0)
+            }
+        }
+    }
+
+    # Determine the lengths of the TSD and TIR sequences from the header
+    my $tir_length;
+    my $tsd_length;
+    ($header) = keys %sequences; # random header with the TSD and TIR information  
+    if ($header =~ /\d+_(\d+)_(\d+)$/) {
+        $tsd_length = $1;
+        $tir_length = $2;
+    } 
+    else {
+        warn "WARNING: could not determine the TSD and TIR length from the header below\n$header\n";
+        $tsd_length = 0;
+        $tir_length = 0;
+    }
+
+    if ($reverse_complement) { # if the user wanted to reverse complement the output
+        return(rc($consensus), $tsd_length, $tir_length);
+    }
+    else {
+        return ($consensus, $tsd_length, $tir_length);
+    }
 }
