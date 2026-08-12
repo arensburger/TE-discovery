@@ -74,17 +74,24 @@ for (my $i=0; $i < $lengths[0]; $i++ ) { # go through each position one at a tim
     my @chars; # array that holds all the characters at this position
     for my $header (keys %sequences) { # go through each sequence at this position
         my $c = substr $sequences{$header}, $i, 1; # current character
-        unless ($c eq "-") { # don't add gap characters
+        chomp $c;
+        if ($c !~ /[-n]/i) { # don't add gap characters
             push @chars, $c;
         }
     } 
 
     ## Identify the most abundant character
     my %count;
+    my $proportion;
     $count{$_}++ for @chars;
     my ($top_char) = sort { $count{$b} <=> $count{$a} } keys %count;
     my $total_characters = scalar @chars;
-    my $proportion = $count{$top_char} / $total_characters;
+    if ($total_characters) {
+        $proportion = $count{$top_char} / $total_characters;
+    }
+    else {
+        $proportion = 0;
+    }
 
     ## Decide if this character should be printed or not
     if(($total_characters >= $MIN_FOR_POSITION) and ($proportion >= $CONSENSUS_LEVEL)) { # condiditions to report a non N consensus
@@ -99,6 +106,7 @@ for (my $i=0; $i < $lengths[0]; $i++ ) { # go through each position one at a tim
         }
     }
 }
+
 if ($RVCMP) { # if the user wanted to reverse complement the output
     $consensus = rc($consensus);
 }
@@ -114,17 +122,7 @@ if ($TIRTSD and $consensus) { # user has requested the TIR and TSD information b
     if ($header =~ /\d+_(\d+)_(\d+)$/) {
         $TSDseq = uc(substr $consensus, 0, $1);
         $TIR1seq = uc(substr $consensus, $1, $2);
-        $TIR2seq = uc(substr $consensus, -$1-$2, $2);     
-        if ($TSDseq eq "TA") { 
-            print "TSD: TA\n";
-            $TSDlength = 2;
-        } 
-        else {
-            $TSDlength = length $TSDseq;
-            print "TSD: $TSDseq.bp\n";
-        }
-        print "TIR1: $TIR1seq\n";
-        print "TIR2: $TIR2seq\n";
+        $TIR2seq = uc(substr $consensus, -$1-$2, $2);    
     }
     else {
         die "WARNING: Could not extract TSD and TIR information from header: $header\n";
@@ -135,15 +133,29 @@ if ($consensus) { # print the consensus sequence if the TSD and TIR was requeste
     my $ali_length = $lengths[0] - (2*$TSDlength);
     my $cons_length = (length $consensus) - (2*$TSDlength);
     my $num_input_seq = keys %sequences;
-    print "Alignment length: $ali_length, Consensus length $cons_length, Number of input sequences: $num_input_seq\n";
-    print ">consensus\n";
-    if ($TIRTSD) { 
+    $TSDlength = length $TSDseq;
+    if ($TIRTSD) {   
         my $no_tsd_cons = substr $consensus, $TSDlength, (length $consensus) - (2*$TSDlength);
+        print "## Nucleotide sequence:\n";
         print "$no_tsd_cons\n";
+        print "## TSD Type (TA, 2, ..., 10)\n";
+        if ($TSDseq eq "TA") { 
+            print "TA\n";
+        } 
+        else {
+            print "$TSDseq.bp\n";
+        }
+        print "## TIR sequences\n";
+        print "- 5' TIR: $TIR1seq\n";
+        print "- 3' TIR: $TIR2seq\n";
     }
     else {
+        print ">consensus\n";
         print "$consensus\n";
     }
+
+        print "\nAlignment length: $ali_length, Consensus length $cons_length, Number of input sequences: $num_input_seq\n";
+
 }
 else {
     print "No consensus found for these input sequences:\n";
