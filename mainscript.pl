@@ -2185,7 +2185,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                             }
                             $menu1 = 1; # stay in menu 1
                         }
-
+ 
                         ## Setup sub-menu, aka. menu2, will only enter if a consensus sequence has been created
                         while ($menu2)  {
                             my @menu2_items; # holds the text of menu 2 choices
