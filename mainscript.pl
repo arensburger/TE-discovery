@@ -2155,8 +2155,8 @@ if ($STEP == 6) { # check if this step should be performed or not
                             if (defined $fasta_text && length $fasta_text) { 
                                 ($consensus_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
                                 # print the consensus for the user, minus the TSD sequences
-                                my $printed_consensus_sequence = substr $consensus_sequence, $tsd_length, (length $consensus_sequence) - (2*$tsd_length);
-                                print "\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$printed_consensus_sequence\n\n";
+                               # my $printed_consensus_sequence = substr $consensus_sequence, $tsd_length, (length $consensus_sequence) - (2*$tsd_length);
+                                print "\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$consensus_sequence\n\n";
                                 $menu2 = 1; # go to sub menu 2
                             }
                             else {
@@ -2175,8 +2175,8 @@ if ($STEP == 6) { # check if this step should be performed or not
                                 ($consensus_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
                                 # print the consensus for the user, minus the TSD sequences
                                 if ($consensus_sequence) {
-                                    my $printed_consensus_sequence = substr $consensus_sequence, $tsd_length, (length $consensus_sequence) - (2*$tsd_length);
-                                    print "\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$printed_consensus_sequence\n\n";
+ #                                   my $printed_consensus_sequence = substr $consensus_sequence, $tsd_length, (length $consensus_sequence) - (2*$tsd_length);
+                                    print "\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$consensus_sequence\n\n";
                                     $menu2 = 1; # go to sub menu 2
                                 }
                                 else {
@@ -2193,6 +2193,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                             push @menu2_items, "Do NCBI BLASTn search on the nt database using the consensus sequence"; # item 1
                             push @menu2_items, "Do NCBI BLASTx search on the nr database using the consensus sequence"; # item 2
                             push @menu2_items, "BLAST protein to nucleotide alignment"; # item 3
+                            push @menu2_items, "Create report"; # item 4
 
                             my $menu2_choice = prompt('m', {
                                 title => "\nSub-menu of $cluster_name using the consensus sequence\n",
@@ -2757,6 +2758,8 @@ sub consensus {
         $tir_length = 0;
     }
 
+    # Remove the TSD sequences from the consensus
+    $consensus = substr $consensus, $tsd_length, (length $consensus) - (2*$tsd_length);
     if ($reverse_complement) { # if the user wanted to reverse complement the output
         return(rc($consensus), $tsd_length, $tir_length);
     }
