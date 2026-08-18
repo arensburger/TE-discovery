@@ -2107,6 +2107,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                     push @menu1_items, "Change consensus sequence parameters"; # item 3
                     push @menu1_items, "Calculate consensus sequence based on all sequences"; # item 4
                     push @menu1_items, "Calculate consensus sequence based on selected sequences"; # item 5
+                    push @menu1_items, "Create report"; # item 6
                     
                     my $menu1 = 1; # boolean, set to one until the user is done with menu 1
                     my $menu2 = 0; # boolean, menu2 is submenu of 1
@@ -2183,6 +2184,10 @@ if ($STEP == 6) { # check if this step should be performed or not
                                     warn "No consensus was created.\n";
                                 }
                             }
+                            $menu1 = 1; # stay in menu 1
+                        }
+                        if ($menu1_choice == 6) {
+                            my $report_creation_outcome = create_report($cluster_report_path, $cluster_name, $consensus_sequence, $tsd_length, $tir_length);
                             $menu1 = 1; # stay in menu 1
                         }
  
@@ -2284,14 +2289,13 @@ if ($STEP == 6) { # check if this step should be performed or not
                                 $menu1 = 1; # stay in menu 1
                                 $menu2 = 1; # go to sub menu 2
                             }
+                            if ($menu2_choice == 4) { # create report
+                                my $report_creation_outcome = create_report($cluster_report_path, $cluster_name, $consensus_sequence, $tsd_length, $tir_length);
+                                $menu1 = 1; # stay in menu 1
+                                $menu2 = 0; # go to sub menu 2
+                            }
                         }
                     }
-                    
-
-                    # load all the nucleotide sequences into memory
-                    
-                    
-
                 }
             }
         }
@@ -2766,4 +2770,93 @@ sub consensus {
     else {
         return ($consensus, $tsd_length, $tir_length);
     }
+}
+
+# Create the outline of a report on a cluster
+sub create_report {
+    my ($cluster_report_path, $cluster_name, $consensus_sequence, $tsd_length, $tir_length) = @_;
+    
+    # Check if the user already created a report 
+    if (-e $cluster_report_path) {
+        print "ERROR: A report file on this cluster already exists at $cluster_report_path\n";
+        print "\tYou should remove this file before trying again to create a report\n";
+        return (0);
+    }
+    
+    # Get the nucleotide sequence the user wants to use
+    my $nucleotide_sequence;
+    if ($consensus_sequence) {
+        $nucleotide_sequence = uc(prompt('a', "Enter the nucleotide sequence, press ENTER to use consensus sequence or paste a new one. The nucleotide sequence should be in 5' to 3' orientation and not have TSD sequences:", "", "$consensus_sequence"));
+    }
+    else {
+        $nucleotide_sequence = uc(prompt('a', "Enter the nucleotide sequence. The nucleotide sequence should be in 5' to 3' orientation and not have TSD sequences:", "", ""));
+    }
+
+    # Get the TSD type
+    my @TSD_items = qw(TA 2 3 4 5 6 7 8 9 10 blank);
+    my $TSD_idx = prompt('m',
+        {
+            prompt       => 'Enter the TSD type:',
+            items        => \@TSD_items,
+            display_base => 1,
+            return_base  => 1,
+        },
+        'Choose TA or a number between 2 and 10',
+        'TA');
+
+    my $TSD_type = $TSD_items[$TSD_idx - 1];  # subtract return_base to get 0-indexed
+
+    # Get the transposase information
+    my $transposase = prompt('a', "Enter the transposase sequence:", "", "");
+    my $complete_protein = prompt('y', 'Is this a complete transposon?', 'Enter y or n', 'y');
+
+    # Get the taxonomy
+    my @taxonomy_items = qw(Tc hAT unknown blank);
+    my $taxonomy_idx = prompt('m',
+        {
+            prompt       => 'Enter the taxonomy of this element:',
+            items        => \@taxonomy_items,
+            display_base => 1,
+            return_base  => 1,
+        },
+        '',
+        '');
+
+    my $taxonomy = $taxonomy_items[$taxonomy_idx - 1];  # subtract return_base to get 0-indexed
+
+    # Create the report
+    open (OUTPUT, '>', $cluster_report_path) or die "ERROR: Cannot create report at $cluster_report_path\n";
+    print OUTPUT "# Report $cluster_name\n";
+    print OUTPUT "## Nucleotide sequence:\n";
+    print OUTPUT "$nucleotide_sequence\n";
+    print OUTPUT "## TSD Type\n";
+    if ($TSD_type eq "blank") {
+        print OUTPUT "\n";
+    }
+    else {
+        print OUTPUT "$TSD_type\n";
+    }
+    print OUTPUT "## TIR sequences\n";
+    my $TIR1seq = substr $nucleotide_sequence, 0, $tir_length;
+    my $TIR2seq = substr $nucleotide_sequence, -$tir_length, $tir_length;
+    print OUTPUT "- 5' TIR: $TIR1seq\n";
+    print OUTPUT "- 3' TIR: $TIR2seq\n";
+    if ($complete_protein) {
+        print OUTPUT "## Protein sequence\n";
+    }
+    else {
+        print OUTPUT "## Protein sequence - partial\n";
+    }
+    print OUTPUT "$transposase\n";
+    print OUTPUT "## Element taxonomy:\n";
+    if ($taxonomy eq "blank") {
+        print OUTPUT "\n";
+    }
+    else {
+        print OUTPUT "$taxonomy\n";
+    }
+    print OUTPUT "## Notes:\n";
+    close (OUTPUT);
+
+    return (1);
 }
