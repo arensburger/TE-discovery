@@ -13,7 +13,7 @@ use File::Temp qw(tempdir);
 use Term::Prompt;
 use Term::ANSIColor;
 use Cwd;
-use LWP::UserAgent;
+use LWP::UserAgent; # to connect to NCBI
 use JSON;
 use Graph; # use sudo apt install libgraph-perl to install this
 use Term::ANSIColor qw(colored);
@@ -2090,6 +2090,9 @@ if ($STEP == 6) { # check if this step should be performed or not
                 my $current_cluster_folder = $CLUSTER_FOLDER . "/" . $cluster_name ; # folder with specific element of interest   
                 my $cluster_report_path = $current_cluster_folder . "/" . $cluster_name . "_report.md"; # if it exists this would be the full path to the report for this cluster
                 my $consensus_sequence; # latest consensus sequence
+                my $current_protein_sequence; # current protein sequence
+                my $current_nucleotide_sequence; # current nucleotide sequence
+                my $current_protein_accession;
                 my $tsd_length;  
                 my $tir_length;
                 unless (-e $cluster_report_path) { # only continue if this cluster does not have a report yet
@@ -2099,6 +2102,10 @@ if ($STEP == 6) { # check if this step should be performed or not
                     print ANALYSIS "\tReview of cluster $cluster_report_path\n";
                     `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
 
+                    # Declare variables used in different menu parts
+                    my $current_protein_sequence; # current protein sequence
+                    my $current_nucleotide_sequence; # current nucleotide sequence
+
                     # Setup and display menu 1
                     my @menu1_items; # holds the text of menu 1 choices
                     push @menu1_items, "Quit the program"; # item 0
@@ -2107,7 +2114,10 @@ if ($STEP == 6) { # check if this step should be performed or not
                     push @menu1_items, "Change consensus sequence parameters"; # item 3
                     push @menu1_items, "Calculate consensus sequence based on all sequences"; # item 4
                     push @menu1_items, "Calculate consensus sequence based on selected sequences"; # item 5
-                    push @menu1_items, "Create report"; # item 6
+                    push @menu1_items, "Do NCBI BLASTn search on the nt database"; # item 6
+                    push @menu1_items, "Do NCBI BLASTx search on the nr database"; # item 7
+                    push @menu1_items, "BLAST protein to nucleotide alignment"; # item 8
+                    push @menu1_items, "Create report"; # item 9
                     
                     my $menu1 = 1; # boolean, set to one until the user is done with menu 1
                     my $menu2 = 0; # boolean, menu2 is submenu of 1
@@ -2154,11 +2164,11 @@ if ($STEP == 6) { # check if this step should be performed or not
                                 }
                             }
                             if (defined $fasta_text && length $fasta_text) { 
-                                ($consensus_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
+                                ($current_nucleotide_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
                                 # print the consensus for the user, minus the TSD sequences
-                               # my $printed_consensus_sequence = substr $consensus_sequence, $tsd_length, (length $consensus_sequence) - (2*$tsd_length);
-                                print "\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$consensus_sequence\n\n";
-                                $menu2 = 1; # go to sub menu 2
+                               # my $printed_consensus_sequence = substr $current_nucleotide_sequence, $tsd_length, (length $current_nucleotide_sequence) - (2*$tsd_length);
+                                print "\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$current_nucleotide_sequence\n\n";
+#                                $menu2 = 1; # go to sub menu 2
                             }
                             else {
                                 warn "File $nuc_alignment_file_name does not contain fasta formated sequences.\n"; 
@@ -2173,12 +2183,12 @@ if ($STEP == 6) { # check if this step should be performed or not
                                 warn "Could not read clipboard. Make sure 'xclip' is installed.\n";
                             }
                             else { 
-                                ($consensus_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
+                                ($current_nucleotide_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
                                 # print the consensus for the user, minus the TSD sequences
-                                if ($consensus_sequence) {
+                                if ($current_nucleotide_sequence) {
  #                                   my $printed_consensus_sequence = substr $consensus_sequence, $tsd_length, (length $consensus_sequence) - (2*$tsd_length);
-                                    print "\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$consensus_sequence\n\n";
-                                    $menu2 = 1; # go to sub menu 2
+                                    print "\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$current_nucleotide_sequence\n\n";
+ #                                   $menu2 = 1; # go to sub menu 2
                                 }
                                 else {
                                     warn "No consensus was created.\n";
@@ -2186,19 +2196,110 @@ if ($STEP == 6) { # check if this step should be performed or not
                             }
                             $menu1 = 1; # stay in menu 1
                         }
-                        if ($menu1_choice == 6) {
-                            my $report_creation_outcome = create_report($cluster_report_path, $cluster_name, $consensus_sequence, $tsd_length, $tir_length);
+
+                        if ($menu1_choice == 6) { # user wants to search with BLASTn
+                            $current_nucleotide_sequence = uc(prompt('a', "Enter the nucleotide sequence", "", "$current_nucleotide_sequence"));
+                            my $program  = "blastn";
+                            my $database = "nt";
+                            my $query = uri_escape($current_nucleotide_sequence);
+                            my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?" . "CMD=Put&PROGRAM=$program&DATABASE=$database&QUERY=$query";
+                            
+                            # Launch Firefox with this URL
+                            print "\nLaunching NCBI blastn on web browser\n\n";
+                            system("firefox", $url);
+                            $menu1 = 1; # stay in menu 1
+                        }
+
+                        if ($menu1_choice == 7) { # user wants to search with BLASTx
+                            $current_nucleotide_sequence = uc(prompt('a', "Enter the nucleotide sequence", "", "$current_nucleotide_sequence"));
+                            my $program  = "blastx";
+                            my $database = "nt";
+                            #my $sequence = $consensus_sequence;
+                            my $query = uri_escape($current_nucleotide_sequence);
+                            my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?" . "CMD=Put&PROGRAM=$program&DATABASE=$database&QUERY=$query";
+                            # Launch Firefox with this URL
+                            print "\nLaunching NCBI blastx on web browser\n\n";
+                            system("firefox \"$url\" &");
+                            $menu1 = 1; # stay in menu 1
+                        }
+
+                        if ($menu1_choice == 8) { # user wants blast protein sequence to alignment
+                            $current_protein_accession = prompt('x', "Enter either an NCBI protein identifier or input 0 to enter a protein sequence instead:", "", "$current_protein_accession");
+
+                            # obtain the amino acid sequence
+                            if ($current_protein_accession) {
+                                $current_protein_sequence = fetch_protein_fasta($current_protein_accession);
+                            }
+                            else {
+                                $current_protein_sequence = prompt('a', "Enter protein sequence as a single line:", "", "$current_protein_sequence");
+                            }
+
+                            if ($current_protein_sequence =~ /Error\:/) {
+                                print "Error: Did not get a protein sequence\n";
+                            }
+                            else {
+                                # Copy protein sequence to temporary file
+                                my $protein_inputfile_name = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); 
+                                open (OUTPUT, '>', $protein_inputfile_name) or die "ERROR: Cannot create tempoary file $protein_inputfile_name\n";
+                                print OUTPUT ">protein\n$current_protein_sequence\n";
+                                close OUTPUT;
+
+                                # Copy alignment file to temporary file and remove gaps
+                                my $nucleotide_inputfile_name = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); 
+                                open (OUTPUT, '>', $nucleotide_inputfile_name) or die "ERROR: Cannot create tempoary file $nucleotide_inputfile_name\n";
+                                my %alignment_sequences = fastatohash($nuc_alignment_file_name); # load the existing alignments
+                                foreach my $header (keys %alignment_sequences) {
+                                    print OUTPUT ">" . $header . "\n";
+                                    $alignment_sequences{$header} =~ s/-//g; # remove gaps from the sequence
+                                    print OUTPUT $alignment_sequences{$header} . "\n";
+                                }
+                                close OUTPUT;
+
+                                # Run the blastx 
+                                my $blast_output_file_name = $current_cluster_folder . "/" . "blastx-" . strftime("%m%d%y-%H%M", localtime) . ".asn";
+                                `blastx -subject $protein_inputfile_name -query $nucleotide_inputfile_name -outfmt 11 > $blast_output_file_name`;
+                                if ($?) { die "ERROR running blastx locally $?\n"}
+                                print "\nBLASTx output written to file $blast_output_file_name\n\n";
+
+                                # Identify the hits with the best matches and sort it by coverage
+                                my $reformat_blastx_text = `blast_formatter -archive $blast_output_file_name -outfmt "6 qseqid pident length qframe"`;
+                                if ($?) { die "ERROR running reformating blastx $?\n"}
+                                my @reformat_blastx_array = split "\n", $reformat_blastx_text;
+                                my @sorted_blastx_array = sort { (split /\t/, $b)[2] <=> (split /\t/, $a)[2] } @reformat_blastx_array;
+
+                                # display top results
+                                my $maximum_number_of_results_to_display = 10;
+                                my $protein_length = length ($current_protein_sequence);
+                                print "Top results, sorted by match length. Protein length is $protein_length\n";
+                                print "Sequence name\t%identity\taa. covered\tframe\n";
+                                for (my $i=0; $i<$maximum_number_of_results_to_display; $i++) {
+                                    if (exists $sorted_blastx_array[$i]) {
+                                        print "$sorted_blastx_array[$i]\n";
+                                    }
+                                }
+                                print "HINT: Display this search in using\n";
+                                print "blast_formatter -archive $blast_output_file_name -outfmt 0 -html > temp.html && firefox temp.html\n";
+                                print "\n";
+                                $menu1 = 1; # stay in menu 1
+                            } 
+                        }
+
+
+                        if ($menu1_choice == 9) {
+                            my $report_creation_outcome = create_report($cluster_report_path, $cluster_name, $current_nucleotide_sequence, $tsd_length, $tir_length);
                             $menu1 = 1; # stay in menu 1
                         }
  
                         ## Setup sub-menu, aka. menu2, will only enter if a consensus sequence has been created
+                        
                         while ($menu2)  {
                             my @menu2_items; # holds the text of menu 2 choices
                             push @menu2_items, "Go back to previous menu"; # item 0
                             push @menu2_items, "Do NCBI BLASTn search on the nt database using the consensus sequence"; # item 1
                             push @menu2_items, "Do NCBI BLASTx search on the nr database using the consensus sequence"; # item 2
                             push @menu2_items, "BLAST protein to nucleotide alignment"; # item 3
-                            push @menu2_items, "Create report"; # item 4
+                            push @menu2_items, "Identify transposase in nucleotide seqeuence"; # item 4
+                            push @menu2_items, "Create report"; # item 5
 
                             my $menu2_choice = prompt('m', {
                                 title => "\nSub-menu of $cluster_name using the consensus sequence\n",
@@ -2237,18 +2338,18 @@ if ($STEP == 6) { # check if this step should be performed or not
                                 my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?" . "CMD=Put&PROGRAM=$program&DATABASE=$database&QUERY=$query";
                                 # Launch Firefox with this URL
                                 print "\nLaunching NCBI blastx on web browser\n\n";
-                                system("firefox", $url);
+                                system("firefox \"$url\" &");
                                 $menu1 = 1; # stay in menu 1
                                 $menu2 = 1; # go to sub menu 2
                             }
 
                             if ($menu2_choice == 3) { # user wants blast protein sequence to alignment
-                                my $protein_sequence = prompt('a', "Enter protein sequence as a single line:", "", "");
+                                $current_protein_sequence = prompt('a', "Enter protein sequence as a single line:", "", "");
                                 
                                 # Copy protein sequence to temporary file
                                 my $protein_inputfile_name = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); 
                                 open (OUTPUT, '>', $protein_inputfile_name) or die "ERROR: Cannot create tempoary file $protein_inputfile_name\n";
-                                print OUTPUT ">protein\n$protein_sequence\n";
+                                print OUTPUT ">protein\n$current_protein_sequence\n";
                                 close OUTPUT;
 
                                 # Copy alignment file to temporary file and remove gaps
@@ -2276,7 +2377,7 @@ if ($STEP == 6) { # check if this step should be performed or not
 
                                 # display top results
                                 my $maximum_number_of_results_to_display = 10;
-                                my $protein_length = length ($protein_sequence);
+                                my $protein_length = length ($current_protein_sequence);
                                 print "Top results, sorted by match length. Protein length is $protein_length\n";
                                 print "Sequence name\t%identity\taa. covered\tframe\n";
                                 for (my $i=0; $i<$maximum_number_of_results_to_display; $i++) {
@@ -2289,7 +2390,15 @@ if ($STEP == 6) { # check if this step should be performed or not
                                 $menu1 = 1; # stay in menu 1
                                 $menu2 = 1; # go to sub menu 2
                             }
-                            if ($menu2_choice == 4) { # create report
+                            if ($menu2_choice == 4) { # user wants to find most likely transposase sequence in a nucleotide sequence 
+                                my $nucleotide_sequence = uc(prompt('a', "Enter the nucleotide sequence name or DNA sequence", "", ""));
+                                $current_protein_sequence = uc(prompt('a', "Enter the protein sequence", "", "$current_protein_sequence"));
+
+                                $menu1 = 1; # stay in menu 1
+                                $menu2 = 1; # go to sub menu 2
+
+                            }
+                            if ($menu2_choice == 5) { # create report
                                 my $report_creation_outcome = create_report($cluster_report_path, $cluster_name, $consensus_sequence, $tsd_length, $tir_length);
                                 $menu1 = 1; # stay in menu 1
                                 $menu2 = 0; # go to sub menu 2
@@ -2859,4 +2968,20 @@ sub create_report {
     close (OUTPUT);
 
     return (1);
+}
+
+sub fetch_protein_fasta {
+    my ($accession) = @_;
+    my $base = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi';
+    my $url  = "$base?db=protein&id=$accession&rettype=fasta&retmode=text";
+    my $ua = LWP::UserAgent->new(timeout => 30);
+    $ua->agent('MyPerlScript/1.0 (myemail@example.com)');  # NCBI asks you to identify yourself
+    my $resp = $ua->get($url);
+    if ($resp->is_success) {
+        return $resp->decoded_content;
+    }
+    else {
+        return 0;
+    }
+#    return $resp->decoded_content;
 }
