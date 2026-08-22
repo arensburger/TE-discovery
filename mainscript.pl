@@ -1730,7 +1730,7 @@ if ($STEP == 5) { # check if this step should be performed or not
             push @Pfam_symbols, "$c1$c2";
         }
     }
-
+   
     # Store the data from the Interpro file into hash, this makes sure that duplicate records are not recorded more than once
     open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
     my %interpro_data; # has the genomic location as key (assumed to be unique) and as value an array with [0] getorf line (only 1), [1] all PANTHER lines, [2] all Pfam lines
