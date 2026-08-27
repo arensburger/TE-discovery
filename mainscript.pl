@@ -2082,7 +2082,8 @@ if ($STEP == 6) { # check if this step should be performed or not
     opendir(my $dh, $CLUSTER_FOLDER) or die "ERROR: Cannot open cluster folder $CLUSTER_FOLDER, $!";
     my %seen_tirs; # hash of arrays that has the unique tsd-tir1-tir2 string as key, and array of with data on this combination
     while (readdir $dh) {
-        my $cluster_name = $_;
+        #my $cluster_name = $_;
+        my $cluster_name = "cluster36";
         unless (($cluster_name =~ /^\./) or ($cluster_name =~ /.fa$/)) { # prevents reading invisible files . and .. as well as fasta files in that directory 
             # Constants, reset for each cluster
             my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must agree to call a position
@@ -2105,7 +2106,6 @@ if ($STEP == 6) { # check if this step should be performed or not
                 # update the user on how many folders are left to review
                 my ($total_folders, $folders_with_report) = count_report_folders($CLUSTER_FOLDER);
                 my $folders_left = $total_folders - $folders_with_report;
-  #              print "There are $folders_left clusters left to review of a total of $total_folders\n";
 
                 # Variables used accross menu items
                 my $blastx_negative_strand; # used when writting the report 
@@ -2209,7 +2209,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                             # Copy alignment file to temporary file and remove gaps
                             my $nucleotide_inputfile_name = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); 
                             open (OUTPUT, '>', $nucleotide_inputfile_name) or die "ERROR: Cannot create tempoary file $nucleotide_inputfile_name\n";
-                            my %alignment_sequences = fastatohash($nuc_alignment_file_name); # load the existing alignments
+#                            my %alignment_sequences = fastatohash($nuc_alignment_file_name); # load the existing alignments
                             foreach my $header (keys %alignment_sequences) {
                                 print OUTPUT ">" . $header . "\n";
                                 $alignment_sequences{$header} =~ s/-//g; # remove gaps from the sequence
@@ -2227,7 +2227,9 @@ if ($STEP == 6) { # check if this step should be performed or not
                             my $reformat_blastx_text = `blast_formatter -archive $blast_output_file_name -outfmt "6 qseqid pident length qframe"`;
                             if ($?) { die "ERROR running reformating blastx $?\n"}
                             my @reformat_blastx_array = split "\n", $reformat_blastx_text;
-                            my @sorted_blastx_array = sort { (split /\t/, $b)[2] <=> (split /\t/, $a)[2] } @reformat_blastx_array;
+                            my %seen; # there will be duplicate lines, this is to remove duplicates
+                            my @unique = grep { !$seen{$_}++ } @reformat_blastx_array; # there will be duplicate lines, this is to remove duplicates
+                            my @sorted_blastx_array = sort { (split /\t/, $b)[2] <=> (split /\t/, $a)[2] } @unique;
 
                             # display top results
                             my $maximum_number_of_results_to_display = 10;
@@ -2370,12 +2372,48 @@ if ($STEP == 6) { # check if this step should be performed or not
                     }
 
                     if ($menu1_choice == 7) { # print report
-                            my $notes; # text to add to the Notes section of the report   
-                            my $continue_report = 1; # boolean used to abort the report if problems arrise
+                        my $notes; # text to add to the Notes section of the report   
+                        my $continue_report = 1; # boolean used to abort the report if problems arrise
 
-                        # Get the nucleotide sequence the user wants to use ask if the sequence in the other strand
-                        my $nucleotide_sequence = uc(prompt('a', "Enter the nucleotide sequence, press ENTER to use consensus sequence or paste a new one. The nucleotide sequence should be in 5' to 3' orientation and not have TSD sequences:", "", "$current_nucleotide_sequence"));
-                        $current_nucleotide_sequence = $nucleotide_sequence; # updated in case the report has be redone
+                        # Get the nucleotide sequence the user wants to use 
+                        $current_sequence_name = uc(prompt('x', "Enter full name of the alignment sequence to use, enter 0 to enter a different kind of sequence:", "", "$current_sequence_name"));
+                        my $TIR1seq; # TIR sequences to use in the report
+                        my $TIR2seq;
+                        if ($current_sequence_name eq "0") {
+                            $current_nucleotide_sequence = prompt('x', "Enter the nucleotide sequence without TSDs:", "", "$current_nucleotide_sequence");
+                            $current_nucleotide_sequence = uc($current_nucleotide_sequence);
+                            $tir_length = prompt('n', "Enter the length of the TIRs at the end of the sequence:", "", "$tir_length");
+                            #$TIR1seq = substr $current_nucleotide_sequence, 0, $tir_length;
+                            #$TIR2seq = substr $current_nucleotide_sequence, -$tir_length, $tir_length;
+                            $notes .= "Reference nucleotide sequence is not one of the alignment sequences\n";
+                        }
+                        else {
+                            if (exists $alignment_sequences{$current_sequence_name}) {
+                                if ($current_sequence_name =~ /\S+_\d+_(\d+)_(\d+)/) {
+                                    $tsd_length  = $1;
+                                    $tir_length = $2;
+                                    $current_nucleotide_sequence = uc($alignment_sequences{$current_sequence_name});
+                                    $current_nucleotide_sequence =~ s/-//g; # remove any gaps from the sequence
+                                    $current_nucleotide_sequence = substr $current_nucleotide_sequence, $tsd_length, (length $current_nucleotide_sequence) - (2*$tsd_length); # remove the TSDs
+                                    #$TIR1seq = substr $current_nucleotide_sequence, 0, $tir_length;
+                                    #$TIR2seq = substr $current_nucleotide_sequence, -$tir_length, $tir_length;
+                                    $notes .= "Reference nucleotide sequence is $current_sequence_name\n";
+                                }
+                                else {
+                                    die "ERROR: Could not parse the TSD and TIR lengths from name $current_sequence_name\n";
+                                }
+                            }
+                            else {
+                                print "WARNING: The current alignment does not have a sequence called $current_sequence_name. The report will not be printed\n";
+                                $continue_report = 0;
+                            }
+                        }
+                        # Get the TIR sequences
+                        $TIR1seq = substr $current_nucleotide_sequence, 0, $tir_length;
+                        $TIR2seq = substr $current_nucleotide_sequence, -$tir_length, $tir_length;
+
+                        #my $current_nucleotide_sequence = uc(prompt('a', "Enter the nucleotide sequence, press ENTER to use consensus sequence or paste a new one. The nucleotide sequence should be in 5' to 3' orientation and not have TSD sequences:", "", "$current_nucleotide_sequence"));
+                        #$current_nucleotide_sequence = $current_nucleotide_sequence; # updated in case the report has be redone
                         my $rc; # boolean, set to 1 if the sequence should be reverse-complemented
                         if ($blastx_negative_strand) {
                             $rc = prompt('y', "Should this sequence be written in the opposite orientation? (last BLASTx was on the negative strand)", "", "y");
@@ -2384,7 +2422,8 @@ if ($STEP == 6) { # check if this step should be performed or not
                             $rc = prompt('y', "Should this sequence be written in the opposite orientation?", "", "n");
                         }
                         if ($rc) {
-                            $nucleotide_sequence = rc($nucleotide_sequence);
+                            $current_nucleotide_sequence = rc($current_nucleotide_sequence);
+                            $notes .= "Nucleotide sequence has been reverse-complemented\n";
                         }
 
                         # Get the transposase information
@@ -2393,7 +2432,7 @@ if ($STEP == 6) { # check if this step should be performed or not
 
                             # Check that the transposase and the nucleotide sequences are in the same orientation and align well
                             my $protein_input_file = fasta_tempfile($transposase);
-                            my $nucleotide_input_file = fasta_tempfile($nucleotide_sequence);
+                            my $nucleotide_input_file = fasta_tempfile($current_nucleotide_sequence);
                             my $blastx_output = `blastx -subject $protein_input_file -query $nucleotide_input_file -outfmt "6 length qframe"`;
                             my @blastx_array = split "\n", $blastx_output;
                             my @topline_data = split " ", $blastx_array[0];
@@ -2459,7 +2498,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                             open (OUTPUT, '>', $cluster_report_path) or die "ERROR: Cannot create report at $cluster_report_path\n";
                             print OUTPUT "# Report $cluster_name\n";
                             print OUTPUT "## Nucleotide sequence:\n";
-                            print OUTPUT "$nucleotide_sequence\n";
+                            print OUTPUT "$current_nucleotide_sequence\n";
                             print OUTPUT "## TSD Type\n";
                             if ($TSD_type eq "blank") {
                                 print OUTPUT "\n";
@@ -2468,8 +2507,6 @@ if ($STEP == 6) { # check if this step should be performed or not
                                 print OUTPUT "$TSD_type\n";
                             }
                             print OUTPUT "## TIR sequences\n";
-                            my $TIR1seq = substr $nucleotide_sequence, 0, $tir_length;
-                            my $TIR2seq = substr $nucleotide_sequence, -$tir_length, $tir_length;
                             print OUTPUT "- 5' TIR: $TIR1seq\n";
                             print OUTPUT "- 3' TIR: $TIR2seq\n";
                             print OUTPUT "## Protein sequence\n";
