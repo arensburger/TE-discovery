@@ -20,12 +20,12 @@ no warnings 'redefine';
     my ($cols) = GetTerminalSize();
     return $cols || 80;
 };
-use Term::ANSIColor;
+#use Term::ANSIColor;
 use Cwd;
 use LWP::UserAgent; # to connect to NCBI
 use JSON;
 use Graph; # use sudo apt install libgraph-perl to install this
-use Term::ANSIColor qw(colored);
+use Term::ANSIColor qw(colored colorstrip);
 use URI::Escape; # this is to handle weird characters
 use POSIX qw(strftime); # to format time 
 
@@ -57,7 +57,7 @@ GetOptions(
 
 ## CHECK INPUTS If help was called (this could probably be improved)
 if ($SHOW_HELP) {
-    print STDERR "Description and input help can be found at https://github.com/arensburger/TE-discovery\n";
+    print colored ("Description and input help can be found at https://github.com/arensburger/TE-discovery\n", "bold");
     exit;
 }
 
@@ -77,7 +77,7 @@ my $COMBINED_CLUSTERS_OUTPUT_FILENAME = $CLUSTER_FOLDER . "/" . $ANALYSIS_NAME .
 my $current_directry = getcwd();
 if (($STEP == 1) or ($STEP == 12)) {
     if (-d $ANALYSIS_FOLDER) { 
-        print "WARNING: folder $current_directry/$ANALYSIS_FOLDER already exists, using this folder rather than creating a new one\n";
+        print colored ("WARNING: folder $current_directry/$ANALYSIS_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
     }
     else {
         print STDERR "Creating directory $ANALYSIS_FOLDER for storing analysis files\n";
@@ -86,7 +86,7 @@ if (($STEP == 1) or ($STEP == 12)) {
     }
 
     if (-d $ELEMENT_FOLDER) { 
-        print "WARNING: folder $ELEMENT_FOLDER already exists, using this folder rather than creating a new one\n";
+        print colored ("WARNING: folder $ELEMENT_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
     }
     else {
         print STDERR "Creating directory $ELEMENT_FOLDER for storing element files\n";
@@ -95,7 +95,7 @@ if (($STEP == 1) or ($STEP == 12)) {
     }
 
     if (-d $reject_folder_path) { 
-        print "WARNING: folder $reject_folder_path already exists, using this folder rather than creating a new one\n";
+        print colored ("WARNING: folder $reject_folder_path already exists, using this folder rather than creating a new one\n", "yellow");
     }
     else {
         print STDERR "Creating directory $reject_folder_path for reject elements\n";
@@ -743,10 +743,7 @@ if ($STEP == 3) { # check if this step should be performed or not
         }
 
         if ($elements_left_to_review) {
-            
-            print color('blue');
-            print "\nElement $element_name, $elements_left_to_review left to review\n";
-            print color('reset');
+            print colored ("\nElement $element_name, $elements_left_to_review left to review\n", "blue");
             print ANALYSIS "\tReview of element $ELEMENT_FOLDER/$element_name\n";
             `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
 
@@ -770,13 +767,9 @@ if ($STEP == 3) { # check if this step should be performed or not
                 }
             } 
             close README;
-
-            # print any prior notes if applicable
-            print color('bold blue');
             if ($prior_notes) {
-                print "\nPRIOR REVIEW NOTES FOR ELEMENT $element_name\n$prior_notes";
+                print colored ("\nPRIOR REVIEW NOTES FOR ELEMENT $element_name\n$prior_notes", "bold blue");
             }
-            print color('reset');
 
             # Check if the consensus sequence of this element has a TSD-TIR combination that has been seen before.
             # If such a combination has been seen (and only one) then automatically record this as an element
@@ -847,7 +840,7 @@ if ($STEP == 3) { # check if this step should be performed or not
 
             # Decide if the element can be processed automatically or needs to be reviewed by the user
             if (((keys %known_tsdtirs) == 1) and ($TSDmatch)) { # this element can be recorded automatically
-                print "\tThis element has a TSD and TIR combination that has been recorded previously, recording and moving to the next element\n";
+                print colored ("\tThis element has a TSD and TIR combination that has been recorded previously, recording and moving to the next element\n", "blue");
                 foreach my $l (keys %known_tsdtirs) { # there's only one line, but this allows me not to have to look up the name of the key
                     my $tsd = $known_tsdtirs{$l}[0];
                     my $tir1 = $known_tsdtirs{$l}[2];
@@ -942,7 +935,7 @@ if ($STEP == 3) { # check if this step should be performed or not
                         close README;
                         `mv $ELEMENT_FOLDER/$element_name $FURTHER_REVIEW_FOLDER_NAME`;
                         if ($?) { die "ERROR: could not move folder $ELEMENT_FOLDER/$element_name to folder $FURTHER_REVIEW_FOLDER_NAME: error code $?\n"}
-                        print "\tMoved the element to the folder $FURTHER_REVIEW_FOLDER_NAME\n";
+                        print colored ("\tMoved the element to the folder $FURTHER_REVIEW_FOLDER_NAME\n", "blue");
                         $menu1 = 0;
                     }
                     elsif ($menu1_choice == 6) { # the user wants to manually enter the coordinates
@@ -1194,15 +1187,13 @@ if ($STEP == 3) { # check if this step should be performed or not
                         while ($menu2) {  #keep displaying until the user ready to leave
 
                             # if applicable tell the user this TIRs been seen before
-                            print color('bold blue');
                             if (abs($tirmatch)==2) {
-                                print "\nNOTE: These exact TIRs have been recorded before\n";
+                                print colored ("\nNOTE: These exact TIRs have been recorded before\n", "bold blue");
                             }
                             if (abs($tirmatch)==1) {
-                                print "\nNOTE: Very similar TIRs have been recorded before\n";
-                                print "PRIOR TIRs: $other_tir1  $other_tir2\n";
+                                print colored ("\nNOTE: Very similar TIRs have been recorded before\n", "bold blue");
+                                print colored ("PRIOR TIRs: $other_tir1  $other_tir2\n", "bold blue");
                             }
-                            print color('reset');
                             
                             # display menu 2
                             my $menu2_choice = prompt('m', {
@@ -1428,7 +1419,7 @@ if ($STEP == 4) { # check if this step should be performed or not
 
     # Create a new directory where that will now how the clusters, rather than the old 'elements' (need to rename all this)
     if (-d $CLUSTER_FOLDER) { 
-        print "WARNING: folder $CLUSTER_FOLDER already exists, using this folder rather than creating a new one\n";
+        print colored ("WARNING: folder $CLUSTER_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
     }
     else {
         `mkdir $CLUSTER_FOLDER`;
@@ -1452,7 +1443,7 @@ if ($STEP == 4) { # check if this step should be performed or not
         $TIR_length = length($tir1_seq);
         my $TIRs_set = 1; # boolean, set to 1 if TIR sequence are ok, or zero if not
         if (($tir1_seq =~/n/i) or ($tir2_seq =~ /n/i)) { # if the tir sequences include "n" characters warn the user and stop processing
-            print STDERR "WARNING: The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_number}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n";
+            print colored ("WARNING: The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_number}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n", "yellow");
             $TIRs_set = 0;
         }
 
@@ -1486,7 +1477,7 @@ if ($STEP == 4) { # check if this step should be performed or not
             # Create directory cluster specific folder
             my $cluster_directory = "$CLUSTER_FOLDER/cluster$cluster_number";
             if (-d $cluster_directory) { 
-                print "WARNING: folder $cluster_directory already exists, using this folder rather than creating a new one\n";
+                print colored ("WARNING: folder $cluster_directory already exists, using this folder rather than creating a new one\n", "yellow");
             }
             else {
                 `mkdir $cluster_directory`;
@@ -1556,8 +1547,8 @@ if ($STEP == 4) { # check if this step should be performed or not
     }
     
     # Report what to do next
-    print colored("STEP $STEP is complete, clusters have been determined. The next step is to search for translated regions in these sequences using interproscan. Run the following search:", 'bold'), "\n";
-    print colored("interproscan.sh -i $COMBINED_CLUSTERS_OUTPUT_FILENAME -appl Pfam,Panther -t n -f GFF3 -o $ANALYSIS_NAME-Interpro.gff3", 'italic'), "\n";
+    print colored("STEP $STEP is complete, clusters have been determined. The next step is to search for translated regions in these sequences using interproscan. Run the following search:", "bold"), "\n";
+    print colored("interproscan.sh -i $COMBINED_CLUSTERS_OUTPUT_FILENAME -appl Pfam,Panther -t n -f GFF3 -o $ANALYSIS_NAME-Interpro.gff3", "italic"), "\n";
 }
 
 ### PIPELINE STEP 5 
@@ -2082,8 +2073,8 @@ if ($STEP == 6) { # check if this step should be performed or not
     opendir(my $dh, $CLUSTER_FOLDER) or die "ERROR: Cannot open cluster folder $CLUSTER_FOLDER, $!";
     my %seen_tirs; # hash of arrays that has the unique tsd-tir1-tir2 string as key, and array of with data on this combination
     while (readdir $dh) {
-        #my $cluster_name = $_;
-        my $cluster_name = "cluster36";
+        my $cluster_name = $_;
+        #my $cluster_name = "cluster36";
         unless (($cluster_name =~ /^\./) or ($cluster_name =~ /.fa$/)) { # prevents reading invisible files . and .. as well as fasta files in that directory 
             # Constants, reset for each cluster
             my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must agree to call a position
@@ -2134,7 +2125,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                 my $menu1 = 1; # boolean, set to one until the user is done with menu 1
                 while ($menu1) {
                     my $menu1_choice = prompt('m', {
-                        title => "Reviewing $cluster_name, there are $folders_left clusters left to review of a total of $total_folders",
+                        title => colored("Reviewing $cluster_name, there are $folders_left clusters left to review of a total of $total_folders", "bold green"),
                         prompt => 'What would you like to do?',
                         display_base => 0,
                         return_base => 0,
@@ -2168,8 +2159,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                         }
                         if (defined $fasta_text && length $fasta_text) { 
                             ($current_nucleotide_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
-                            # print the consensus for the user, minus the TSD sequences
-                            print "\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$current_nucleotide_sequence\n\n";
+                            print colored ("\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$current_nucleotide_sequence\n\n", "bold");
                         }
                         else {
                             warn "File $nuc_alignment_file_name does not contain fasta formated sequences.\n"; 
@@ -2184,7 +2174,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                         my $database = "nt";
                         my $query = uri_escape($current_nucleotide_sequence);                            
                         my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Put&PROGRAM=$program&DATABASE=$database&QUERY=$query";
-                        print "\nLaunching NCBI blastx on web browser\n\n";
+                        print colored ("\nLaunching NCBI blastx on web browser\n\n", "blue");
                         system("firefox \"$url\" &");
                         $menu1 = 1; # stay in menu 1
                     }
@@ -2209,7 +2199,6 @@ if ($STEP == 6) { # check if this step should be performed or not
                             # Copy alignment file to temporary file and remove gaps
                             my $nucleotide_inputfile_name = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); 
                             open (OUTPUT, '>', $nucleotide_inputfile_name) or die "ERROR: Cannot create tempoary file $nucleotide_inputfile_name\n";
-#                            my %alignment_sequences = fastatohash($nuc_alignment_file_name); # load the existing alignments
                             foreach my $header (keys %alignment_sequences) {
                                 print OUTPUT ">" . $header . "\n";
                                 $alignment_sequences{$header} =~ s/-//g; # remove gaps from the sequence
@@ -2221,7 +2210,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                             my $blast_output_file_name = $current_cluster_folder . "/" . "blastx-" . strftime("%m%d%y-%H%M", localtime) . ".asn";
                             `blastx -subject $protein_inputfile_name -query $nucleotide_inputfile_name -outfmt 11 > $blast_output_file_name`;
                             if ($?) { die "ERROR running blastx locally $?\n"}
-                            print "\nBLASTx output written to file $blast_output_file_name\n\n";
+                            print colored ("\nBLASTx output written to file $blast_output_file_name\n\n", "blue");
 
                             # Identify the hits with the best matches and sort it by coverage
                             my $reformat_blastx_text = `blast_formatter -archive $blast_output_file_name -outfmt "6 qseqid pident length qframe"`;
@@ -2234,16 +2223,15 @@ if ($STEP == 6) { # check if this step should be performed or not
                             # display top results
                             my $maximum_number_of_results_to_display = 10;
                             my $protein_length = length ($current_protein_sequence);
-                            print "Top results, sorted by match length. Protein length is $protein_length\n";
-                            print "Sequence name\t%identity\taa. covered\tframe\n";
+                            print colored ("Top results, sorted by match length. Protein length is $protein_length\n", "bold");
+                            print colored ("Sequence name\t%identity\taa. covered\tframe\n", "bold");
                             for (my $i=0; $i<$maximum_number_of_results_to_display; $i++) {
                                 if (exists $sorted_blastx_array[$i]) {
                                     print "$sorted_blastx_array[$i]\n";
                                 }
                             }
-                            print "HINT: Display this search in using\n";
-                            print "blast_formatter -archive $blast_output_file_name -outfmt 0 -html > temp.html && firefox temp.html\n";
-                            print "\n";
+                            print colored ("HINT: Display this search in using\n", "blue");
+                            print colored ("blast_formatter -archive $blast_output_file_name -outfmt 0 -html > temp.html && firefox temp.html\n\n", "bold");
                             $menu1 = 1; # stay in menu 1
                         } 
                     }
@@ -2339,13 +2327,13 @@ if ($STEP == 6) { # check if this step should be performed or not
                             }
 
                             # Print the ORFs starting with a header
-                            print "\nPossible ORFs, fasta titles are <sequence name>-<peptide length>-<number of stop codons>:\n";
+                            print colored ("\nPossible ORFs, fasta titles are <sequence name>-<peptide length>-<number of stop codons>:\n", "blue");
                             if ($best_blastx_parameters[1] > 0) {
-                                print "Translation is on the POSITIVE strand\n";
+                                print colored ("Translation is on the POSITIVE strand\n", "bold");
                                 $blastx_negative_strand = 0; # update the strand of the blastx for use later
                             }
                             else {
-                                print "Translation is on the NEGATIVE strand\n"; # update the strand of the blastx for use later
+                                print colored ("Translation is on the NEGATIVE strand\n", "bold"); # update the strand of the blastx for use later
                                 $blastx_negative_strand = 1; 
                             }
                             my @sorted = sort { length($b) <=> length($a) } @orfs;
@@ -2395,8 +2383,6 @@ if ($STEP == 6) { # check if this step should be performed or not
                                     $current_nucleotide_sequence = uc($alignment_sequences{$current_sequence_name});
                                     $current_nucleotide_sequence =~ s/-//g; # remove any gaps from the sequence
                                     $current_nucleotide_sequence = substr $current_nucleotide_sequence, $tsd_length, (length $current_nucleotide_sequence) - (2*$tsd_length); # remove the TSDs
-                                    #$TIR1seq = substr $current_nucleotide_sequence, 0, $tir_length;
-                                    #$TIR2seq = substr $current_nucleotide_sequence, -$tir_length, $tir_length;
                                     $notes .= "Reference nucleotide sequence is $current_sequence_name\n";
                                 }
                                 else {
@@ -2404,16 +2390,13 @@ if ($STEP == 6) { # check if this step should be performed or not
                                 }
                             }
                             else {
-                                print "WARNING: The current alignment does not have a sequence called $current_sequence_name. The report will not be printed\n";
+                                print colored ("WARNING: The current alignment does not have a sequence called $current_sequence_name. The report will not be printed\n", "yellow");
                                 $continue_report = 0;
                             }
                         }
                         # Get the TIR sequences
                         $TIR1seq = substr $current_nucleotide_sequence, 0, $tir_length;
                         $TIR2seq = substr $current_nucleotide_sequence, -$tir_length, $tir_length;
-
-                        #my $current_nucleotide_sequence = uc(prompt('a', "Enter the nucleotide sequence, press ENTER to use consensus sequence or paste a new one. The nucleotide sequence should be in 5' to 3' orientation and not have TSD sequences:", "", "$current_nucleotide_sequence"));
-                        #$current_nucleotide_sequence = $current_nucleotide_sequence; # updated in case the report has be redone
                         my $rc; # boolean, set to 1 if the sequence should be reverse-complemented
                         if ($blastx_negative_strand) {
                             $rc = prompt('y', "Should this sequence be written in the opposite orientation? (last BLASTx was on the negative strand)", "", "y");
@@ -2438,9 +2421,9 @@ if ($STEP == 6) { # check if this step should be performed or not
                             my @topline_data = split " ", $blastx_array[0];
                             my $match_proportion = $topline_data[0]/(length $transposase);
                             if (($topline_data[1] < 0) or ($match_proportion < 0.75)) {
-                                print "WARNING: The nucleotide sequence and transposase don't seem to match:\n";
-                                print "Transpoase orientation: $topline_data[1]\n";
-                                print "Proportion of transpoase mapping to nucleotide: $match_proportion\n";
+                                print colored ("WARNING: The nucleotide sequence and transposase don't seem to match:\n", "yellow");
+                                print colored ("Transpoase orientation: $topline_data[1]\n", "bold");
+                                print cologed ("Proportion of transpoase mapping to nucleotide: $match_proportion\n", "bold");
                                 $continue_report = prompt('y', 'Should printing this report be continued?', '', 'n');
                             }
 
@@ -2539,10 +2522,10 @@ if ($STEP == 6) { # check if this step should be performed or not
                             ($current_nucleotide_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
                             # print the consensus for the user, minus the TSD sequences
                             if ($current_nucleotide_sequence) {
-                                print "\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$current_nucleotide_sequence\n\n";
+                                print colored ("\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$current_nucleotide_sequence\n\n", "bold");
                             }
                             else {
-                                warn "No consensus was created.\n";
+                                print colored ("WARNING: No consensus was created.\n", "yellow");
                             }
                         }
                         $menu1 = 1; # stay in menu 1
@@ -2563,7 +2546,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                         my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?" . "CMD=Put&PROGRAM=$program&DATABASE=$database&QUERY=$query";
                         
                         # Launch Firefox with this URL
-                        print "\nLaunching NCBI blastn on web browser\n\n";
+                        print colored ("\nLaunching NCBI blastn on web browser\n\n", "blue");
                         system("firefox", $url);
                         $menu1 = 1; # stay in menu 1
                     }
@@ -2956,27 +2939,25 @@ sub consensus {
 
     ### Check the content of %sequences
     if (!%sequences) { # check if FASTA sequences were read
-        print "\nERROR: No FASTA formated sequences were found in the clipboard.\n\n";
+        print colored ("\nERROR: No FASTA formated sequences were found in the clipboard.\n\n", "red");
         return (0);
     }
     elsif (scalar keys %sequences == 1) { # check if there's more than one sequence
-        my ($header) = keys %sequences;
-        print "\nERROR: There only appears to be a single FASTA formatted entry, here's what was read\n$header\n$sequences{$header}\n\n";
-        return (0)
+        print colored ("\nWARNING: A single FASTA sequence was read\n", "yellow");
+        $MIN_FOR_POSITION = 1;
     }
     ## check if the sequences all have the same length
     my @lengths = map { length $_ } values %sequences;
     my %unique_lengths = map { $_ => 1 } @lengths;
     unless (scalar keys %unique_lengths == 1) {
-        print "\nERROR: The input FASTA sequences don't all have the same length, need to have aligned sequences as input\n\n";
+        print colored ("\nERROR: The input FASTA sequences don't all have the same length, need to have aligned sequences as input\n\n", "red");
         return (0);
     } 
 
     ### Create consensus sequence
     my $consensus; 
     for (my $i=0; $i < $lengths[0]; $i++ ) { # go through each position one at a time
-        
-        ## Store the characters at this postion into an arry
+        ## Store the characters at this postion into an array
         my @chars; # array that holds all the characters at this position
         for my $header (keys %sequences) { # go through each sequence at this position
             my $c = substr $sequences{$header}, $i, 1; # current character
@@ -2988,7 +2969,7 @@ sub consensus {
 
         ## Identify the most abundant character
         my %count;
-        my $proportion;
+        my $proportion;  
         $count{$_}++ for @chars;
         my ($top_char) = sort { $count{$b} <=> $count{$a} } keys %count;
         my $total_characters = scalar @chars;
@@ -2998,7 +2979,6 @@ sub consensus {
         else {
             $proportion = 0;
         }
-
         ## Decide if this character should be printed or not
         if(($total_characters >= $MIN_FOR_POSITION) and ($proportion >= $CONSENSUS_LEVEL)) { # condiditions to report a non N consensus
             $consensus .= uc("$top_char");
@@ -3011,7 +2991,7 @@ sub consensus {
                 $consensus .= "X";
             }
             else {
-                print "\nERROR: sequence type $type is unknown.\n";
+                print colored ("\nERROR: sequence type $type is unknown.\n", "red");
                 return (0)
             }
         }
