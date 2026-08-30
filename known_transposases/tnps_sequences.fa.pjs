@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "tnps_sequences.fa",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tnps_sequences.fa",
+  "number-of-letters": 443,
+  "number-of-sequences": 1,
+  "last-updated": "2026-08-29T15:57:00",
+  "number-of-volumes": 1,
+  "bytes-total": 37613,
+  "bytes-to-cache": 565,
+  "files": [
+    "tnps_sequences.fa.pdb",
+    "tnps_sequences.fa.phr",
+    "tnps_sequences.fa.pin",
+    "tnps_sequences.fa.pot",
+    "tnps_sequences.fa.psq",
+    "tnps_sequences.fa.ptf",
+    "tnps_sequences.fa.pto"
+  ]
+}

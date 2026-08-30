@@ -688,7 +688,6 @@ if ($STEP == 3) { # check if this step should be performed or not
      my $datestring = localtime();
     print ANALYSIS "Running STEP 3 on $datestring\n";
 
-    my $pkey; # pressed key, used for input from user
     my $elements_left_to_review=1; # number of elements left to review, set to a non-zero value initially so that an initial evaluation will be done
     while ($elements_left_to_review) {
 
@@ -2064,17 +2063,23 @@ if ($STEP == 5) { # check if this step should be performed or not
 my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must agree to call a position
 my $MIN_FOR_POSITION = 2; # minumum number of nucleotides or amino acids to call a position (not ignore it)
 my $RVCMP; # optional, reverse complement the fasta file input
+my $KNOWN_TNP_DATABASE = "/home/peter/TE-discovery/known_transposases/tnps_sequences.fa"; # location of known transpoase sequences, fomated with makeblastdb
 
-if ($STEP == 6) { # check if this step should be performed or not  
+if ($STEP == 6) { # check if this step should be performed or not
     ## update the analysis file with what is going on
     my $datestring = localtime();
     print ANALYSIS "Running STEP 6 on $datestring\n";
-    my $pkey; # pressed key, used for input from user
+    
+    ## check that all the inputs are ok
     opendir(my $dh, $CLUSTER_FOLDER) or die "ERROR: Cannot open cluster folder $CLUSTER_FOLDER, $!";
+    unless (-e $KNOWN_TNP_DATABASE) {
+        die "ERROR: Cannot find the database of known transposases $KNOWN_TNP_DATABASE . This database must formatted with NCBI's makeblastdb.\n";
+    }
+
     my %seen_tirs; # hash of arrays that has the unique tsd-tir1-tir2 string as key, and array of with data on this combination
     while (readdir $dh) {
         my $cluster_name = $_;
-        #my $cluster_name = "cluster36";
+        #my $cluster_name = "cluster24";
         unless (($cluster_name =~ /^\./) or ($cluster_name =~ /.fa$/)) { # prevents reading invisible files . and .. as well as fasta files in that directory 
             # Constants, reset for each cluster
             my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must agree to call a position
@@ -2171,11 +2176,34 @@ if ($STEP == 6) { # check if this step should be performed or not
                     if ($menu1_choice == 4) { # user wants to search with BLASTx
                         $current_nucleotide_sequence = uc(prompt('a', "Enter the nucleotide sequence", "", "$current_nucleotide_sequence"));
                         my $program  = "blastx";
-                        my $database = "nt";
-                        my $query = uri_escape($current_nucleotide_sequence);                            
-                        my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Put&PROGRAM=$program&DATABASE=$database&QUERY=$query";
-                        print colored ("\nLaunching NCBI blastx on web browser\n\n", "blue");
-                        system("firefox \"$url\" &");
+                        # try the matching to the known transposase database first
+                        my $MIN_ID_PERCENTAGE = 80; # smallest percentage of match to known transpoase to report it
+                        my $MIN_COVERAGE = 80; # smallest percentage of coverage known transpoase to report it
+                        my $nucleotide_input_file = fasta_tempfile($current_nucleotide_sequence);
+                        my $blastx_output = `blastx -db $KNOWN_TNP_DATABASE -query $nucleotide_input_file -outfmt "6 sseqid stitle pident length slen qframe"`;
+                        my @blastx_array = split "\n", $blastx_output;
+                        my $found_match = 0; # boolean
+                        foreach my $line (@blastx_array) {
+                            my @line_elements = split "\t", $line;
+                            my $coverage = 100 * ($line_elements[3]/$line_elements[4]);
+                            if (($line_elements[2] >= $MIN_ID_PERCENTAGE) and ($coverage >= $MIN_COVERAGE)){
+                                print "The known transposase below is $line_elements[2]% identical and covers $coverage% to the nucleotide input\n$line_elements[1]\n";
+                                $current_protein_accession = $line_elements[0];
+                                $found_match = 1;
+                            }
+                        }
+                        print "\n";
+                        unless ($found_match) {
+                            print colored ("No matches to known transpoases were found, do a BLASTX search on NCBI\n", "yellow");
+                            print colored ("\nLaunching NCBI BLAST on web browser\n\n", "blue");
+                            my $url = "https://blast.ncbi.nlm.nih.gov/";
+                            system("firefox \"$url\" &");
+                        }  
+                        # my $database = "nt";
+                        # my $query = uri_escape($current_nucleotide_sequence);                            
+                        # my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Put&PROGRAM=$program&DATABASE=$database&QUERY=$query";
+                        # print colored ("\nLaunching NCBI blastx on web browser\n\n", "blue");
+                        # system("firefox \"$url\" &");
                         $menu1 = 1; # stay in menu 1
                     }
 
@@ -2210,7 +2238,9 @@ if ($STEP == 6) { # check if this step should be performed or not
                             my $blast_output_file_name = $current_cluster_folder . "/" . "blastx-" . strftime("%m%d%y-%H%M", localtime) . ".asn";
                             `blastx -subject $protein_inputfile_name -query $nucleotide_inputfile_name -outfmt 11 > $blast_output_file_name`;
                             if ($?) { die "ERROR running blastx locally $?\n"}
-                            print colored ("\nBLASTx output written to file $blast_output_file_name\n\n", "blue");
+                            print colored ("\nBLASTx output written to file $blast_output_file_name\n", "blue");
+                            print colored ("HINT: Display this search in using\n", "blue");
+                            print colored ("blast_formatter -archive $blast_output_file_name -outfmt 0 -html > temp.html && firefox temp.html\n\n", "bold");
 
                             # Identify the hits with the best matches and sort it by coverage
                             my $reformat_blastx_text = `blast_formatter -archive $blast_output_file_name -outfmt "6 qseqid pident length qframe"`;
@@ -2228,10 +2258,12 @@ if ($STEP == 6) { # check if this step should be performed or not
                             for (my $i=0; $i<$maximum_number_of_results_to_display; $i++) {
                                 if (exists $sorted_blastx_array[$i]) {
                                     print "$sorted_blastx_array[$i]\n";
+                                    if ($i==0) { # get the alignment name of the top hit for future use
+                                        my @line_elements = split " ", $sorted_blastx_array[$i];
+                                        $current_sequence_name = $line_elements[0];
+                                    }
                                 }
                             }
-                            print colored ("HINT: Display this search in using\n", "blue");
-                            print colored ("blast_formatter -archive $blast_output_file_name -outfmt 0 -html > temp.html && firefox temp.html\n\n", "bold");
                             $menu1 = 1; # stay in menu 1
                         } 
                     }
@@ -2371,8 +2403,6 @@ if ($STEP == 6) { # check if this step should be performed or not
                             $current_nucleotide_sequence = prompt('x', "Enter the nucleotide sequence without TSDs:", "", "$current_nucleotide_sequence");
                             $current_nucleotide_sequence = uc($current_nucleotide_sequence);
                             $tir_length = prompt('n', "Enter the length of the TIRs at the end of the sequence:", "", "$tir_length");
-                            #$TIR1seq = substr $current_nucleotide_sequence, 0, $tir_length;
-                            #$TIR2seq = substr $current_nucleotide_sequence, -$tir_length, $tir_length;
                             $notes .= "Reference nucleotide sequence is not one of the alignment sequences\n";
                         }
                         else {
@@ -2423,7 +2453,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                             if (($topline_data[1] < 0) or ($match_proportion < 0.75)) {
                                 print colored ("WARNING: The nucleotide sequence and transposase don't seem to match:\n", "yellow");
                                 print colored ("Transpoase orientation: $topline_data[1]\n", "bold");
-                                print cologed ("Proportion of transpoase mapping to nucleotide: $match_proportion\n", "bold");
+                                print colored ("Proportion of transpoase mapping to nucleotide: $match_proportion\n", "bold");
                                 $continue_report = prompt('y', 'Should printing this report be continued?', '', 'n');
                             }
 
