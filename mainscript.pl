@@ -2076,7 +2076,7 @@ if ($STEP == 6) { # check if this step should be performed or not
         die "ERROR: Cannot find the database of known transposases $KNOWN_TNP_DATABASE . This database must formatted with NCBI's makeblastdb.\n";
     }
 
-    my %seen_tirs; # hash of arrays that has the unique tsd-tir1-tir2 string as key, and array of with data on this combination
+   # my %seen_tirs; # hash of arrays that has the unique tsd-tir1-tir2 string as key, and array of with data on this combination
     while (readdir $dh) {
         my $cluster_name = $_;
         #my $cluster_name = "cluster24";
@@ -2096,6 +2096,7 @@ if ($STEP == 6) { # check if this step should be performed or not
             my $current_sequence_name;
             my $tsd_length;  
             my $tir_length;
+            my $next_step = 2; # a guess from the script for the next step the user might want to do 
             unless (-e $cluster_report_path) { # only continue if this cluster does not have a report yet
                 print ANALYSIS "\tStarting review of cluster $cluster_name\n"; # update the analysis log
 
@@ -2122,11 +2123,8 @@ if ($STEP == 6) { # check if this step should be performed or not
                 push @menu1_items, "Find nucleotide alignment sequence(s) with most intact transposase"; # item 5
                 push @menu1_items, "Find transposase in nucleotide sequence"; # item 6
                 push @menu1_items, "Create report"; # item 7
-
                 push @menu1_items, "Calculate consensus sequence based on selected sequences"; # item 8
                 push @menu1_items, "Change consensus sequence parameters"; # item 9
-                push @menu1_items, "Do NCBI BLASTn search on the nt database"; # item 10
-
                 my $menu1 = 1; # boolean, set to one until the user is done with menu 1
                 while ($menu1) {
                     my $menu1_choice = prompt('m', {
@@ -2137,7 +2135,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                         accept_multiple_selections => 0,
                         items  => [@menu1_items],
                         separator => '[,/\s]',
-                    },'', 2);
+                    },'', $next_step);
 
                     # process answer to menu 1
                     if ($menu1_choice == 0) {
@@ -2152,6 +2150,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                         `aliview $nuc_alignment_file_name `;
                         if ($?) { die "ERROR: Could not open program aliview: error code $?\n"}
                         $menu1 = 1; # stay in menu 1
+                        $next_step = 3;
                     }
                     
                     if ($menu1_choice == 3) { # the wants make a consensus based on all the sequences in the alignment                            
@@ -2170,7 +2169,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                             warn "File $nuc_alignment_file_name does not contain fasta formated sequences.\n"; 
                         }
                         $menu1 = 1; # stay in menu 1
-                        
+                        $next_step = 4;
                     }
 
                     if ($menu1_choice == 4) { # user wants to search with BLASTx
@@ -2203,6 +2202,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                             system("firefox \"$url\" 2>/dev/null");
                         }  
                         $menu1 = 1; # stay in menu 1
+                        $next_step = 5;
                     }
 
                     if ($menu1_choice == 5) { # user wants blast protein sequence to alignment
@@ -2263,6 +2263,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                                 }
                             }
                             $menu1 = 1; # stay in menu 1
+                            $next_step = 6;
                         } 
                     }
 
@@ -2387,6 +2388,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                             print ">Whole_sequence-$len-$stop_count\n$translated_sequence\n\n"; # print the whole thing
                         }
                         $menu1 = 1; # stay in menu 1
+                        $next_step = 7;
                     }
 
                     if ($menu1_choice == 7) { # print report
@@ -2456,18 +2458,34 @@ if ($STEP == 6) { # check if this step should be performed or not
                             }
 
                             if ($continue_report) {
-                                my $complete_protein = prompt('y', 'Is this likely a complete transposase?', '', 'y');
+                                my $default_transposase_state = 'n'; # guessing at the state of the transpoase
+                                my $trimmed = substr($transposase, 0, -1); # remove the last character
+                                my $count_stops = () = $trimmed =~ /\*/g; # count the number of * characters
+                                if (($transposase =~ /^M.+\*$/) and ($count_stops == 0)) { # check that the transposes looks intact
+                                    $default_transposase_state = 'y';
+                                }
+                                my $complete_protein = prompt('y', 'Is this likely a complete and intact transposase?', '', $default_transposase_state);
                                 if ($complete_protein) {
-                                    $notes .= "Complete transposase sequence\n";
+                                    $notes .= "Complete and intact transposase sequence\n";
                                 }
                                 else {
-                                    $notes .= "Partial transposase sequence\n";
+                                    $notes .= "Partial or non-intact transposase sequence\n";
                                 }
                             }
                         }
 
                         if ($continue_report) { # only continue if not fatal errors have been generated
                             # Get the TSD type
+                            my $default_tsd = 1; # trying to guess what the TSD will be
+                            my $default_taxonomy = 1; # trying to guess what the taxonomy will be
+                            if ($tsd_length == 8) {
+                                $default_tsd = 8;
+                                $default_taxonomy = 3;
+                            }
+                            elsif ($tsd_length == 2) {
+                                $default_tsd = 1;
+                                $default_taxonomy = 1;
+                            }
                             my @TSD_items = qw(TA 2 3 4 5 6 7 8 9 10 blank);
                             my $TSD_idx = prompt('m',
                                 {
@@ -2477,7 +2495,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                                     return_base  => 1,
                                 },
                                 'Choose TA or a number between 2 and 10',
-                                '1');
+                                $default_tsd);
 
                             my $TSD_type = $TSD_items[$TSD_idx - 1];  # subtract return_base to get 0-indexed
                             if ($TSD_type == 8) {
@@ -2488,6 +2506,8 @@ if ($STEP == 6) { # check if this step should be performed or not
                             }
 
                             # Get the taxonomy
+                            
+
                             my @taxonomy_items = qw(Tc tigger hAT other unknown blank);
                             my $taxonomy_idx = prompt('m',
                                 {
@@ -2497,7 +2517,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                                     return_base  => 1,
                                 },
                                 '',
-                                '1');
+                                $default_taxonomy);
 
                             my $taxonomy = $taxonomy_items[$taxonomy_idx - 1];
                             if ($taxonomy eq "other") {
@@ -2539,6 +2559,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                         }
 
                         $menu1 = 1; # stay in menu 1
+                        $next_step = 1;
                     }
 
                     if ($menu1_choice == 8) { # user want to select lines for the consensus
@@ -2557,26 +2578,15 @@ if ($STEP == 6) { # check if this step should be performed or not
                             }
                         }
                         $menu1 = 1; # stay in menu 1
+                        $next_step = 4;
                     }
 
-                    if ($menu1_choice == 9) { # the wants to change the consensus sequence parameter
+                    if ($menu1_choice == 9) { # the user wants to change the consensus sequence parameter
                         $RVCMP = prompt('y', "Should the nucletides be reverse complemented:", '', $RVCMP); 
                         $CONSENSUS_LEVEL = prompt('f', "Consensus level:", '', $CONSENSUS_LEVEL);
                         $MIN_FOR_POSITION = prompt('f', "Minumum number for position:", '', $MIN_FOR_POSITION);
                         $menu1 = 1; # stay in menu 1
-                    }
-
-                    if ($menu1_choice == 10) { # user wants to search with BLASTn
-                        $current_nucleotide_sequence = uc(prompt('a', "Enter the nucleotide sequence", "", "$current_nucleotide_sequence"));
-                        my $program  = "blastn";
-                        my $database = "nt";
-                        my $query = uri_escape($current_nucleotide_sequence);
-                        my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?" . "CMD=Put&PROGRAM=$program&DATABASE=$database&QUERY=$query";
-                        
-                        # Launch Firefox with this URL
-                        print colored ("\nLaunching NCBI blastn on web browser\n\n", "blue");
-                        system("firefox", $url);
-                        $menu1 = 1; # stay in menu 1
+                        $next_step = 4;
                     }
                 }
             }
