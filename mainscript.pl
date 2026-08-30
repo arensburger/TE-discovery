@@ -2195,15 +2195,13 @@ if ($STEP == 6) { # check if this step should be performed or not
                         print "\n";
                         unless ($found_match) {
                             print colored ("No matches to known transpoases were found, do a BLASTX search on NCBI\n", "yellow");
-                            print colored ("\nLaunching NCBI BLAST on web browser\n\n", "blue");
-                            my $url = "https://blast.ncbi.nlm.nih.gov/";
-                            system("firefox \"$url\" &");
+                            print colored ("\nLaunching NCBI BLAST on web browser (copied nucleotide sequence to clipboard)\n\n", "blue");
+                            open(my $clip, "|-", "xclip -selection clipboard") or die "Can't open xclip: $!";
+                            print $clip $current_nucleotide_sequence;
+                            close($clip);
+                            my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastx&PAGE_TYPE=BlastSearch&LINK_LOC=blasthome";
+                            system("firefox \"$url\" 2>/dev/null");
                         }  
-                        # my $database = "nt";
-                        # my $query = uri_escape($current_nucleotide_sequence);                            
-                        # my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Put&PROGRAM=$program&DATABASE=$database&QUERY=$query";
-                        # print colored ("\nLaunching NCBI blastx on web browser\n\n", "blue");
-                        # system("firefox \"$url\" &");
                         $menu1 = 1; # stay in menu 1
                     }
 
