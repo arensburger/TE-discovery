@@ -2123,8 +2123,9 @@ if ($STEP == 6) { # check if this step should be performed or not
                 push @menu1_items, "Find nucleotide alignment sequence(s) with most intact transposase"; # item 5
                 push @menu1_items, "Find transposase in nucleotide sequence"; # item 6
                 push @menu1_items, "Create report"; # item 7
+                push @menu1_items, "Open report in text editor"; # item 8
                 push @menu1_items, "Calculate consensus sequence based on selected sequences"; # item 8
-                push @menu1_items, "Change consensus sequence parameters"; # item 9
+                push @menu1_items, "Change consensus sequence parameters"; # item 10
                 my $menu1 = 1; # boolean, set to one until the user is done with menu 1
                 while ($menu1) {
                     my $menu1_choice = prompt('m', {
@@ -2458,18 +2459,29 @@ if ($STEP == 6) { # check if this step should be performed or not
                             }
 
                             if ($continue_report) {
-                                my $default_transposase_state = 'n'; # guessing at the state of the transpoase
+                                my $default_transposase_full = 'n'; # guessing if the transposase is full length
+                                my $default_transposase_intact = 'n'; # guessing if the transposase is intact
                                 my $trimmed = substr($transposase, 0, -1); # remove the last character
                                 my $count_stops = () = $trimmed =~ /\*/g; # count the number of * characters
-                                if (($transposase =~ /^M.+\*$/) and ($count_stops == 0)) { # check that the transposes looks intact
-                                    $default_transposase_state = 'y';
+                                if ($transposase =~ /^M.+\*$/) { # check that the transposes starts with M and ends with *
+                                    $default_transposase_full = 'y';
                                 }
-                                my $complete_protein = prompt('y', 'Is this likely a complete and intact transposase?', '', $default_transposase_state);
-                                if ($complete_protein) {
-                                    $notes .= "Complete and intact transposase sequence\n";
+                                if ($count_stops == 0) { # check if there are stop codons other than at the end of the transpoase
+                                    $default_transposase_intact = 'y';
+                                }
+                                my $full_length_protein = prompt('y', 'Is this likely a full length transposase?', '', $default_transposase_full);
+                                if ($full_length_protein) {
+                                    $notes .= "Full length transposase\n";
                                 }
                                 else {
-                                    $notes .= "Partial or non-intact transposase sequence\n";
+                                    $notes .= "Partial transposase\n";
+                                }
+                                my $intact_protein = prompt('y', 'Is the transpoase sequence likely intact?', '', $default_transposase_intact);
+                                if ($intact_protein) {
+                                    $notes .= "Transposase sequence is intact\n";
+                                }
+                                else {
+                                    $notes .= "Transposase sequence is not intact\n";
                                 }
                             }
                         }
@@ -2559,13 +2571,28 @@ if ($STEP == 6) { # check if this step should be performed or not
                         }
 
                         $menu1 = 1; # stay in menu 1
+                        $next_step = 8;
+                    }
+
+                    if ($menu1_choice == 8) { # user want to edit the report
+                        if (-e $cluster_report_path) { # check that a report has been generated
+                            if (system("which code > /dev/null 2>&1") == 0) { # check that the text editor is available
+                                `code $cluster_report_path`;
+                            } else {
+                                print colored ("ERROR: Could open the text editor appliction \"code\", make sure it is installed.\n", "red");
+                            }
+                        }
+                        else {
+                            print colored ("WARNING: No report has yet been generated for this cluster.\n", "yellow");
+                        }
+                        $menu1 = 1; # stay in menu 1
                         $next_step = 1;
                     }
 
-                    if ($menu1_choice == 8) { # user want to select lines for the consensus
+                    if ($menu1_choice == 9) { # user want to select lines for the consensus
                         my $fasta_text = `xclip -selection clipboard -o 2>/dev/null`;
                         if (!defined $fasta_text || $fasta_text eq '') {
-                            warn "Could not read clipboard. Make sure 'xclip' is installed.\n";
+                            print colored ("Could not read clipboard. Make sure 'xclip' is installed.\n", "yellow");
                         }
                         else { 
                             ($current_nucleotide_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
@@ -2581,12 +2608,12 @@ if ($STEP == 6) { # check if this step should be performed or not
                         $next_step = 4;
                     }
 
-                    if ($menu1_choice == 9) { # the user wants to change the consensus sequence parameter
+                    if ($menu1_choice == 10) { # the user wants to change the consensus sequence parameter
                         $RVCMP = prompt('y', "Should the nucletides be reverse complemented:", '', $RVCMP); 
                         $CONSENSUS_LEVEL = prompt('f', "Consensus level:", '', $CONSENSUS_LEVEL);
                         $MIN_FOR_POSITION = prompt('f', "Minumum number for position:", '', $MIN_FOR_POSITION);
                         $menu1 = 1; # stay in menu 1
-                        $next_step = 4;
+                        $next_step = 3;
                     }
                 }
             }
