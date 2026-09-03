@@ -1435,7 +1435,6 @@ if ($STEP == 4) { # check if this step should be performed or not
     my $TIR_length;
         
     foreach my $cluster_number (keys %clustering_info) { # go through the clusters individually     
-
         # get the TIR sequences for this cluster
         my $tir1_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[1]);
         my $tir2_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[2]);
@@ -1470,35 +1469,6 @@ if ($STEP == 4) { # check if this step should be performed or not
             } 
         }
 
-        # identify, report and remove from further analysis any sequences that overlap with a cluster
-        # Create BED file
-        my $temp_bed_file = File::Temp->new(UNLINK => 1); # temporary bed file s
-        my $temp_bed_sorted_file = File::Temp->new(UNLINK => 1); # temporary bed file sorted
-        my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command
-        open (BED, ">", $temp_bed_file) or die "ERROR: cannot created temporary bed file $temp_bed_file\n"; 
-        foreach my $title (keys %cluster_sequences) {
-            if ($title =~ /^(\S+):(\d+)-(\d+)/) {
-                my $chromosome = $1;
-                my $b1 = $2;
-                my $b2 = $3;
-                my $orientation = "+";
-                if ($b1 > $b2) {
-                    $orientation = "-";
-                    my $temp = $b2;
-                    $b2 = $b1;
-                    $b1 = $temp;
-                }
-                print BED "$chromosome\t$b1\t$b2\t$orientation\n"; # all the information about overlaps
- #           push @{ $cluster_fasta{$cluster} }, ">$title\n$all_nucleotides_fasta{$title}"; # populate the hash organizing the data by cluster
-            }
-            else {
-                die "ERROR: Cannot parse title $title\n";
-            }
-        }
-        close BED;
-`cp $temp_bed_file /home/peter/Desktop/temp.bed`; exit;
-
-
         # output the cluster sequences to the single file COMBINED_CLUSTERS_OUTPUT
         if(%cluster_sequences) { # only continue if sequences were found
 
@@ -1514,11 +1484,67 @@ if ($STEP == 4) { # check if this step should be performed or not
 
             # Create and populate the README file for this cluster
             my $cluster_sequence_file = "$cluster_directory/cluster$cluster_number.fa";
-            open (CLREADME, ">", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
+            open (CLREADME, ">>", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
             my $datestring = localtime();
             print CLREADME "$datestring, Clustering sequences $clustering_info{$cluster_number}[0]\n";
             print CLREADME "\tFile cluster$cluster_number.fa contains the genome sequences of sequences in this cluster. The sequences are oriented.\n";
             close CLREADME;
+
+            # identify, report and remove from further analysis any sequences that overlap with a cluster
+            # Create BED file
+            my $temp_bed_file = File::Temp->new(UNLINK => 1); # temporary bed file s
+            my $temp_bed_sorted_file = File::Temp->new(UNLINK => 1); # temporary bed file sorted
+            my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command
+            open (BED, ">", $temp_bed_file) or die "ERROR: cannot created temporary bed file $temp_bed_file\n"; 
+            foreach my $title (keys %cluster_sequences) {
+                if ($title =~ /^(\S+):(\d+)-(\d+)/) {
+                    my $chromosome = $1;
+                    my $b1 = $2;
+                    my $b2 = $3;
+                    my $orientation = "+";
+                    if ($b1 > $b2) {
+                        $orientation = "-";
+                        my $temp = $b2;
+                        $b2 = $b1;
+                        $b1 = $temp;
+                    }
+                    print BED "$chromosome\t$b1\t$b2\t$orientation\t$title\n"; # all the information about overlaps
+    #           push @{ $cluster_fasta{$cluster} }, ">$title\n$all_nucleotides_fasta{$title}"; # populate the hash organizing the data by cluster
+                }
+                else {
+                    die "ERROR: Cannot parse title $title\n";
+                }
+            }
+            close BED;
+            # Identify overlapping pairs of sequences
+            `bedtools sort -i $temp_bed_file > $temp_bed_sorted_file`;
+            if ($?) { die "ERROR running bedtools sort: error code $?\n"}
+            `bedtools intersect -a $temp_bed_sorted_file -b $temp_bed_sorted_file -wo > $temp_overlap_file`; # has all the overlapping including the sequence to itself
+            if ($?) { die "ERROR running bedtools intersect: error code $?\n"}
+            # Put the names of the overlapping pairs of sequences into a graph, so that groups of overalping sequences
+            # can be identified.
+            my $graph = Graph->new(undirected => 1); # this is a graph to join all the pairs of overlapping sequences
+            open (OVERLAP, $temp_overlap_file) or die "ERROR: Cannot open temporary overlap file $temp_overlap_file\n";
+            while (my $line = <OVERLAP>) {           
+                my @data = split " ", $line;
+                # adding sequences to the graph but only if they are not the the same sequence
+                if ($data[4] ne $data[9]) {  
+                    $graph->add_edge($data[4], $data[9]);                                               
+                }
+            }
+            my @groups = $graph->connected_components(); # @groups is an array of arrays with the overlapping sequences in one group 
+            # if any overlaps have been found, report them to the REAMDE and ANALYSIS files and remove them from further analysis
+            foreach my $g (@groups) {
+                my $datestring = localtime();
+                open (CLREADME, ">>", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
+                print CLREADME "\tThe sequences below overlap and have been removed from the analysis:\n";
+                foreach my $s (@$g) {
+                    print CLREADME "\t>$s\n$cluster_sequences{$s}\n";
+                    delete $cluster_sequences{$s};
+                }
+                close CLREADME;
+            }
+            
 
             # orient the sequences by aligning them with mafft and --adjustdirection option. Might need to change orientation after INTERPRO run
             my $temp_input_alignment_file = File::Temp->new(UNLINK => 1); # input to mafft alignment
