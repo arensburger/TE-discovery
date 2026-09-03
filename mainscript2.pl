@@ -72,6 +72,7 @@ $ANALYSIS_FOLDER = fixdirname($ANALYSIS_NAME . "-analysis");
 $ELEMENT_FOLDER = fixdirname($ANALYSIS_NAME . "-element");
 $CLUSTER_FOLDER = fixdirname($ANALYSIS_NAME . "-clusters");
 my $reject_folder_path = $ANALYSIS_FOLDER . "/" . $REJECTED_ELEMENTS_FOLDER;
+# remove this when done editing
 my $COMBINED_CLUSTERS_OUTPUT_FILENAME = $CLUSTER_FOLDER . "/" . $ANALYSIS_NAME . "-combined-clusters-nucleotide-sequences.fa"; # file that has all the nucleotide sequence of the potential elments, will be used for intepro analysis
 
 my $current_directry = getcwd();
@@ -1319,7 +1320,7 @@ if ($STEP == 4) { # check if this step should be performed or not
     print ANALYSIS "Running STEP 4 on $datestring\n";
     print ANALYSIS "\tGenome: $INPUT_GENOME\n";
     print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
-    print ANALYSIS "\tCombined cluster nucleotide sequences printed to file $COMBINED_CLUSTERS_OUTPUT_FILENAME\n";
+    #print ANALYSIS "\tCombined cluster nucleotide sequences printed to file $COMBINED_CLUSTERS_OUTPUT_FILENAME\n";
 
     ## Read the README files and identify TIRs sequences and TSD  
     # load the element information from the README files
@@ -1425,10 +1426,9 @@ if ($STEP == 4) { # check if this step should be performed or not
         if ($?) { die "ERROR creating directory $CLUSTER_FOLDER: error code $?\n"}
     }
 
-    ## Using TIR sequences for each cluster, identify possible element nucleotide sequences. Print these into a single file for 
-    ## protein scanning.
+    ## Using TIR sequences for each cluster, identify possible element nucleotide sequences.
 
-    open (COMBINED_CLUSTERS_OUTPUT, ">>", $COMBINED_CLUSTERS_OUTPUT_FILENAME) or die "ERROR: Cannot create the file $COMBINED_CLUSTERS_OUTPUT_FILENAME to output the nucleotide sequences to\n";
+    #open (COMBINED_CLUSTERS_OUTPUT, ">>", $COMBINED_CLUSTERS_OUTPUT_FILENAME) or die "ERROR: Cannot create the file $COMBINED_CLUSTERS_OUTPUT_FILENAME to output the nucleotide sequences to\n";
     my %genome = fastatohash($INPUT_GENOME); # load the genome into memory
     my $TSD_type; # a number, or a specific sequence
     my $TSD_length;
@@ -1469,6 +1469,35 @@ if ($STEP == 4) { # check if this step should be performed or not
                 }
             } 
         }
+
+        # identify, report and remove from further analysis any sequences that overlap with a cluster
+        # Create BED file
+        my $temp_bed_file = File::Temp->new(UNLINK => 1); # temporary bed file s
+        my $temp_bed_sorted_file = File::Temp->new(UNLINK => 1); # temporary bed file sorted
+        my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command
+        open (BED, ">", $temp_bed_file) or die "ERROR: cannot created temporary bed file $temp_bed_file\n"; 
+        foreach my $title (keys %cluster_sequences) {
+            if ($title =~ /^(\S+):(\d+)-(\d+)/) {
+                my $chromosome = $1;
+                my $b1 = $2;
+                my $b2 = $3;
+                my $orientation = "+";
+                if ($b1 > $b2) {
+                    $orientation = "-";
+                    my $temp = $b2;
+                    $b2 = $b1;
+                    $b1 = $temp;
+                }
+                print BED "$chromosome\t$b1\t$b2\t$orientation\n"; # all the information about overlaps
+ #           push @{ $cluster_fasta{$cluster} }, ">$title\n$all_nucleotides_fasta{$title}"; # populate the hash organizing the data by cluster
+            }
+            else {
+                die "ERROR: Cannot parse title $title\n";
+            }
+        }
+        close BED;
+`cp $temp_bed_file /home/peter/Desktop/temp.bed`; exit;
+
 
         # output the cluster sequences to the single file COMBINED_CLUSTERS_OUTPUT
         if(%cluster_sequences) { # only continue if sequences were found
@@ -1545,9 +1574,9 @@ if ($STEP == 4) { # check if this step should be performed or not
         print ANALYSIS "\tMoving the folder $FURTHER_REVIEW_FOLDER_NAME to $ANALYSIS_FOLDER\n";
     }
     
-    # Report what to do next
-    print colored("STEP $STEP is complete, clusters have been determined. The next step is to search for translated regions in these sequences using interproscan. Run the following search:", "bold"), "\n";
-    print colored("interproscan.sh -i $COMBINED_CLUSTERS_OUTPUT_FILENAME -appl Pfam,Panther -t n -f GFF3 -o $ANALYSIS_NAME-Interpro.gff3", "italic"), "\n";
+    # # Report what to do next
+    # print colored("STEP $STEP is complete, clusters have been determined. The next step is to search for translated regions in these sequences using interproscan. Run the following search:", "bold"), "\n";
+    # print colored("interproscan.sh -i $COMBINED_CLUSTERS_OUTPUT_FILENAME -appl Pfam,Panther -t n -f GFF3 -o $ANALYSIS_NAME-Interpro.gff3", "italic"), "\n";
 }
 
 ### PIPELINE STEP 5 
