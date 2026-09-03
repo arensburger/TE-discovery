@@ -2081,12 +2081,10 @@ if ($STEP == 6) { # check if this step should be performed or not
         my $cluster_name = $_;
         #my $cluster_name = "cluster24";
         unless (($cluster_name =~ /^\./) or ($cluster_name =~ /.fa$/)) { # prevents reading invisible files . and .. as well as fasta files in that directory 
-            # Constants, reset for each cluster
-            my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must agree to call a position
-            my $MIN_FOR_POSITION = 2; # minumum number of nucleotides or amino acids to call a position (not ignore it)
-            my $RVCMP=0; # boolean, set 1 if the nucleotide sequences should be reverse-complemented
-
             # Setup cluster specific variables
+            my $CONSENSUS_LEVEL; # minimum proportion of non-gap positions that must agree to call a position
+            my $MIN_FOR_POSITION; # minumum number of nucleotides or amino acids to call a position (not ignore it)
+            my $RVCMP=0; # boolean, set 1 if the nucleotide sequences should be reverse-complemented
             my $current_cluster_folder = $CLUSTER_FOLDER . "/" . $cluster_name ; # folder with specific element of interest   
             my $cluster_report_path = $current_cluster_folder . "/" . $cluster_name . "_report.md"; # if it exists this would be the full path to the report for this cluster
             my $consensus_sequence; # latest consensus sequence, these variable are declared here so they can be used at different parts of the menu
@@ -2110,6 +2108,23 @@ if ($STEP == 6) { # check if this step should be performed or not
                 # Load the nucleotide sequences for this cluster
                 my $nuc_alignment_file_name = $current_cluster_folder . "/" . $cluster_name . "-aligned_nucleotides.fa";
                 my %alignment_sequences = fastatohash($nuc_alignment_file_name); # load the existing alignments
+
+                # THIS IS TEMPORARY --> remove from %alignment_sequence that start with >Sequences, these will be removed when I get rid of STEP5
+                foreach my $key (keys %alignment_sequences) {
+                    if ($key =~ /Sequences_/) {
+                        delete $alignment_sequences{$key};
+                    }
+                }
+
+                # Set the consensus parameters depending on the size of the alignment
+                if (keys %alignment_sequences == 2) {
+                    $MIN_FOR_POSITION = 1;
+                    $CONSENSUS_LEVEL = 0.6
+                }
+                else {
+                    $MIN_FOR_POSITION = 2;
+                    $CONSENSUS_LEVEL = 0.6
+                }
 
                 `pkill java`; # kill a previous aliview window, this could be dangerous in the long run otherwise
 
@@ -2154,7 +2169,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                         $next_step = 3;
                     }
                     
-                    if ($menu1_choice == 3) { # the wants make a consensus based on all the sequences in the alignment                            
+                    if ($menu1_choice == 3) { # the user wants make a consensus based on all the sequences in the alignment                            
                         # Turn this fasta file into a single text file, this is so that it's consistent with the clipboard entry of fasta files.
                         my $fasta_text; 
                         foreach my $sequence_name (keys %alignment_sequences){ 
@@ -2636,7 +2651,7 @@ sub fastatohash {
     open (INPUT, $filename) or die "ERROR: cannot open input file $filename in fastatohash subroutine\n";
     my $line = <INPUT>;
 
-    ## record the first header, ignoring everything after the first space in the header (to simplify recording later)
+    ## record the first header, ignoring everything after the first space in the header
     if ($line =~ /^>(\S+)/) {
         $current_header = $1;
     }
