@@ -1603,526 +1603,9 @@ if ($STEP == 4) { # check if this step should be performed or not
     `mv $ELEMENT_FOLDER $ANALYSIS_FOLDER`;
     if ($?) { die "ERROR moving folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER $?\n"}
     print ANALYSIS "\tMoving the folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER\n";
-    
-    # if (-d $FURTHER_REVIEW_FOLDER_NAME) { # check if a further review folder exists
-    #     `mv $FURTHER_REVIEW_FOLDER_NAME $ANALYSIS_FOLDER`;
-    #     if ($?) { die "ERROR moving folder $FURTHER_REVIEW_FOLDER_NAME to $ANALYSIS_FOLDER $?\n"}
-    #     print ANALYSIS "\tMoving the folder $FURTHER_REVIEW_FOLDER_NAME to $ANALYSIS_FOLDER\n";
-    # }
-    
-    # # Report what to do next
-    # print colored("STEP $STEP is complete, clusters have been determined. The next step is to search for translated regions in these sequences using interproscan. Run the following search:", "bold"), "\n";
-    # print colored("interproscan.sh -i $COMBINED_CLUSTERS_OUTPUT_FILENAME -appl Pfam,Panther -t n -f GFF3 -o $ANALYSIS_NAME-Interpro.gff3", "italic"), "\n";
 }
 
 ### PIPELINE STEP 5 
-### Looking at the outcome of interpro, making a summary of element for the user for each cluster
-my %seen_descriptions; # holds the seen PANTHER as key and description as value, this is to speed up searches.
-
-if ($STEP == 5) { # check if this step should be performed or not  
-    print STDERR "Working on STEP 5 ...\n";
-
-    ## making sure all the required information has been provided
-    unless ($INTERPRO_FILENAME){
-        die "ERROR: for this step you need to provide a file with the Interpro output, using the -in parameter\n";
-    }
-    unless (-e $COMBINED_CLUSTERS_OUTPUT_FILENAME) {
-        die "ERROR: this step expected the file $COMBINED_CLUSTERS_OUTPUT_FILENAME that contains the input for the interproscan run\n";
-    }
-
-    my $datestring = localtime();
-    print ANALYSIS "Running STEP 5 on $datestring\n";
-    print ANALYSIS "\tInterpro file name: $INTERPRO_FILENAME\n";
-    print ANALYSIS "\tCombined clusters output file name: $COMBINED_CLUSTERS_OUTPUT_FILENAME\n";
-    
-    ## Identify any sequences that overlap in the input sequences. Write all the location data to a bed file,
-    ## use bedtools to identify overlaps pairs, then a graph to group the overlapping files. 
-    my %all_nucleotides_fasta = fastatohash($COMBINED_CLUSTERS_OUTPUT_FILENAME); # get the raw data
-    my %cluster_fasta; # same data as %all_nucleotides_fasta, but organized with cluster number as key and array of sequences with fasta titles
-    my $temp_bed_file = File::Temp->new(UNLINK => 1); # temporary bed file
-    my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command
-    my %overlapping_sequences_by_name; # record of sequences that overlap with others, to be reported to the user 
-    
-    # Create BED file
-    open (BED, ">", $temp_bed_file) or die "ERROR: cannot created temporary bed file $temp_bed_file\n"; 
-    my $temp_bed_sorted_file = File::Temp->new(UNLINK => 1); # temporary bed file sorted
-    foreach my $title (keys %all_nucleotides_fasta) {
-        if ($title =~ /^(\S+):(\d+)-(\d+)_(\d+)_\d+_\d+/) {
-            my $chromosome = $1;
-            my $b1 = $2;
-            my $b2 = $3;
-            my $cluster = $4;
-            my $orientation = "+";
-            if ($b1 > $b2) {
-                $orientation = "-";
-                my $temp = $b2;
-                $b2 = $b1;
-                $b1 = $temp;
-            }
-            print BED "$chromosome\t$b1\t$b2\t$orientation\t$cluster\t$title\n"; # all the information about overlaps
-            push @{ $cluster_fasta{$cluster} }, ">$title\n$all_nucleotides_fasta{$title}"; # populate the hash organizing the data by cluster
-        }
-        else {
-            die "ERROR: Cannot parse title $title\n";
-        }
-    }
-    close BED;
-
-    # Identify overlapping pairs of sequences
-    `bedtools sort -i $temp_bed_file > $temp_bed_sorted_file`;
-    if ($?) { die "ERROR running bedtools sort: error code $?\n"}
-    `bedtools intersect -a $temp_bed_sorted_file -b $temp_bed_sorted_file -wo > $temp_overlap_file`; # has all the overlapping including the sequence to itself
-    if ($?) { die "ERROR running bedtools intersect: error code $?\n"}
-
-    # Put the names of the overlapping pairs of sequences into a graph, so that groups of overalping sequences
-    # can be identified.
-    my $graph = Graph->new(undirected => 1); # this is a graph to join all the pairs of overlapping sequences
-    open (OVERLAP, $temp_overlap_file) or die "ERROR: Cannot open temporary overlap file $temp_overlap_file\n";
-    while (my $line = <OVERLAP>) {
-        my @data = split " ", $line;
-        # adding sequences to the graph but only if they are 1) from the same cluster, 2) they are not the the same sequence
-        if (($data[4] eq $data[10]) and ($data[5] ne $data[11])) {  
-            $graph->add_edge($data[5], $data[11]);                                               
-        }
-    }
-    my @groups = $graph->connected_components(); # @groups is an array of arrays with the overlapping sequences in one group 
-    
-
-    # Combine cluster, group, and sequence names into a hash of hashes
-    my %cluster_group; # hash of hashes with cluster number --> unique group number --> sequence name, the group number is unique to a set of overalping sequences
-    my $unique_group_number; # index of sets of overlaping sequences
-    foreach my $g (@groups) {
-
-        # Identify the current cluster of the current group by parsing the name of the first sequence
-        my $cluster_number;
-        if(@$g[0] =~ /_(\d+)_\d+_\d+/) {
-            $cluster_number = $1;
-        }
-        else {
-            die "ERROR: Could not parse sequence name after grouping: @$g[0]\n";
-        }
-
-        # Add the sequences to the %cluster_group hash
-        $unique_group_number++; # set a new group number
-        foreach my $sequence_name (@$g) {
-            push @{ $cluster_group{$cluster_number}{$unique_group_number} }, $sequence_name;
-        }
-    }
-
-    # Sort the groups by cluster
-    my %overlapping_sequences_by_cluster; # holds the cluster number as key and as value an array with groups of sequences in the cluster that overlap
-    foreach my $g (@groups) {
-        # identify the current cluster of the current group by parsing the name of the first sequence
-        my $cluster_number;
-        if(@$g[0] =~ /_(\d+)_\d+_\d+/) {
-            $cluster_number = $1;
-        }
-        else {
-            die "ERROR: Could not parse sequence name after grouping: @$g[0]\n";
-        }
-
-        if (scalar @$g > 1) {
-            push @{ $overlapping_sequences_by_cluster{$cluster_number}}, join(",", @$g);
-        }
-    }
-
-    # Create report on overlapping sequences 
-    for my $cluster_number (keys %overlapping_sequences_by_cluster) {
-        my $overlapping_report_file_name = $current_directry . "/" . $CLUSTER_FOLDER . "/" . "cluster$cluster_number" . "/" . "cluster$cluster_number-overlapping_sequences.fa";
-        open (OUTPUT, ">", $overlapping_report_file_name) or die "ERROR: Cannot create file for overlapping sequences report\n";
-        for my $group (0 .. $#{ $overlapping_sequences_by_cluster{$cluster_number}}) {
-            my @sequence_names = split ",", $overlapping_sequences_by_cluster{$cluster_number}[$group];
-            print OUTPUT ">OVERLAPPING_SEQUENCES_$group\n";
-            print OUTPUT "NNNNNNNNNNNNNNNNNNNNNNNN\n";
-            foreach my $name (@sequence_names) {
-                print OUTPUT ">$name\n";
-                print OUTPUT "$all_nucleotides_fasta{$name}\n";
-                $overlapping_sequences_by_name{$name} = 1; # update the name of sequences that overlap
-            }
-        }
-        close OUTPUT;
-
-        # Update the cluster README file
-        open (CLREADME, ">>", "$current_directry/$CLUSTER_FOLDER/cluster$cluster_number/README.txt") or die "ERROR: Cannot open README file for cluster $cluster_number, $!\n";
-        my $datestring = localtime();
-        print CLREADME "$datestring, Identifying overlapping sequences in this cluster\n";
-        print CLREADME "\tFile cluster$cluster_number-overlapping_sequences.fa contains groups of overlapping sequences in this cluster\n";
-        close CLREADME;
-    }
-
-
-    ## Parse the protein information from the Interpro file
-    
-    # Read the Interpro results file and record all the fasta sequences in it, this will be used later 
-    # to generate alignments and bed files with protein sequences
-    my $temp_fasta_file = File::Temp->new(UNLINK => 1); # temporary fasta file
-    my %cluster_orientation;    # this will be used to determine the orientation of the nucleotide sequences based on ORFs 
-                                # cluster number is key and value is an array with [0] number of ORFs on the + strand, [1] ORFs on the - strand
-    
-    open (OUTPUT, ">", $temp_fasta_file) or die "ERROR: cannot create temporary file $temp_fasta_file $!\n";
-    open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
-    my $in_fasta_section = 0; # boolean, 0 until hit the fasta section of the file
-    while (my $line = <INTERPRO>) {
-        if ($in_fasta_section) {
-            print OUTPUT $line;
-        }
-        if ($line =~ /\#\#FASTA/) {
-            $in_fasta_section = 1;
-        }
-    }
-    close INTERPRO;
-    close OUTPUT;
-    my %interpro_fasta = fastatohash($temp_fasta_file);
-
-    # Parse the interpro results file, identify relevant information into a series of hashes
-    open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
-    
-    # The 3 hashes below carry information about the nucleotide sequence --> orf from interpro --> pfam or PANTHER id --> start and stop on the amino acid sequence --> description
-    my %nucleotide_orf; # nucleotide locus name as key and ORF name as value, assume there is only one ORF per locus
-    my %orf_data; # orf name from interpro as key and as reference an array with information on input sequence name --> through Pfam annotation
-    my %id_symbol_and_description; # unique symbol and description assigned to every Pfam or PANTHER id
-    
-    my @PANTHER_symbols; # all the PANTHER symbols are capital letters, populated with two symbols AA through ZZ
-    for my $c1 ('A'..'Z') {
-        for my $c2 ('A'..'Z') {
-            push @PANTHER_symbols, "$c1$c2";
-        }
-    }
-    my @Pfam_symbols; # all the Pfam symbols are lower case letters
-    for my $c1 ('a'..'z') {
-        for my $c2 ('a'..'z') {
-            push @Pfam_symbols, "$c1$c2";
-        }
-    }
-   
-    # Store the data from the Interpro file into hash, this makes sure that duplicate records are not recorded more than once
-    open (INTERPRO, $INTERPRO_FILENAME) or die "ERROR: Cannot open file $INTERPRO_FILENAME, $!";
-    my %interpro_data; # has the genomic location as key (assumed to be unique) and as value an array with [0] getorf line (only 1), [1] all PANTHER lines, [2] all Pfam lines
-    my $total_records_number; # count of total records
-    my $duplicated_records_number; # count that keeps track of how many duplicated records were identified
-    my $current_genomic_location; 
-    while (my $line = <INTERPRO>) {
-        if ($line =~ /##sequence-region\s(\S+)\s\d+\s\d+/) { 
-            $total_records_number++; 
-            $current_genomic_location = $1;
-        }
-        if ($line =~ /$current_genomic_location.(orf\d+)\sgetorf\sORF\s/){
-            $interpro_data{$current_genomic_location}[0] .= $line;
-        }
-        if ($line =~ /$current_genomic_location\S+\s+PANTHER\sprotein_match\s/) {
-            $interpro_data{$current_genomic_location}[1] .= $line;
-        }
-        if ($line =~ /$current_genomic_location\S+\sPfam\sprotein_match\s/) {
-            $interpro_data{$current_genomic_location}[2] .= $line;
-        }
-    }    
-    close INTERPRO;
-
-    # Update the analysis README with stats on how many records were ignored
-    print ANALYSIS "\tInterpro file analysis: identified a total of $total_records_number genomic location of which $duplicated_records_number are duplicates. Duplicates are treated as a single entry from here on.\n";
-
-    # Go through the Interpro file and identify relevant information
-
-    foreach my $locus (keys %interpro_data) {
-
-        # Go through the Interpro "getorf" lines for this genomic location
-        my @orf_lines = split "\n", $interpro_data{$locus}[0];
-        foreach my $line (@orf_lines) {
-            if ($line =~ /^(\S+_(\d+)_\d+_\d+)_(orf\d+)\sgetorf\sORF\s(\d+)\s(\d+)\s\.\s(\S).+Target=(\S+)\s/) { # This line will give us the ORF information
-                $nucleotide_orf{$locus} .= "$3 ";
-                $orf_data{$3}[0] .= "$interpro_fasta{$7} "; # record the ORF amino acid sequence
-                $orf_data{$3}[1] .= "$4 "; # record ORF nucleotide position 
-                $orf_data{$3}[2] .= "$5 "; # record ORF nucleotide position 
-                # record orientation
-                if ($6 eq "+") {
-                    $cluster_orientation{$2}[0] += 1;
-                }
-                elsif ($6 eq "-") {
-                    $cluster_orientation{$2}[1] += 1;
-                }
-                else {
-                    die "ERROR: In the interpro getorf line below the orientation could not be determined\n$interpro_data{$locus}[0]";
-                }
-            }
-            else {
-                die "ERROR: The Interpro getorf line below could not be parsed\n$interpro_data{$locus}[0]";
-            }
-        }
-
-        # Go through PANTHER lines at this genomic location
-        my @PANTHER_lines = split "\n", $interpro_data{$locus}[1];
-        foreach my $line (@PANTHER_lines) {
-            if ($line =~ /^\S+_(orf\d+)\sPANTHER\sprotein_match\s+(\d+)\s+(\d+).+;Name=(\S+?);/) { # Match to PANTHER annotation
-                my $current_left_bound = $2;
-                my $current_right_bound = $3;
-                my $current_panther_id = $4;
-                $orf_data{$1}[3] .= "$current_left_bound "; # PANTHER left bounds in order
-                $orf_data{$1}[4] .= "$current_right_bound "; # PANTHER right bounds in order
-                $orf_data{$1}[5] .= "$current_panther_id "; # PANTHER ids in order
-                unless (exists $id_symbol_and_description{$current_panther_id}[0]) { # this symbol has not been seen before need to assign unique symbol and fetch description
-                # fetch the description of this id on the web
-                    my $url = "https://www.ebi.ac.uk/interpro/api/entry/panther/$current_panther_id/?format=json";
-                    my $ua = LWP::UserAgent->new(timeout => 30);
-                    $ua->agent('Mozilla/5.0');
-                    my $response = $ua->get($url);
-                    if (!$response->is_success) {
-                        my $code = $response->code;
-                        if ($code == 404) {
-                            die "Error: PANTHER entry '$current_panther_id' not found.\n";
-                        } else {
-                            die "Error: HTTP request failed with status $code in sub fetch_PANTHER_description: " . $response->status_line . "\n";
-                        }
-                    }
-                    my $data = decode_json($response->decoded_content);
-                    my $fetched_description = $data->{metadata}{name}{name}  // 'N/A';
-
-                    # populate %id_symbol_and_description with unique symbol and description
-                    if (@PANTHER_symbols) { # check that there are symbols left, die otherwise
-                        my $unique_symbol = shift @PANTHER_symbols;
-                        $id_symbol_and_description{$current_panther_id}[0] = $unique_symbol;
-                        $id_symbol_and_description{$current_panther_id}[1] = $fetched_description;
-                    }
-                    else {
-                        die "ERROR: the array PANTHER_symbols is empty, did it run out of symbols?\n";
-                    }
-
-                }
-            }
-            else {
-                die "ERROR: The Interpro PANTHER line below could not be parsed\n$interpro_data{$locus}[1]";
-            }
-        }
-
-        # Go through Pfam lines at this genomic location
-        my @Pfam_lines = split "\n", $interpro_data{$locus}[2];
-        foreach my $line (@Pfam_lines) {           
-            if ($line =~ /^\S+_(orf\d+)\sPfam\sprotein_match\s+(\d+)\s+(\d+).+;signature_desc=(.+?);Name=(\S+?);/) { # Match to Pfam annotation
-                my $current_left_bound = $2;
-                my $current_right_bound = $3;
-                my $current_pfam_id = $5;
-                $orf_data{$1}[6] .= "$current_left_bound "; # Pfam left bound
-                $orf_data{$1}[7] .= "$current_right_bound "; # Pfam right bound
-                $orf_data{$1}[8] .= "$current_pfam_id "; # Pfam id
-                my $pfam_description = $4;
-                unless (exists $id_symbol_and_description{$current_pfam_id}) { # if this symbol has not been seen before need to assign unique symbol and fetch description
-                    # populate %id_symbol_and_description with unique symbol and description
-                    if (@Pfam_symbols) { # check that there are symbols left, die otherwise
-                        my $unique_symbol = shift @Pfam_symbols;
-                        $id_symbol_and_description{$current_pfam_id}[0] = $unique_symbol;
-                        $id_symbol_and_description{$current_pfam_id}[1] = $pfam_description;
-                    }
-                    else {
-                        die "ERROR: the array Pfam_symbols is empty, did it run out of symbols?\n";
-                    }
-                    
-                }
-            } 
-            else {
-                die "ERROR: The Interpro Pfam line below could not be parsed\n$line";
-            } 
-        } 
-    }
-
-    ## Align the nucleotide sequences for each cluster and make a report
-    #my @nucleotide_sequence_order; # holds the names of the nucleotide sequences in the order they are printed 
-    foreach my $cluster_number (keys %cluster_fasta) {   
-        print "cluster: $cluster_number\n";
-        my @nucleotide_sequence_order; # holds the names of the nucleotide sequences in the order they are printed
-        # align the cluster sequences into a temporary file
-        my $cluster_alignment_input_file = File::Temp->new(UNLINK => 1); # temporary file for alignment input
-        my $cluster_alignment_output_file = File::Temp->new(UNLINK => 1); # temporary file for alignment output
-        open (OUTPUT, ">", $cluster_alignment_input_file) or die "ERROR: cannot create temporary file $cluster_alignment_input_file $!\n";
-        foreach my $whole_sequence (@{ $cluster_fasta{$cluster_number} }) {            
-            my ($sequence_name) = $whole_sequence =~ /^>(\S+)/m; #parse out the sequence name
-            unless (exists $overlapping_sequences_by_name{$sequence_name}) { # remove any overlapping sequences from further analysis
-                print OUTPUT $whole_sequence, "\n";
-            }
-        }
-        close OUTPUT;
-        `mafft --quiet --thread -1 $cluster_alignment_input_file > $cluster_alignment_output_file`;
-        if ($?) { die "Error executing mafft, error code $?\n"}
-
-        # Identify the names of all the overlaping sequences in this cluster
-        my %overlaping_sequences_by_group; # cluster specific, unique group number as key and string with sequence names as value
-        my %overlaping_sequences_list; # cluster specific, all the duplicated sequences, used for printing
-        if (exists $cluster_group{$cluster_number}) {
-            foreach my $group_number (keys %{ $cluster_group{$cluster_number} }) {
-                foreach my $sequence_name (@{$cluster_group{$cluster_number}{$group_number}}) {
-                    $overlaping_sequences_by_group{$group_number} .= " " . $sequence_name;
-                    $overlaping_sequences_list{$sequence_name} = 1;
-                }
-            }
-        }
-
-        # Decide the orientation of the alignment based on protein sequences, record the reasosing for this decision in the cluster's README file
-        my $cluster_alignment_orientation; # orientation of the cluster based on ORFs, 1 for + and -1 for minus
-        open (CLREADME, ">>", "$current_directry/$CLUSTER_FOLDER/cluster$cluster_number/README.txt") or die "ERROR: Cannot open README file for cluster $cluster_number, $!\n";
-        my $datestring = localtime();
-        print CLREADME "$datestring, Determining orientation of cluster $cluster_number based on ORF orientations (STEP $STEP)\n";
-
-        if (($cluster_orientation{$cluster_number}[0] == 0) && ($cluster_orientation{$cluster_number}[1] == 0)) { # this is true if neither orientation has ORFs
-            $cluster_alignment_orientation=1;            
-            print CLREADME "\tDefaulting to + orientation because no ORFs mapped in either orientation\n";
-        }
-        elsif (($cluster_orientation{$cluster_number}[0] > 0) && ($cluster_orientation{$cluster_number}[1] == 0)) { # this is true if + has ORFs - does not
-            $cluster_alignment_orientation=-1;
-            print CLREADME "\tUsing + orientation, $cluster_orientation{$cluster_number}[0] ORFs mapped to + orientation and 0 to - orientation\n"; 
-        }
-        elsif (($cluster_orientation{$cluster_number}[0] == 0) && ($cluster_orientation{$cluster_number}[1] > 0)) { # this is true if - has no ORFs - does
-            $cluster_alignment_orientation=-1;
-            print CLREADME "\tUsing - orientation, 0 ORFs mapped to + orientation, and $cluster_orientation{$cluster_number}[1] to - orientation\n"; 
-        }
-        else { # neither + nor - is zero value
-            my $ORF_orientation_proportion = $cluster_orientation{$cluster_number}[0] / $cluster_orientation{$cluster_number}[1];
-            if ($ORF_orientation_proportion > 1) {
-                $cluster_alignment_orientation=1;
-                print CLREADME "\tUsing + orientation, $cluster_orientation{$cluster_number}[0] ORFs mapped to + orientation and $cluster_orientation{$cluster_number}[1] to - orientation\n";
-            }
-            elsif ($ORF_orientation_proportion < 1) {
-                $cluster_alignment_orientation=-1;
-                print CLREADME "\tUsing - orientation, $cluster_orientation{$cluster_number}[0] ORFs mapped to + orientation and $cluster_orientation{$cluster_number}[1] to - orientation\n";
-            }
-            else { # both + and - are equal
-                $cluster_alignment_orientation=1;
-                print CLREADME "\tDefaulting to + orientation because $cluster_orientation{$cluster_number}[0] ORFs mapped to + orientation and $cluster_orientation{$cluster_number}[1] to - orientation\n";
-                print "$cluster_number\t$cluster_orientation{$cluster_number}[0]\t$cluster_orientation{$cluster_number}[1]\t+ orientation by default\n";
-            }
-        }        
-        
-        # Read the alignment file and create output alignment formatted for human review
-        my %alignment_sequences = fastatohash($cluster_alignment_output_file);
-        my %alignment_sequence_names = map { $_ => 0 } keys %alignment_sequences; # this will be used to keep track of which sequence have been printed to the output file
-        my $nucleotide_report_file_name = $current_directry . "/" . $CLUSTER_FOLDER . "/" . "cluster$cluster_number" . "/" . "cluster$cluster_number-aligned_nucleotides.fa";
-        open (OUTPUT, ">", $nucleotide_report_file_name) or die "ERROR: Cannot create file $nucleotide_report_file_name $!\n";
-        
-        # If the cluster orientation is negative reverse complement all the sequences
-        if ($cluster_alignment_orientation < 0) {
-            foreach my $seq_name (keys %alignment_sequence_names) {
-                $alignment_sequences{$seq_name} = rc($alignment_sequences{$seq_name});
-            }
-        }
-
-        # First print sequences that have ORFs and don't overlap
-        print OUTPUT ">Sequences_with_ORFs\nNNNNNNNNNN\n";
-        foreach my $seqname (keys %alignment_sequence_names) {
-            if ((exists $interpro_data{$seqname}[0]) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
-                print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
-                push @nucleotide_sequence_order, $seqname; # update the order in which these have been printed
-            }
-        }
-
-        # Second print sequences that don't have ORF and don't overlap
-        print OUTPUT ">Sequences_no_ORFs\nNNNNNNNNNN\n";
-        foreach my $seqname (keys %alignment_sequence_names) {
-            if ((!exists $interpro_data{$seqname}[0]) and (!exists $overlaping_sequences_list{$seqname})) { # true if the sequence has an ORF and is not overalaping
-                print OUTPUT ">$seqname\n$alignment_sequences{$seqname}\n";
-            }
-        }
-        close OUTPUT;
-
-        # Align the amino acid sequences
-        if (@nucleotide_sequence_order) { # check that there are sequences to align
-            # Create the alignment input file for amimo acids, as well as the associated PANTHER and Pfam sequences.
-            # Eeach nucleotide sequence will have the Interpro ORFs (from "getorf") translations merged
-            # in order. The sequence order will be the same as for the nucleotide sequence
-
-            my $aa_alignment_input_file = File::Temp->new(UNLINK => 1); # temporary file for alignment input
-            my $aa_alignment_output_file = File::Temp->new(UNLINK => 1); # temporary file for alignment output
-            open (ALI_IN, ">", $aa_alignment_input_file) or die "ERROR: cannot create temporary file $aa_alignment_input_file $!\n";
-            my @aa_annotation;  # two dimensional array that holds the amino acid sequence in order to be printed(the same order as the nucleotides)
-                                # the elements are [0] name of the sequence, [1] amino acid sequence, [2] PANTHER sequence, [3] Pfam sequence
-            my %PANTHER_ids; # all the PANTHER ids used for annotations in this cluster
-            my %Pfam_ids; # all the Pfam used for annotations in this cluster          
-            for (my $i=0; $i<scalar @nucleotide_sequence_order; $i++) { # cycle through the nucleotide sequences for this cluster
-                my $aa_sequence; # current aa_sequence
-                my $PANTHER_sequence; # current PANTHER sequence
-                my $Pfam_sequence; # current Pfam sequence
-                
-                # Put the ORFs for this sequence into hash and sort them in order they appear in the nucleotide sequence
-                my @orfs = split " ", $nucleotide_orf{$nucleotide_sequence_order[$i]}; 
-                my %sort_orfs; # used to sort orfs by their order on the nucleotide sequence; orf name as key and left bound as value
-                for (my $j=0; $j<scalar @orfs; $j++) { # cycle through the orfs for this nucleotide sequence to populate %sort_orfs
-                    $sort_orfs{$orfs[$j]} = $orf_data{$orfs[$j]}[1];
-                }
-                for my $orf (sort { $sort_orfs{$a} <=> $sort_orfs{$b} } keys %sort_orfs) { # sort the orfs by value, i.e. left bound
-                    $orf_data{$orf}[0] =~ s/\s//g; # clean up any remaining white spaces
-                    $aa_sequence .= $orf_data{$orf}[0]; # add the current ORF sequence to the amino acid sequence
-                    
-                    # Go through all the PANTHER and Pfam annotations associated with this ORF
-                    my @PANTHER_ids = split " ", $orf_data{$orf}[5]; 
-                    my @PANTHER_start = split " ", $orf_data{$orf}[3];
-                    my @PANTHER_end = split " ", $orf_data{$orf}[4];
-                    my @Pfam_ids = split " ", $orf_data{$orf}[8]; 
-                    my @Pfam_start = split " ", $orf_data{$orf}[6];
-                    my @Pfam_end = split " ", $orf_data{$orf}[7];
-                    my $orf_sequence_length = length $orf_data{$orf}[0];
-                    my $orf_PANTHER_sequence = '-' x $orf_sequence_length; # PANTHER sequence just for this ORF assign it to just '-' so there's always something assigned
-                    for (my $s=0; $s < scalar @PANTHER_ids; $s++) {
-                        my $symbol = $id_symbol_and_description{$PANTHER_ids[$s]}[0];
-                        $orf_PANTHER_sequence = update_annotation_sequence($orf_PANTHER_sequence, $PANTHER_start[$s], $PANTHER_end[$s], $symbol, $orf_sequence_length);
-                        $PANTHER_ids{$PANTHER_ids[$s]} = 1;
-                    }
-                    $PANTHER_sequence .= $orf_PANTHER_sequence;
-
-                    my $orf_Pfam_sequence = '-' x $orf_sequence_length; # Pfam sequence just for this ORF assign it to just '-' so there's always something assigned
-                    for (my $s=0; $s < scalar @Pfam_ids; $s++) {
-                        my $symbol = $id_symbol_and_description{$Pfam_ids[$s]}[0];
-                        $orf_Pfam_sequence = update_annotation_sequence($orf_Pfam_sequence, $Pfam_start[$s], $Pfam_end[$s], $symbol, $orf_sequence_length);
-                        $Pfam_ids{$Pfam_ids[$s]} = 1;
-                    }
-                    $Pfam_sequence .= $orf_Pfam_sequence;
-                }
-
-                # Update the annotation array and the amino acid input file
-                print ALI_IN ">$nucleotide_sequence_order[$i]\n";
-                print ALI_IN "$aa_sequence\n";
-                push @aa_annotation, [$nucleotide_sequence_order[$i], $aa_sequence, $PANTHER_sequence, $Pfam_sequence];
-            }
-            close ALI_IN;
- 
-            # Align the merged, translated ORFs. Put the aligned file into memory.
-            `mafft --quiet --thread -1 $aa_alignment_input_file > $aa_alignment_output_file`;
-            if ($?) { die "Error executing mafft when aligning proteins, error code $?\n"}
-            my %aligned_orfs = fastatohash($aa_alignment_output_file);
-
-            # Create output file with alignment as well as annotations
-            my $PANTHER_sequences; # single string with all the PANTHER annotations to add at the end of the file after the amino acid alignment
-            my $Pfam_sequences; # single string with all the Pfam annotations to add at the end of the file after the amino acid alignment
-            my $amino_acid_alignment_file_name = "$current_directry/$CLUSTER_FOLDER/cluster$cluster_number/cluster$cluster_number-aligned-aa.fa";
-            open (AA, ">", $amino_acid_alignment_file_name) or die "ERROR: Cannot create output file $current_directry/$CLUSTER_FOLDER/cluster$cluster_number/$cluster_number-aligned-aa.fa, $!\n";
-            for (my $i=0; $i < scalar @aa_annotation; $i++) {
-                print AA ">$aa_annotation[$i][0]\n";
-                print AA "$aligned_orfs{$aa_annotation[$i][0]}\n";
-
-                # Update the strings with PANTHER and Pfam annotation, including titles and sequences
-                my $PANTHER_title = ">$aa_annotation[$i][0]" . "-PANTHER\n";
-                $PANTHER_sequences .= $PANTHER_title . adjust_alignment($aa_annotation[$i][2], $aligned_orfs{$aa_annotation[$i][0]}) . "\n";        
-                my $Pfam_title = ">$aa_annotation[$i][0]" . "-Pfam\n";
-                $Pfam_sequences .= $Pfam_title . adjust_alignment($aa_annotation[$i][3], $aligned_orfs{$aa_annotation[$i][0]}) . "\n";        
-            }
-            print AA $PANTHER_sequences;
-            print AA $Pfam_sequences;
-            close AA;
-
-            # Update the README file with PANTHER and Pfam symbol descriptions
-            my $datestring = localtime();
-            print CLREADME "$datestring, Aligned nucleotide and amino acid sequences\n";
-            print CLREADME "\tFile: cluster$cluster_number-aligned_nucleotides.fa contains the aligned nucleotide sequences\n";
-            print CLREADME "\tFile: cluster$cluster_number-aligned-aa.fa contains the aligned amino acids sequences\n";
-            print CLREADME "\tKey to PANTHER and Pfam annotations of amino acid alignments\n";
-            foreach my $id (keys %PANTHER_ids) {
-                print CLREADME "\t\t$id_symbol_and_description{$id}[0]\t$id\t$id_symbol_and_description{$id}[1]\n";
-            }
-            foreach my $id (keys %Pfam_ids) {
-                print CLREADME "\t\t$id_symbol_and_description{$id}[0]\t$id\t$id_symbol_and_description{$id}[1]\n";
-            }
-        }
-        close CLREADME;
-    } 
-
-}
-
-### PIPELINE STEP 6 
 ### Identify the most likely representative sequence for each cluster, and create final report
 ### CONSTANTS applicable only for STEP 6
 my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must agree to call a position
@@ -2130,7 +1613,7 @@ my $MIN_FOR_POSITION = 2; # minumum number of nucleotides or amino acids to call
 my $RVCMP; # optional, reverse complement the fasta file input
 my $KNOWN_TNP_DATABASE = "/home/peter/TE-discovery/known_transposases/tnps_sequences.fa"; # location of known transpoase sequences, fomated with makeblastdb
 
-if ($STEP == 6) { # check if this step should be performed or not
+if ($STEP == 5) { # check if this step should be performed or not
     ## update the analysis file with what is going on
     my $datestring = localtime();
     print ANALYSIS "Running STEP 6 on $datestring\n";
@@ -2174,13 +1657,6 @@ if ($STEP == 6) { # check if this step should be performed or not
                 my $nuc_alignment_file_name = $current_cluster_folder . "/" . $cluster_name . "-aligned_nucleotides.fa";
                 my %alignment_sequences = fastatohash($nuc_alignment_file_name); # load the existing alignments
 
-                # THIS IS TEMPORARY --> remove from %alignment_sequence that start with >Sequences, these will be removed when I get rid of STEP5
-                foreach my $key (keys %alignment_sequences) {
-                    if ($key =~ /Sequences_/) {
-                        delete $alignment_sequences{$key};
-                    }
-                }
-
                 # Set the consensus parameters depending on the size of the alignment
                 if (keys %alignment_sequences == 2) {
                     $MIN_FOR_POSITION = 1;
@@ -2206,6 +1682,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                 push @menu1_items, "Open report in text editor"; # item 8
                 push @menu1_items, "Calculate consensus sequence based on selected sequences"; # item 8
                 push @menu1_items, "Change consensus sequence parameters"; # item 10
+                push @menu1_items, "Extract query sequence from BLASTx output"; # item 11
                 my $menu1 = 1; # boolean, set to one until the user is done with menu 1
                 while ($menu1) {
                     my $menu1_choice = prompt('m', {
@@ -2293,7 +1770,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                             $current_protein_sequence = fetch_protein_fasta($current_protein_accession);
                         }
                         else {
-                            $current_protein_sequence = prompt('a', "Enter protein sequence as a single line:", "", "$current_protein_sequence");
+                            $current_protein_sequence = prompt('x', "Enter protein sequence as a single line:", "", "$current_protein_sequence");
                         }
 
                         if ($current_protein_sequence =~ /Error\:/) {
@@ -2390,7 +1867,7 @@ if ($STEP == 6) { # check if this step should be performed or not
                                 }
                             }
                             else {
-                                $current_protein_sequence = prompt('a', "Enter protein sequence as a single line:", "", "$current_protein_sequence");
+                                $current_protein_sequence = prompt('x', "Enter protein sequence as a single line:", "", "$current_protein_sequence");
                             }
                         }
                         if ($current_nucleotide_sequence and $current_protein_sequence) {
@@ -2694,6 +2171,32 @@ if ($STEP == 6) { # check if this step should be performed or not
                         $MIN_FOR_POSITION = prompt('f', "Minumum number for position:", '', $MIN_FOR_POSITION);
                         $menu1 = 1; # stay in menu 1
                         $next_step = 3;
+                    }
+
+                    if ($menu1_choice == 11) { # the user wants extract the query sequence from BLASTx output
+                        # read the data from the clipboard and check that it's ok
+                        my $clipboard_text = `xclip -selection clipboard -o 2>/dev/null`; 
+                        my $query_sequence;
+                        if (!defined $clipboard_text) { # check that xclip is installed
+                            print colored ("Could not read clipboard. Make sure 'xclip' is installed.\n", "yellow");
+                        }
+                        else { # data is ok
+                            my @lines = split "\n", $clipboard_text;
+                            for (my $i = 0; $i < @lines; $i++) {
+                                my $line = $lines[$i];
+                                if ($line =~ /^Query\s+\d+\s+(\S+)\s+\d+\s*$/) {
+                                    $query_sequence .= $1;
+                                }
+                            }
+                        }
+                        # print results
+                        if ($query_sequence) {
+                            print ">Query_sequence\n$query_sequence\n";
+                        }
+                        else {
+                            print colored ("No query sequence was found in the clipboard\n", "yellow");
+                            print "$clipboard_text\n";
+                        }
                     }
                 }
             }
