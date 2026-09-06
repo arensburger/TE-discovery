@@ -1740,12 +1740,16 @@ if ($STEP == 5) { # check if this step should be performed or not
                         my $blastx_output = `blastx -db $KNOWN_TNP_DATABASE -query $nucleotide_input_file -outfmt "6 sseqid stitle pident length slen qframe"`;
                         my @blastx_array = split "\n", $blastx_output;
                         my $found_match = 0; # boolean
+                        my $i=1; # used to only record the first match
                         foreach my $line (@blastx_array) {
                             my @line_elements = split "\t", $line;
                             my $coverage = 100 * ($line_elements[3]/$line_elements[4]);
                             if (($line_elements[2] >= $MIN_ID_PERCENTAGE) and ($coverage >= $MIN_COVERAGE)){
-                                print "The known transposase below is $line_elements[2]% identical and covers $coverage% to the nucleotide input\n$line_elements[1]\n";
-                                $current_protein_accession = $line_elements[0];
+                                print "The known transposase below is $line_elements[4] amino acids long, $line_elements[2]% identical, and covers $coverage% to the nucleotide input\n$line_elements[1]\n";
+                                if ($i == 1) { # only the first match will become the later default match
+                                    $current_protein_accession = $line_elements[0];
+                                }
+                                $i++;    
                                 $found_match = 1;
                             }
                         }
@@ -1795,8 +1799,8 @@ if ($STEP == 5) { # check if this step should be performed or not
                             `blastx -subject $protein_inputfile_name -query $nucleotide_inputfile_name -outfmt 11 > $blast_output_file_name`;
                             if ($?) { die "ERROR running blastx locally $?\n"}
                             print colored ("\nBLASTx output written to file $blast_output_file_name\n", "blue");
-                            print colored ("HINT: Display this search in using\n", "blue");
-                            print colored ("blast_formatter -archive $blast_output_file_name -outfmt 0 -html > temp.html && firefox temp.html\n\n", "bold");
+                            #print colored ("HINT: Display this search in using\n", "blue");
+                            #print colored ("blast_formatter -archive $blast_output_file_name -outfmt 0 -html > temp.html && firefox temp.html\n\n", "bold");
 
                             # Identify the hits with the best matches and sort it by coverage
                             my $reformat_blastx_text = `blast_formatter -archive $blast_output_file_name -outfmt "6 qseqid pident length qframe"`;
@@ -2049,7 +2053,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                             my $default_taxonomy = 1; # trying to guess what the taxonomy will be
                             if ($tsd_length == 8) {
                                 $default_tsd = 8;
-                                $default_taxonomy = 3;
+                                $default_taxonomy = 4;
                             }
                             elsif ($tsd_length == 2) {
                                 $default_tsd = 1;
@@ -2077,7 +2081,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                             # Get the taxonomy
                             
 
-                            my @taxonomy_items = qw(Tc tigger hAT other unknown blank);
+                            my @taxonomy_items = qw(Tc tigger mariner hAT other unknown blank);
                             my $taxonomy_idx = prompt('m',
                                 {
                                     prompt       => 'Enter the taxonomy of this element:',
@@ -2598,8 +2602,19 @@ sub consensus {
     my @lengths = map { length $_ } values %sequences;
     my %unique_lengths = map { $_ => 1 } @lengths;
     unless (scalar keys %unique_lengths == 1) {
-        print colored ("\nERROR: The input FASTA sequences don't all have the same length, need to have aligned sequences as input\n\n", "red");
-        return (0);
+        print colored ("\nWarning: The input FASTA sequences don't all have the same length, alignig the input sequences\n\n", "yellow");
+        my $alignment_input_file = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' );
+        open (INPUT, ">", $alignment_input_file) or die "ERROR: cannot create temporary file $alignment_input_file $!\n";
+        foreach my $title (keys %sequences) {
+            print INPUT "$title\n$sequences{$title}\n";
+        }
+        close INPUT;
+        my $alignment_output_file = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' );
+        `mafft --quiet --thread -1 $alignment_input_file > $alignment_output_file`;
+        if ($?) { die "Error executing mafft, error code $?\n"}
+        %sequences = ();
+        %sequences = fastatohash($alignment_output_file);
+        @lengths = map { length $_ } values %sequences;
     } 
 
     ### Create consensus sequence
