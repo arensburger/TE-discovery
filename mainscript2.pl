@@ -1755,7 +1755,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                         }
                         print "\n";
                         unless ($found_match) {
-                            print colored ("No matches to known transpoases were found, do a BLASTX search on NCBI\n", "yellow");
+                            print colored ("No matches to known transposases were found, do a BLASTX search on NCBI\n", "yellow");
                             print colored ("\nLaunching NCBI BLAST on web browser (copied nucleotide sequence to clipboard)\n\n", "blue");
                             open(my $clip, "|-", "xclip -selection clipboard") or die "Can't open xclip: $!";
                             print $clip $current_nucleotide_sequence;
