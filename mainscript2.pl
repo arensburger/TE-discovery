@@ -1797,7 +1797,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                             # Run the blastx 
                             my $blast_output_file_name = $current_cluster_folder . "/" . "blastx-" . strftime("%m%d%y-%H%M", localtime) . ".asn";
                             `blastx -subject $protein_inputfile_name -query $nucleotide_inputfile_name -outfmt 11 > $blast_output_file_name`;
-                            if ($?) { die "ERROR running blastx locally $?\n"}
+                            if ($?) { warn "WARNING running blastx locally did not work$?\n"}
                             print colored ("\nBLASTx output written to file $blast_output_file_name\n", "blue");
                             #print colored ("HINT: Display this search in using\n", "blue");
                             #print colored ("blast_formatter -archive $blast_output_file_name -outfmt 0 -html > temp.html && firefox temp.html\n\n", "bold");
