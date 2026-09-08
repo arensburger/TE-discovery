@@ -2193,6 +2193,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                                 }
                             }
                         }
+                        $query_sequence =~ s/-//g; # remove gaps
                         # print results
                         if ($query_sequence) {
                             print ">Query_sequence\n$query_sequence\n";
