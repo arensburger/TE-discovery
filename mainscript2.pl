@@ -1745,11 +1745,16 @@ if ($STEP == 5) { # check if this step should be performed or not
                             my @line_elements = split "\t", $line;
                             my $coverage = 100 * ($line_elements[3]/$line_elements[4]);
                             if (($line_elements[2] >= $MIN_ID_PERCENTAGE) and ($coverage >= $MIN_COVERAGE)){
-                                print "The known transposase below is $line_elements[4] amino acids long, $line_elements[2]% identical, and covers $coverage% to the nucleotide input\n$line_elements[1]\n";
                                 if ($i == 1) { # only the first match will become the later default match
-                                    $current_protein_accession = $line_elements[0];
+                                    $current_protein_accession = $line_elements[0]; # make the first match the default
+                                    # copy the nucleotide input to the clipboard in case they want to blast it
+                                    open(my $clip, "|-", "xclip -selection clipboard") or die "Can't open xclip: $!";
+                                    print $clip $current_nucleotide_sequence;
+                                    close($clip);
+                                    print colored ("Copied nucleotide sequence to clipboard to use with BLASTx if wanted\n", "blue");
                                 }
-                                $i++;    
+                                $i++; 
+                                print "The known transposase below is $line_elements[4] amino acids long, $line_elements[2]% identical, and covers $coverage% to the nucleotide input\n$line_elements[1]\n";   
                                 $found_match = 1;
                             }
                         }
@@ -1958,14 +1963,17 @@ if ($STEP == 5) { # check if this step should be performed or not
                         my $continue_report = 1; # boolean used to abort the report if problems arrise
 
                         # Get the nucleotide sequence the user wants to use 
-                        $current_sequence_name = uc(prompt('x', "Enter full name of the alignment sequence to use, enter 0 to enter a different kind of sequence:", "", "$current_sequence_name"));
+                        $current_sequence_name = uc(prompt('x', "Enter full name of the alignment sequence to use, enter 0 to enter a different kind of sequence, of -1 to abort this step:", "", "$current_sequence_name"));
                         my $TIR1seq; # TIR sequences to use in the report
                         my $TIR2seq;
-                        if ($current_sequence_name eq "0") {
+                        if ($current_sequence_name eq "0") { # user want to enter a sequence manually
                             $current_nucleotide_sequence = prompt('x', "Enter the nucleotide sequence without TSDs:", "", "$current_nucleotide_sequence");
                             $current_nucleotide_sequence = uc($current_nucleotide_sequence);
                             $tir_length = prompt('n', "Enter the length of the TIRs at the end of the sequence:", "", "$tir_length");
                             $notes .= "Reference nucleotide sequence is not one of the alignment sequences\n";
+                        }
+                        elsif ($current_sequence_name eq "-1") { # user wants to abort
+                            $continue_report = 0;
                         }
                         else {
                             if (exists $alignment_sequences{$current_sequence_name}) {
@@ -1987,62 +1995,67 @@ if ($STEP == 5) { # check if this step should be performed or not
                             }
                         }
                         # Get the TIR sequences
-                        $TIR1seq = substr $current_nucleotide_sequence, 0, $tir_length;
-                        $TIR2seq = substr $current_nucleotide_sequence, -$tir_length, $tir_length;
-                        my $rc; # boolean, set to 1 if the sequence should be reverse-complemented
-                        if ($blastx_negative_strand) {
-                            $rc = prompt('y', "Should this sequence be written in the opposite orientation? (last BLASTx was on the negative strand)", "", "y");
-                        }
-                        else {
-                            $rc = prompt('y', "Should this sequence be written in the opposite orientation?", "", "n");
-                        }
-                        if ($rc) {
-                            $current_nucleotide_sequence = rc($current_nucleotide_sequence);
-                            $notes .= "Nucleotide sequence has been reverse-complemented\n";
+                        if ($continue_report) {
+                            $TIR1seq = substr $current_nucleotide_sequence, 0, $tir_length;
+                            $TIR2seq = substr $current_nucleotide_sequence, -$tir_length, $tir_length;
+                            my $rc; # boolean, set to 1 if the sequence should be reverse-complemented
+                            if ($blastx_negative_strand) {
+                                $rc = prompt('y', "Should this sequence be written in the opposite orientation? (last BLASTx was on the negative strand)", "", "y");
+                            }
+                            else {
+                                $rc = prompt('y', "Should this sequence be written in the opposite orientation?", "", "n");
+                            }
+                            if ($rc) {
+                                $current_nucleotide_sequence = rc($current_nucleotide_sequence);
+                                $notes .= "Nucleotide sequence has been reverse-complemented\n";
+                            }
                         }
 
                         # Get the transposase information
-                        my $transposase = prompt('x', "Enter the transposase sequence:", "", "none");
-                        unless ($transposase eq "none") {
+                        my $transposase;
+                        if ($continue_report) {
+                            $transposase = prompt('x', "Enter the transposase sequence:", "", "none");
+                            unless ($transposase eq "none") {
 
-                            # Check that the transposase and the nucleotide sequences are in the same orientation and align well
-                            my $protein_input_file = fasta_tempfile($transposase);
-                            my $nucleotide_input_file = fasta_tempfile($current_nucleotide_sequence);
-                            my $blastx_output = `blastx -subject $protein_input_file -query $nucleotide_input_file -outfmt "6 length qframe"`;
-                            my @blastx_array = split "\n", $blastx_output;
-                            my @topline_data = split " ", $blastx_array[0];
-                            my $match_proportion = $topline_data[0]/(length $transposase);
-                            if (($topline_data[1] < 0) or ($match_proportion < 0.75)) {
-                                print colored ("WARNING: The nucleotide sequence and transposase don't seem to match:\n", "yellow");
-                                print colored ("Transpoase orientation: $topline_data[1]\n", "bold");
-                                print colored ("Proportion of transpoase mapping to nucleotide: $match_proportion\n", "bold");
-                                $continue_report = prompt('y', 'Should printing this report be continued?', '', 'n');
-                            }
+                                # Check that the transposase and the nucleotide sequences are in the same orientation and align well
+                                my $protein_input_file = fasta_tempfile($transposase);
+                                my $nucleotide_input_file = fasta_tempfile($current_nucleotide_sequence);
+                                my $blastx_output = `blastx -subject $protein_input_file -query $nucleotide_input_file -outfmt "6 length qframe"`;
+                                my @blastx_array = split "\n", $blastx_output;
+                                my @topline_data = split " ", $blastx_array[0];
+                                my $match_proportion = $topline_data[0]/(length $transposase);
+                                if (($topline_data[1] < 0) or ($match_proportion < 0.75)) {
+                                    print colored ("WARNING: The nucleotide sequence and transposase don't seem to match:\n", "yellow");
+                                    print colored ("Transpoase orientation: $topline_data[1]\n", "bold");
+                                    print colored ("Proportion of transpoase mapping to nucleotide: $match_proportion\n", "bold");
+                                    $continue_report = prompt('y', 'Should printing this report be continued?', '', 'n');
+                                }
 
-                            if ($continue_report) {
-                                my $default_transposase_full = 'n'; # guessing if the transposase is full length
-                                my $default_transposase_intact = 'n'; # guessing if the transposase is intact
-                                my $trimmed = substr($transposase, 0, -1); # remove the last character
-                                my $count_stops = () = $trimmed =~ /\*/g; # count the number of * characters
-                                if ($transposase =~ /^M.+\*$/) { # check that the transposes starts with M and ends with *
-                                    $default_transposase_full = 'y';
-                                }
-                                if ($count_stops == 0) { # check if there are stop codons other than at the end of the transpoase
-                                    $default_transposase_intact = 'y';
-                                }
-                                my $full_length_protein = prompt('y', 'Is this likely a full length transposase?', '', $default_transposase_full);
-                                if ($full_length_protein) {
-                                    $notes .= "Full length transposase\n";
-                                }
-                                else {
-                                    $notes .= "Partial transposase\n";
-                                }
-                                my $intact_protein = prompt('y', 'Is the transpoase sequence likely intact?', '', $default_transposase_intact);
-                                if ($intact_protein) {
-                                    $notes .= "Transposase sequence is intact\n";
-                                }
-                                else {
-                                    $notes .= "Transposase sequence is not intact\n";
+                                if ($continue_report) {
+                                    my $default_transposase_full = 'n'; # guessing if the transposase is full length
+                                    my $default_transposase_intact = 'n'; # guessing if the transposase is intact
+                                    my $trimmed = substr($transposase, 0, -1); # remove the last character
+                                    my $count_stops = () = $trimmed =~ /\*/g; # count the number of * characters
+                                    if ($transposase =~ /^M.+\*$/) { # check that the transposes starts with M and ends with *
+                                        $default_transposase_full = 'y';
+                                    }
+                                    if ($count_stops == 0) { # check if there are stop codons other than at the end of the transpoase
+                                        $default_transposase_intact = 'y';
+                                    }
+                                    my $full_length_protein = prompt('y', 'Is this likely a full length transposase?', '', $default_transposase_full);
+                                    if ($full_length_protein) {
+                                        $notes .= "Full length transposase\n";
+                                    }
+                                    else {
+                                        $notes .= "Partial transposase\n";
+                                    }
+                                    my $intact_protein = prompt('y', 'Is the transpoase sequence likely intact?', '', $default_transposase_intact);
+                                    if ($intact_protein) {
+                                        $notes .= "Transposase sequence is intact\n";
+                                    }
+                                    else {
+                                        $notes .= "Transposase sequence is not intact\n";
+                                    }
                                 }
                             }
                         }
@@ -2062,6 +2075,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                             my @TSD_items = qw(TA 2 3 4 5 6 7 8 9 10 blank);
                             my $TSD_idx = prompt('m',
                                 {
+                                    title        => '',
                                     prompt       => 'Enter the TSD type:',
                                     items        => \@TSD_items,
                                     display_base => 1,
@@ -2084,6 +2098,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                             my @taxonomy_items = qw(Tc tigger mariner hAT other unknown blank);
                             my $taxonomy_idx = prompt('m',
                                 {
+                                    title        => '',
                                     prompt       => 'Enter the taxonomy of this element:',
                                     items        => \@taxonomy_items,
                                     display_base => 1,
@@ -2132,7 +2147,12 @@ if ($STEP == 5) { # check if this step should be performed or not
                         }
 
                         $menu1 = 1; # stay in menu 1
-                        $next_step = 8;
+                        if ($continue_report) {
+                            $next_step = 8;
+                        }
+                        else {
+                            $next_step = 7;
+                        }
                     }
 
                     if ($menu1_choice == 8) { # user want to edit the report
