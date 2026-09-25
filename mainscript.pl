@@ -20,7 +20,6 @@ no warnings 'redefine';
     my ($cols) = GetTerminalSize();
     return $cols || 80;
 };
-#use Term::ANSIColor;
 use Cwd;
 use LWP::UserAgent; # to connect to NCBI
 use JSON;
