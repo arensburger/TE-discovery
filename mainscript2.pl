@@ -77,7 +77,7 @@ my $COMBINED_CLUSTERS_OUTPUT_FILENAME = $CLUSTER_FOLDER . "/" . $ANALYSIS_NAME .
 my $current_directry = getcwd();
 if (($STEP == 1) or ($STEP == 12)) {
     if (-d $ANALYSIS_FOLDER) { 
-        print colored ("WARNING: folder $current_directry/$ANALYSIS_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
+        print STDERR colored ("WARNING: folder $current_directry/$ANALYSIS_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
     }
     else {
         print STDERR "Creating directory $ANALYSIS_FOLDER for storing analysis files\n";
@@ -86,7 +86,7 @@ if (($STEP == 1) or ($STEP == 12)) {
     }
 
     if (-d $ELEMENT_FOLDER) { 
-        print colored ("WARNING: folder $ELEMENT_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
+        print STDERR colored ("WARNING: folder $ELEMENT_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
     }
     else {
         print STDERR "Creating directory $ELEMENT_FOLDER for storing element files\n";
@@ -95,7 +95,7 @@ if (($STEP == 1) or ($STEP == 12)) {
     }
 
     if (-d $reject_folder_path) { 
-        print colored ("WARNING: folder $reject_folder_path already exists, using this folder rather than creating a new one\n", "yellow");
+        print STDERR colored ("WARNING: folder $reject_folder_path already exists, using this folder rather than creating a new one\n", "yellow");
     }
     else {
         print STDERR "Creating directory $reject_folder_path for reject elements\n";
@@ -1415,7 +1415,7 @@ if ($STEP == 4) { # check if this step should be performed or not
 
     ## Create a new directory where that will now how the clusters, rather than the old 'elements' (need to rename all this)
     if (-d $CLUSTER_FOLDER) { 
-        print colored ("WARNING: folder $CLUSTER_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
+        print STDERR colored ("WARNING: folder $CLUSTER_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
     }
     else {
         `mkdir $CLUSTER_FOLDER`;
@@ -1429,13 +1429,31 @@ if ($STEP == 4) { # check if this step should be performed or not
     my $TIR_length;
         
     foreach my $cluster_number (keys %clustering_info) { # go through the clusters individually     
+
+        # Create directory cluster specific folder
+        my $cluster_directory = "$CLUSTER_FOLDER/cluster$cluster_number";
+        if (-d $cluster_directory) { 
+            print STDERR colored ("WARNING: folder $cluster_directory already exists, using this folder rather than creating a new one\n", "yellow");
+        }
+        else {
+            `mkdir $cluster_directory`;
+            if ($?) { die "ERROR creating directory $cluster_directory: error code $?\n"}
+        }
+
+        # Create and populate the README file for this cluster
+        open (CLREADME, ">>", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
+        my $datestring = localtime();
+        print CLREADME "$datestring, Clustering sequences $clustering_info{$cluster_number}[0]\n";
+
+
         # get the TIR sequences for this cluster
         my $tir1_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[1]);
         my $tir2_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[2]);
         $TIR_length = length($tir1_seq);
         my $TIRs_set = 1; # boolean, set to 1 if TIR sequence are ok, or zero if not
         if (($tir1_seq =~/n/i) or ($tir2_seq =~ /n/i)) { # if the tir sequences include "n" characters warn the user and stop processing
-            print colored ("WARNING: The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_number}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n", "yellow");
+            print STDERR colored ("WARNING: The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_number}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n", "yellow");
+            print CLREADME "The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_number}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n";
             $TIRs_set = 0;
         }
 
@@ -1458,9 +1476,8 @@ if ($STEP == 4) { # check if this step should be performed or not
             print TIRSEQ ">TIR2\n$tir2_seq\n";
             close (TIRSEQ);
             my $BLAST_output_file_name = File::Temp->new(UNLINK => 1); # file with output of blast
-            `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 1000 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
+            `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 1e-5 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
             if ($?) { die "ERROR running blastn, error code $?\n"}
-
             # identify sequences bound by the two TIRs
             my $TIR1_bed_file = File::Temp->new(UNLINK => 1); # bed file with locations of TIR1
             my $TIR2_bed_file = File::Temp->new(UNLINK => 1); # bed file with locations of TIR2
@@ -1495,36 +1512,61 @@ if ($STEP == 4) { # check if this step should be performed or not
             close INPUT;
             close TIR1_BED;
             close TIR2_BED;
-
             # identify TIRs facing each other and remove reverse-complemented duplicate entries
-            my %unique_sequence; # holds the scaffold and bounds as key, used to remove entries with that overlap
-            my $bedtool_output_file_name = File::Temp->new(UNLINK => 1); # file with output of bedtools
-            `bedtools window -a $TIR1_bed_file -b $TIR2_bed_file -l 0 -r $MAX_ELEMENT_SIZE -sw -sm > $bedtool_output_file_name`;
+            my %element_bounds; # has just the genomic location as key and full bed file line as value, this way identical genomic loctions will not be duplicated
+            my $TIR_locations = File::Temp->new(UNLINK => 1); # has the bounds of the elements
+            `bedtools window -a $TIR1_bed_file -b $TIR2_bed_file -l 0 -r $MAX_ELEMENT_SIZE -sw -sm > $TIR_locations`;
             if ($?) { die "ERROR running bedtools window, error code $?\n"}
-            open (INPUT, $bedtool_output_file_name) or die "ERROR: Cannot open file $bedtool_output_file_name $!\n";
+            open (INPUT, $TIR_locations) or die "ERROR: Cannot open file $TIR_locations $!\n";
             while (my $line = <INPUT>) {
                 my $b1;
                 my $b2;
-                my @parsed_line = split "\t", $line;
+                my @parsed_line = split " ", $line;
                 if (($parsed_line[5] eq "+") and ($parsed_line[11] eq "+")) {
                     $b1 = $parsed_line[1];
-                    $b2 = $parsed_line[7];
+                    $b2 = $parsed_line[8];
                 }
                 elsif (($parsed_line[5] eq "-") and ($parsed_line[11] eq "-")) {
-                    $b1 = $parsed_line[2];
-                    $b2 = $parsed_line[6];
+                    $b1 = $parsed_line[7];
+                    $b2 = $parsed_line[2];
                 }
                 if ($b1 and $b2) { # only record if the two TIRs were found facing each other on the same strand
-                    $unique_sequ
+                    if ($b1 < $b2) {
+                        $element_bounds{$parsed_line[0] . "\t" . $b1 . "\t". $b2} = $parsed_line[0] . "\t" . $b1 . "\t". $b2 . "\t" . $cluster_number . "\t" . 0 . "\t" . "+"; 
+                    }
+                    else {
+                        $element_bounds{$parsed_line[0] . "\t" . $b1 . "\t". $b2} = $parsed_line[0] . "\t" . $b2 . "\t". $b1 . "\t" . $cluster_number . "\t" . 0 . "\t" . "-"; 
+                    }
                 }
             }
+            close INPUT;
 
-
-#            `cp $bedtool_output_file_name /home/peter/Desktop/bedtools.txt`; exit;
-
-#            `cp $TIR1_bed_file /home/peter/Desktop/tir1bed.txt`;
-#            `cp $TIR2_bed_file /home/peter/Desktop/tir2bed.txt`; exit;
+            # remove any sequences that partially overlap each other, unlikely to be full length elements
+            # write the elements into a bed file
+            my $element_bounds_bed = File::Temp->new(UNLINK => 1); # bed file with element bounds
+            open (OUTPUT, ">", $element_bounds_bed) or die "ERROR: Cannot open file $element_bounds_bed $!\n";
+            foreach my $locus (keys %element_bounds) {
+                print OUTPUT "$element_bounds{$locus}\n"; 
+            }
+            close OUTPUT;
+            my $sorted_bed = File::Temp->new(UNLINK => 1); # sorted bed file
+            `bedtools sort -i $element_bounds_bed > $sorted_bed`;
+            if ($?) { die "ERROR running bedtools sort: error code $?\n"}
+            my $overlap_bed = File::Temp->new(UNLINK => 1); # overalping bed file, includes elements overalping themselves
+            `bedtools intersect -a $sorted_bed -b $sorted_bed -c > $overlap_bed`; # will report the number of overlap, expect 1 for itself
+            if ($?) { die "ERROR running bedtools intersect: error code $?\n"}
+            open (OVERLAP, $overlap_bed) or die "ERROR: Cannot open temporary overlap file $overlap_bed\n";
+            while (my $line = <OVERLAP>) {           
+                my @data = split " ", $line;
+                if ($data[6] > 1) { 
+                    my $name = $data[0] . "\t" . $data[1] . "\t". $data[2];
+                    print CLREADME "\tIgnoring sequence because it overlaps with at least one other: $name\n";
+                    delete $element_bounds{$name};                  
+                }
+            }
         }
+        close CLREADME;
+exit;
 
         # 
 
@@ -1548,7 +1590,7 @@ print "$tir1_seq\t$tir2_seq, $TSD_length\n";
             # Create directory cluster specific folder
             my $cluster_directory = "$CLUSTER_FOLDER/cluster$cluster_number";
             if (-d $cluster_directory) { 
-                print colored ("WARNING: folder $cluster_directory already exists, using this folder rather than creating a new one\n", "yellow");
+                print STDERR colored ("WARNING: folder $cluster_directory already exists, using this folder rather than creating a new one\n", "yellow");
             }
             else {
                 `mkdir $cluster_directory`;
