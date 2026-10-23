@@ -1430,6 +1430,8 @@ if ($STEP == 4) { # check if this step should be performed or not
         
     foreach my $cluster_number (keys %clustering_info) { # go through the clusters individually     
 
+        my %element_bounds=(); # has just the genomic location as key and full bed file line as value, this way identical genomic loctions will not be duplicated
+
         # Create directory cluster specific folder
         my $cluster_directory = "$CLUSTER_FOLDER/cluster$cluster_number";
         if (-d $cluster_directory) { 
@@ -1443,7 +1445,7 @@ if ($STEP == 4) { # check if this step should be performed or not
         # Create and populate the README file for this cluster
         open (CLREADME, ">>", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
         my $datestring = localtime();
-        print CLREADME "$datestring, Clustering sequences $clustering_info{$cluster_number}[0]\n";
+        print CLREADME "$datestring, Clustering sequences in folder(s) $clustering_info{$cluster_number}[0]\n";
 
 
         # get the TIR sequences for this cluster
@@ -1468,7 +1470,6 @@ if ($STEP == 4) { # check if this step should be performed or not
 
         # identify the nucleotide sequences between TIR locations
         if ($TIRs_set) { # only continue if the TIR sequence are ok
-
             # blast the TIR sequence
             my $TIR_input_file_name = File::Temp->new(UNLINK => 1); # file with TIR sequences
             open (TIRSEQ, ">", $TIR_input_file_name) or die "ERROR: Cannot create temporary file $TIR_input_file_name $!\n";
@@ -1512,8 +1513,8 @@ if ($STEP == 4) { # check if this step should be performed or not
             close INPUT;
             close TIR1_BED;
             close TIR2_BED;
+
             # identify TIRs facing each other and remove reverse-complemented duplicate entries
-            my %element_bounds; # has just the genomic location as key and full bed file line as value, this way identical genomic loctions will not be duplicated
             my $TIR_locations = File::Temp->new(UNLINK => 1); # has the bounds of the elements
             `bedtools window -a $TIR1_bed_file -b $TIR2_bed_file -l 0 -r $MAX_ELEMENT_SIZE -sw -sm > $TIR_locations`;
             if ($?) { die "ERROR running bedtools window, error code $?\n"}
@@ -1542,182 +1543,86 @@ if ($STEP == 4) { # check if this step should be performed or not
             close INPUT;
 
             # remove any sequences that partially overlap each other, unlikely to be full length elements
-            # write the elements into a bed file
-            my $element_bounds_bed = File::Temp->new(UNLINK => 1); # bed file with element bounds
-            open (OUTPUT, ">", $element_bounds_bed) or die "ERROR: Cannot open file $element_bounds_bed $!\n";
-            foreach my $locus (keys %element_bounds) {
-                print OUTPUT "$element_bounds{$locus}\n"; 
-            }
-            close OUTPUT;
-            my $sorted_bed = File::Temp->new(UNLINK => 1); # sorted bed file
-            `bedtools sort -i $element_bounds_bed > $sorted_bed`;
-            if ($?) { die "ERROR running bedtools sort: error code $?\n"}
-            my $overlap_bed = File::Temp->new(UNLINK => 1); # overalping bed file, includes elements overalping themselves
-            `bedtools intersect -a $sorted_bed -b $sorted_bed -c > $overlap_bed`; # will report the number of overlap, expect 1 for itself
-            if ($?) { die "ERROR running bedtools intersect: error code $?\n"}
-            open (OVERLAP, $overlap_bed) or die "ERROR: Cannot open temporary overlap file $overlap_bed\n";
-            while (my $line = <OVERLAP>) {           
-                my @data = split " ", $line;
-                if ($data[6] > 1) { 
-                    my $name = $data[0] . "\t" . $data[1] . "\t". $data[2];
-                    print CLREADME "\tIgnoring sequence because it overlaps with at least one other: $name\n";
-                    delete $element_bounds{$name};                  
+            my $TSD_bounds_bed = File::Temp->new(UNLINK => 1); # bed file with TSD bounds
+            if (keys %element_bounds) { #only continue if elements have been identified
+                my $element_bounds_bed = File::Temp->new(UNLINK => 1); # bed file with element bounds
+                open (OUTPUT, ">", $element_bounds_bed) or die "ERROR: Cannot open file $element_bounds_bed $!\n";
+                foreach my $locus (keys %element_bounds) {
+                    print OUTPUT "$element_bounds{$locus}\n"; 
                 }
-            }
-        }
-        close CLREADME;
-exit;
-
-        # 
-
-        # identify the nucleotide sequences between TIR locations
-        my %cluster_sequences; # holds the genomic sequence with intact tirs as well as tsd sequences, it's a hash to avoid duplications
-        # if ($TIRs_set) { # only continue if the TIR sequence are ok
-        #     foreach my $chr (keys %genome) { # go through each genome subsection (calling it "chr" here)
-        #         # Identify all the element sequences (including TSDs) in the forward orientation. Converting everything to lower case to avoid confusion with cases.
-        #         # Also providing the name of the chrososome and orientation so that the position of all the elements can recorded.
-        #         my %fw_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_type, $TSD_length, "+"); # look for TIRs on the + strand
-        #         %cluster_sequences = (%cluster_sequences, %fw_cluster_sequences); # add elements found on the + strand to %cluster_sequences
-        #         unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
-        #             my %rc_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_type, $TSD_length, "-");
-        #             %cluster_sequences = (%cluster_sequences, %rc_cluster_sequences); # add any new elements to the hash %cluster_sequences
-        #         }
-        #     } 
-        # }
-print "$tir1_seq\t$tir2_seq, $TSD_length\n";
-        if(%cluster_sequences) { # only continue if sequences were found
-
-            # Create directory cluster specific folder
-            my $cluster_directory = "$CLUSTER_FOLDER/cluster$cluster_number";
-            if (-d $cluster_directory) { 
-                print STDERR colored ("WARNING: folder $cluster_directory already exists, using this folder rather than creating a new one\n", "yellow");
-            }
-            else {
-                `mkdir $cluster_directory`;
-                if ($?) { die "ERROR creating directory $cluster_directory: error code $?\n"}
-            }
-
-            # Create and populate the README file for this cluster
-            open (CLREADME, ">>", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
-            my $datestring = localtime();
-            print CLREADME "$datestring, Clustering sequences $clustering_info{$cluster_number}[0]\n";
-
-            # Identify, report and remove from further analysis any sequences that overlap with a cluster.
-            # This is done by creating a bed file and using bedtools to identify overlaps
-
-            # create the BED file
-            my $temp_bed_file = File::Temp->new(UNLINK => 1); # temporary bed file s
-            my $temp_bed_sorted_file = File::Temp->new(UNLINK => 1); # temporary bed file sorted
-            my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command
-            open (BED, ">", $temp_bed_file) or die "ERROR: cannot created temporary bed file $temp_bed_file\n"; 
-            foreach my $title (keys %cluster_sequences) {
-                if ($title =~ /^(\S+):(\d+)-(\d+)/) {
-                    my $chromosome = $1;
-                    my $b1 = $2;
-                    my $b2 = $3;
-                    my $orientation = "+";
-                    if ($b1 > $b2) {
-                        $orientation = "-";
-                        my $temp = $b2;
-                        $b2 = $b1;
-                        $b1 = $temp;
+                close OUTPUT;
+                my $sorted_bed = File::Temp->new(UNLINK => 1); # sorted bed file
+                `bedtools sort -i $element_bounds_bed > $sorted_bed`;
+                if ($?) { die "ERROR running bedtools sort: error code $?\n"}
+                my $overlap_bed = File::Temp->new(UNLINK => 1); # overalping bed file, includes elements overalping themselves
+                `bedtools intersect -a $sorted_bed -b $sorted_bed -c > $overlap_bed`; # will report the number of overlap, expect 1 for itself
+                if ($?) { die "ERROR running bedtools intersect: error code $?\n"}
+                open (OVERLAP, $overlap_bed) or die "ERROR: Cannot open temporary overlap file $overlap_bed\n";
+                while (my $line = <OVERLAP>) {           
+                    my @data = split " ", $line;
+                    if ($data[6] > 1) { 
+                        my $name = $data[0] . "\t" . $data[1] . "\t". $data[2];
+                        print CLREADME "\tIgnoring sequence because it overlaps with at least one other: $name\n";
+                        delete $element_bounds{$name};                  
                     }
-                    print BED "$chromosome\t$b1\t$b2\t$orientation\t$title\n"; # all the information about overlaps
                 }
-                else {
-                    die "ERROR: Cannot parse title $title\n";
-                }
-            }
-            close BED;
 
-            # Identify overlapping pairs of sequences using bedtools
-            `bedtools sort -i $temp_bed_file > $temp_bed_sorted_file`;
-            if ($?) { die "ERROR running bedtools sort: error code $?\n"}
-            `bedtools intersect -a $temp_bed_sorted_file -b $temp_bed_sorted_file -wo > $temp_overlap_file`; # has all the overlapping including the sequence to itself
-            if ($?) { die "ERROR running bedtools intersect: error code $?\n"}
-            
-            # Put the names of the overlapping pairs of sequences into a graph, so that groups of overalpping sequences
-            # can be identified.
-            my $graph = Graph->new(undirected => 1); # this is a graph to join all the pairs of overlapping sequences
-            open (OVERLAP, $temp_overlap_file) or die "ERROR: Cannot open temporary overlap file $temp_overlap_file\n";
-            while (my $line = <OVERLAP>) {           
-                my @data = split " ", $line;
-                # adding sequences to the graph but only if they are not the the same sequence
-                if ($data[4] ne $data[9]) {  
-                    $graph->add_edge($data[4], $data[9]);                                               
+                # create a file with the element sequences including TSDs
+                # create a bed file with the element bounds, if necessary adjust the bounds if the TIRs are adjacent to the edge of the genome file
+                my %genome_fasta_size; # holds the size of each fasta file of the genome
+                my %sequence_length; # holds the locus as key and sequence length as value, used later to make a historgram
+                open (INPUT, "$INPUT_GENOME.fai") or die "ERROR: Expecting find the file $INPUT_GENOME.fai, need to make one using bedtools\n";
+                while (my $line = <INPUT>) {
+                    my @line_parsed = split " ", $line;
+                    $genome_fasta_size{$line_parsed[0]} = $line_parsed[1];
                 }
-            }
-            my @groups = $graph->connected_components(); # @groups is an array of arrays with the overlapping sequences in one group 
-            
-            # if any overlaps have been found, report them to the REAMDE and ANALYSIS files and remove them from further analysis
-            foreach my $g (@groups) {
-                my $datestring = localtime();
-                print CLREADME "\tThe sequences below overlap and have been removed from the analysis:\n";
-                foreach my $s (@$g) {
-                    print CLREADME "\t>$s\n$cluster_sequences{$s}\n";
-                    delete $cluster_sequences{$s};
+                open (TSDBOUND, ">", $TSD_bounds_bed) or die "ERROR: Cannot open temporary file $TSD_bounds_bed\n";
+                foreach my $locus_name (keys %element_bounds) {
+                    my @locus_parsed = split " ", $element_bounds{$locus_name};
+                    if ((($locus_parsed[1] - $TSD_length) - 1 < 1) or (($locus_parsed[2] + $TSD_length) > $genome_fasta_size{$locus_parsed[0]})) { # this will be true if adding the TSD to the element goes beyond the bounds of the genome file
+                        # don't include the TSDs
+                        print TSDBOUND "$locus_parsed[0]\t$locus_parsed[1]\t$locus_parsed[2]\n";
+                        $sequence_length{"$locus_parsed[0]\t$locus_parsed[1]\t$locus_parsed[2]"} = $locus_parsed[2] - $locus_parsed[1];
+                        print CLREADME "\tWARNING: Sequence $locus_parsed[0]:$locus_parsed[1]-$locus_parsed[2] does not include TSD sequences because it's too close to the edge of the genome file\n";
+                    }
+                    else { # extending the to length of the TSDs is within genome file bounds
+                        my $b1 = $locus_parsed[1] - $TSD_length - 1;
+                        my $b2 = $locus_parsed[2] + $TSD_length;
+                        print TSDBOUND "$locus_parsed[0]\t$b1\t$b2\n";
+                        $sequence_length{"$locus_parsed[0]\t$b1\t$b2"} = $b2 - $b1;
+                    }
                 }
+                close TSDBOUND;
             }
-            if (@groups) { # overlapping sequences were found
-                print ANALYSIS "\tOverlapping files were found and removed in cluster $cluster_number\n";
-            }
-            
-            if (keys %cluster_sequences) { # this will be true if not all sequences were removed due to overlaps
-                # Align the cluster sequences. Use mafft and --adjustdirection option, this will get the sequences to all be in the same orientation
-                my $temp_input_alignment_file = File::Temp->new(UNLINK => 1); # input to mafft alignment
-                open (MAFFTINPUT, ">", $temp_input_alignment_file) or die "ERROR: Cannot create temporay mafft input alignment file\n";
-                my $temp_output_alignment_file = File::Temp->new(UNLINK => 1); # output of mafft alignment
-                foreach my $title (keys %cluster_sequences) {
-                    print MAFFTINPUT ">$title\n";
-                    print MAFFTINPUT "$cluster_sequences{$title}\n";
-                }
-                close MAFFTINPUT;
-                `mafft --adjustdirection --quiet $temp_input_alignment_file > $temp_output_alignment_file`;
+
+            # create the output file
+            if (keys %element_bounds) { # test to see if there are sequences left to print, in theory all the elements could have been deleted because of duplications
+                my $sequence_file_not_oriented = File::Temp->new(UNLINK => 1); # fasta file with element squence but not oriented
+                my $alignment_output_file_name = "$cluster_directory/cluster$cluster_number-aligned_nucleotides.fa";
+                `bedtools getfasta -fi $INPUT_GENOME -bed $TSD_bounds_bed > $sequence_file_not_oriented`;
+                if ($?) { die "ERROR running bedtools getfasta: error code $?\n"}
+                `mafft --adjustdirection --quiet $sequence_file_not_oriented > $alignment_output_file_name`;
                 if ($?) { die "ERROR running MAFFT with --adjustdirection option: error code $?\n"}
-
-                # print the alignment to the cluster directory and update the README
-                my $alignment_file_name = "cluster$cluster_number-aligned_nucleotides.fa";
-                my $cluster_sequence_file = "$cluster_directory/$alignment_file_name";
-                open (CLSEQ, ">", $cluster_sequence_file) or die "ERROR: Cannot create sequence file $cluster_sequence_file, $!\n";
-                my %alignment_output = fastatohash($temp_output_alignment_file); # load the output of the mafft alignment above
-                foreach my $seq_title (keys %alignment_output) {
-                    my $sequence = $alignment_output{$seq_title}; # get the sequence first, before $seq_title could be changed
-                    if ($seq_title =~ /_R_(\S+):(\d+)-(\d+)/) { # if the title is reversed correct the order
-                        $seq_title = "$1:$3-$2"; 
-                    }
-                    print CLSEQ ">$seq_title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
-                    print CLSEQ "$sequence\n";
-                }
-                print CLREADME "\tFile $alignment_file_name contains the aligned genomic sequences. The sequences are oriented and any overlapping sequences have been removed\n";
-                close CLSEQ;
-            }
-            else { # this will be true if all sequences were removed due to overlaps
-                print CLREADME "\tAll the sequences overlap each other, analysis stopped.\n";
-                print ANALYSIS "\tAll the sequences in cluster $cluster_number overlap each other, analysis stopped.\n";
                 my $datestring = localtime();
-                print REJECT "$datestring\t$clustering_info{$cluster_number}[0]\tSTEP 4\tAll the sequences overlap each other, the analysis was halted.\n";
-                # move the elments into the rejected folder
-                my @data = split " ", $clustering_info{$cluster_number}[0];
-                foreach my $element_name (@data) {
- #                   `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
-                    if ($?) { die "ERROR moving folder $ELEMENT_FOLDER/$element_name to $reject_folder_path $?\n"}
-                }
+                print CLREADME "$datestring, File $alignment_output_file_name contains the cluster sequences\n";
             }
-            close CLREADME;
         }
-        else { # this means that no genomic sequences were found for this cluster
+
+        unless (keys %element_bounds) { # No sequences were found, move the elements into the rejected folder and remove the cluster folder
             my $datestring = localtime();
-            print REJECT "$datestring\t$clustering_info{$cluster_number}[0]\tSTEP 4\tNo genomic location were found for this (these) element(s) where the identified TIRs are properly positioned.\n";
-            # move the elments into the rejected folder
+            print REJECT "$datestring\t$clustering_info{$cluster_number}[0]\tSTEP 4\tNo genomic location were found for this (these) element(s).\n";
+            `rm -rf $cluster_directory`; # remove the cluster directory
+            if ($?) { die "ERROR removing folder $cluster_directory $?\n"}
             my @data = split " ", $clustering_info{$cluster_number}[0];
             foreach my $element_name (@data) {
- #               `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
+                `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
                 if ($?) { die "ERROR moving folder $ELEMENT_FOLDER/$element_name to $reject_folder_path $?\n"}
             }
         }
+        close CLREADME;
     }
 
-    # Clean up folders, move the -element and -further_review folders into the -analysis folder and make a record of this
+    #Clean up folders, move the -element and -further_review folders into the -analysis folder and make a record of this
     `mv $ELEMENT_FOLDER $ANALYSIS_FOLDER`;
     if ($?) { die "ERROR moving folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER $?\n"}
     print ANALYSIS "\tMoving the folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER\n";
@@ -1725,7 +1630,7 @@ print "$tir1_seq\t$tir2_seq, $TSD_length\n";
 
 ### PIPELINE STEP 5 
 ### Identify the most likely representative sequence for each cluster, and create final report
-### CONSTANTS applicable only for STEP 6
+### CONSTANTS applicable only for STEP 5
 my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must agree to call a position
 my $MIN_FOR_POSITION = 2; # minumum number of nucleotides or amino acids to call a position (not ignore it)
 my $RVCMP; # optional, reverse complement the fasta file input
