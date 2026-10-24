@@ -1306,6 +1306,7 @@ if ($STEP == 4) { # check if this step should be performed or not
 
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
+    my $GENOMIC_CONTEXT_LENGTH = 20; # number of bp. on each side of the element to use to determine if elements are duplications
 
     # making sure all the required information has been provided
     unless ($INPUT_GENOME){
@@ -1317,6 +1318,9 @@ if ($STEP == 4) { # check if this step should be performed or not
     print ANALYSIS "Running STEP 4 on $datestring\n";
     print ANALYSIS "\tGenome: $INPUT_GENOME\n";
     print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
+
+    ## load the genome into memory
+    my $genome = fastatohash($INPUT_GENOME);
 
     ## Read the README files and identify TIRs sequences and TSD  
     # load the element information from the README files
@@ -1544,6 +1548,8 @@ if ($STEP == 4) { # check if this step should be performed or not
 
             # remove any sequences that partially overlap each other, unlikely to be full length elements
             my $TSD_bounds_bed = File::Temp->new(UNLINK => 1); # bed file with TSD bounds
+            my $GENOME_CONTEXT_bounds_bed = File::Temp->new(UNLINK => 1); # bed file with bounds of sequences surrounding each element
+            my $sequence_file_not_oriented = File::Temp->new(UNLINK => 1); # fasta file with element sequences but not oriented
             if (keys %element_bounds) { #only continue if elements have been identified
                 my $element_bounds_bed = File::Temp->new(UNLINK => 1); # bed file with element bounds
                 open (OUTPUT, ">", $element_bounds_bed) or die "ERROR: Cannot open file $element_bounds_bed $!\n";
@@ -1567,47 +1573,42 @@ if ($STEP == 4) { # check if this step should be performed or not
                     }
                 }
 
-                # create a file with the element sequences including TSDs
-                # create a bed file with the element bounds, if necessary adjust the bounds if the TIRs are adjacent to the edge of the genome file
-                my %genome_fasta_size; # holds the size of each fasta file of the genome
-                my %sequence_length; # holds the locus as key and sequence length as value, used later to make a historgram
-                open (INPUT, "$INPUT_GENOME.fai") or die "ERROR: Expecting find the file $INPUT_GENOME.fai, need to make one using bedtools\n";
-                while (my $line = <INPUT>) {
-                    my @line_parsed = split " ", $line;
-                    $genome_fasta_size{$line_parsed[0]} = $line_parsed[1];
-                }
-                open (TSDBOUND, ">", $TSD_bounds_bed) or die "ERROR: Cannot open temporary file $TSD_bounds_bed\n";
+                # create a file the element sequences, the sequences will be oriented next
+                open (ELEMENT, ">", $sequence_file_not_oriented) or die "ERROR: Cannot create file $sequence_file_not_oriented\n";
                 foreach my $locus_name (keys %element_bounds) {
                     my @locus_parsed = split " ", $element_bounds{$locus_name};
-                    if ((($locus_parsed[1] - $TSD_length) - 1 < 1) or (($locus_parsed[2] + $TSD_length) > $genome_fasta_size{$locus_parsed[0]})) { # this will be true if adding the TSD to the element goes beyond the bounds of the genome file
-                        # don't include the TSDs
-                        print TSDBOUND "$locus_parsed[0]\t$locus_parsed[1]\t$locus_parsed[2]\n";
-                        $sequence_length{"$locus_parsed[0]\t$locus_parsed[1]\t$locus_parsed[2]"} = $locus_parsed[2] - $locus_parsed[1];
-                        print CLREADME "\tWARNING: Sequence $locus_parsed[0]:$locus_parsed[1]-$locus_parsed[2] does not include TSD sequences because it's too close to the edge of the genome file\n";
+                    my $tsd_b1 = $locus_parsed[1]-1-$TSD_length; # left bound of the element including TSD
+                    my $tsd_b2 = $locus_parsed[2]+$TSD_length; # right bound of the element including TSD
+                    # check if the TSD bounds are near the edge of the genome file
+                    if ($tsd_b1 < 1) {
+                        $tsd_b1 = 1;
                     }
-                    else { # extending the to length of the TSDs is within genome file bounds
-                        my $b1 = $locus_parsed[1] - $TSD_length - 1;
-                        my $b2 = $locus_parsed[2] + $TSD_length;
-                        print TSDBOUND "$locus_parsed[0]\t$b1\t$b2\n";
-                        $sequence_length{"$locus_parsed[0]\t$b1\t$b2"} = $b2 - $b1;
+                    if ($tsd_b2 > (length $genome{$locus_parsed[0]})) {
+                        $tsd_b2 = length $genome{$locus_parsed[0]};
                     }
-                }
-                close TSDBOUND;
-            }
+                    my $sequence = substr $genome{$locus_parsed[0]}, $tsd_b1, $tsd_b2-$tsd_b1; 
+                    print ELEMENT ">$locus_parsed[0]:$tsd_b1-$tsd_b2\n$sequence\n";
 
-            # create the output file
-            if (keys %element_bounds) { # test to see if there are sequences left to print, in theory all the elements could have been deleted because of duplications
-                my $sequence_file_not_oriented = File::Temp->new(UNLINK => 1); # fasta file with element squence but not oriented
+                }
+                close ELEMENT;
+
+                # orient the sequences
                 my $alignment_output_file_name = "$cluster_directory/cluster$cluster_number-aligned_nucleotides.fa";
-                `bedtools getfasta -fi $INPUT_GENOME -bed $TSD_bounds_bed > $sequence_file_not_oriented`;
-                if ($?) { die "ERROR running bedtools getfasta: error code $?\n"}
                 `mafft --adjustdirection --quiet $sequence_file_not_oriented > $alignment_output_file_name`;
                 if ($?) { die "ERROR running MAFFT with --adjustdirection option: error code $?\n"}
-                my $datestring = localtime();
-                print CLREADME "$datestring, File $alignment_output_file_name contains the cluster sequences\n";
             }
+            # # create the output file
+            # if (keys %element_bounds) { # test to see if there are sequences left to print, in theory all the elements could have been deleted because of duplications
+                
+            #     my $alignment_output_file_name = "$cluster_directory/cluster$cluster_number-aligned_nucleotides.fa";
+            #     # `bedtools getfasta -fi $INPUT_GENOME -bed $TSD_bounds_bed > $sequence_file_not_oriented`;
+            #     # if ($?) { die "ERROR running bedtools getfasta: error code $?\n"}
+            #     `mafft --adjustdirection --quiet $sequence_file_not_oriented > $alignment_output_file_name`;
+            #     if ($?) { die "ERROR running MAFFT with --adjustdirection option: error code $?\n"}
+            #     my $datestring = localtime();
+            #     print CLREADME "$datestring, File $alignment_output_file_name contains the cluster sequences\n";
+            # }
         }
-
         unless (keys %element_bounds) { # No sequences were found, move the elements into the rejected folder and remove the cluster folder
             my $datestring = localtime();
             print REJECT "$datestring\t$clustering_info{$cluster_number}[0]\tSTEP 4\tNo genomic location were found for this (these) element(s).\n";
