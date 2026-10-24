@@ -7,7 +7,8 @@ use strict;
 use Getopt::Long;
 use File::Temp qw(tempfile);
 use List::UtilsBy qw(max_by);
-use List::Util qw(max);
+#use List::Util qw(max);
+use List::Util qw(min max);
 use Scalar::Util qw(looks_like_number);
 use Term::Prompt;
 use Term::ReadKey;
@@ -113,7 +114,7 @@ elsif ($STEP == 4) {
         die "ERROR: Expecting folders $current_directry/$ANALYSIS_FOLDER and $current_directry/$ELEMENT_FOLDER would have been created prior to running step $STEP\n"
     }
 }
-elsif (($STEP == 5) or ($STEP == 6)) {
+elsif ($STEP == 5) {
     unless (-d $CLUSTER_FOLDER) {
         die "ERROR: Expecting folder $current_directry/$CLUSTER_FOLDER would have been created prior to running step $STEP\n"
     }
@@ -124,7 +125,7 @@ else {
 
 ## CHECK INPUTS Create or open files to store analysis parameters, and rejected sequences. 
 my $analysis_parameters_file_name = "$ANALYSIS_FOLDER/Analysis_run_and_parameters.txt"; # file to record parameters and how the run went
-my $rejection_file_name = "$ANALYSIS_FOLDER/Rejected_sequences.txt"; # file to store rejected sequences, and why
+my $rejection_file_name = "$ANALYSIS_FOLDER/Rejected_elements.txt"; # file to store rejected sequences, and why
 open (ANALYSIS,'>>', $analysis_parameters_file_name) or die "ERROR: cannot open file $analysis_parameters_file_name\n"; # create or append to file
 open (REJECT, '>>', $rejection_file_name) or die "ERROR, cannot create output file $rejection_file_name\n"; # create or append to file
 
@@ -1318,9 +1319,7 @@ if ($STEP == 4) { # check if this step should be performed or not
     print ANALYSIS "Running STEP 4 on $datestring\n";
     print ANALYSIS "\tGenome: $INPUT_GENOME\n";
     print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
-
-    ## load the genome into memory
-    my $genome = fastatohash($INPUT_GENOME);
+    print ANALYSIS "\tGENOMIC_CONTEXT_LENGTH = $GENOMIC_CONTEXT_LENGTH\n";
 
     ## Read the README files and identify TIRs sequences and TSD  
     # load the element information from the README files
@@ -1430,7 +1429,7 @@ if ($STEP == 4) { # check if this step should be performed or not
     my %genome = fastatohash($INPUT_GENOME); # load the genome into memory
     my $TSD_type; # a number, or a specific sequence
     my $TSD_length;
-    my $TIR_length;
+    #my $TIR_length;
         
     foreach my $cluster_number (keys %clustering_info) { # go through the clusters individually     
 
@@ -1455,7 +1454,7 @@ if ($STEP == 4) { # check if this step should be performed or not
         # get the TIR sequences for this cluster
         my $tir1_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[1]);
         my $tir2_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[2]);
-        $TIR_length = length($tir1_seq);
+        #$TIR_length = length($tir1_seq);
         my $TIRs_set = 1; # boolean, set to 1 if TIR sequence are ok, or zero if not
         if (($tir1_seq =~/n/i) or ($tir2_seq =~ /n/i)) { # if the tir sequences include "n" characters warn the user and stop processing
             print STDERR colored ("WARNING: The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_number}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n", "yellow");
@@ -1537,19 +1536,16 @@ if ($STEP == 4) { # check if this step should be performed or not
                 }
                 if ($b1 and $b2) { # only record if the two TIRs were found facing each other on the same strand
                     if ($b1 < $b2) {
-                        $element_bounds{$parsed_line[0] . "\t" . $b1 . "\t". $b2} = $parsed_line[0] . "\t" . $b1 . "\t". $b2 . "\t" . $cluster_number . "\t" . 0 . "\t" . "+"; 
+                        $element_bounds{"$parsed_line[0]:$b1-$b2"} = $parsed_line[0] . "\t" . $b1 . "\t". $b2 . "\t" . $cluster_number . "\t" . 0 . "\t" . "+"; 
                     }
                     else {
-                        $element_bounds{$parsed_line[0] . "\t" . $b1 . "\t". $b2} = $parsed_line[0] . "\t" . $b2 . "\t". $b1 . "\t" . $cluster_number . "\t" . 0 . "\t" . "-"; 
+                        $element_bounds{"$parsed_line[0]:$b1-$b2"} = $parsed_line[0] . "\t" . $b2 . "\t". $b1 . "\t" . $cluster_number . "\t" . 0 . "\t" . "-"; 
                     }
                 }
             }
             close INPUT;
 
             # remove any sequences that partially overlap each other, unlikely to be full length elements
-            my $TSD_bounds_bed = File::Temp->new(UNLINK => 1); # bed file with TSD bounds
-            my $GENOME_CONTEXT_bounds_bed = File::Temp->new(UNLINK => 1); # bed file with bounds of sequences surrounding each element
-            my $sequence_file_not_oriented = File::Temp->new(UNLINK => 1); # fasta file with element sequences but not oriented
             if (keys %element_bounds) { #only continue if elements have been identified
                 my $element_bounds_bed = File::Temp->new(UNLINK => 1); # bed file with element bounds
                 open (OUTPUT, ">", $element_bounds_bed) or die "ERROR: Cannot open file $element_bounds_bed $!\n";
@@ -1567,13 +1563,14 @@ if ($STEP == 4) { # check if this step should be performed or not
                 while (my $line = <OVERLAP>) {           
                     my @data = split " ", $line;
                     if ($data[6] > 1) { 
-                        my $name = $data[0] . "\t" . $data[1] . "\t". $data[2];
-                        print CLREADME "\tIgnoring sequence because it overlaps with at least one other: $name\n";
+                        my $name = "$data[0]:$data[1]-$data[2]";
+                        print CLREADME "\tIgnoring BLASTn output sequence because it overlaps with at least one other: $name\n";
                         delete $element_bounds{$name};                  
                     }
                 }
 
                 # create a file the element sequences, the sequences will be oriented next
+                my $sequence_file_not_oriented = File::Temp->new(UNLINK => 1); # fasta file with element sequences but not oriented
                 open (ELEMENT, ">", $sequence_file_not_oriented) or die "ERROR: Cannot create file $sequence_file_not_oriented\n";
                 foreach my $locus_name (keys %element_bounds) {
                     my @locus_parsed = split " ", $element_bounds{$locus_name};
@@ -1593,21 +1590,59 @@ if ($STEP == 4) { # check if this step should be performed or not
                 close ELEMENT;
 
                 # orient the sequences
-                my $alignment_output_file_name = "$cluster_directory/cluster$cluster_number-aligned_nucleotides.fa";
-                `mafft --adjustdirection --quiet $sequence_file_not_oriented > $alignment_output_file_name`;
+                # my $alignment_output_file_name = "$cluster_directory/cluster$cluster_number-aligned_nucleotides.fa";
+                my $sequence_file_oriented = File::Temp->new(UNLINK => 1); # fasta file with element sequences oriented
+                `mafft --adjustdirection --quiet $sequence_file_not_oriented > $sequence_file_oriented`;
                 if ($?) { die "ERROR running MAFFT with --adjustdirection option: error code $?\n"}
+
+                # remove duplications by examining the sequences surrounding each element, the "genomic context"
+                my %oriented_sequences = fastatohash($sequence_file_oriented); 
+                my $adjacent_sequences = File::Temp->new(UNLINK => 1); # fasta file with adjacent sequence to each element as value, and element locus as key
+                open (ADJACENT, ">", $adjacent_sequences) or die "ERROR: Cannot create file $adjacent_sequences\n";
+                # get and adjust the bounds of sequences adjacent to each element sequence
+                foreach my $locus_name (keys %oriented_sequences) {
+                    $locus_name =~ /^(_R_)?(\S+):(\d+)-(\d+)/
+                        or die "ERROR: Cannot parse locus name: $locus_name\n";
+
+                    my $rc = defined $1 ? 1 : 0;   # 1 if the sequence should be reverse complemented
+                    my $scaffold = $2;
+                    my ($start, $end) = ($3, $4);
+
+                    my $len = length $genome{$scaffold};
+
+                    # bounds of the two adjacent sequences, clamped to the scaffold edges
+                    my $b1 = max(1,    $start - $GENOMIC_CONTEXT_LENGTH - 1);
+                    my $b2 = max(1,    $start - 1);
+                    my $b3 = min($len, $end + 1);
+                    my $b4 = min($len, $end + $GENOMIC_CONTEXT_LENGTH + 1);
+
+                    my $adjacent_sequence = (substr $genome{$scaffold}, $b1, $b2 - $b1) . (substr $genome{$scaffold}, $b3, $b4 - $b3);
+                    if ($rc) {
+                        $adjacent_sequence = rc($adjacent_sequence);
+                    }
+                    print ADJACENT ">$locus_name\n$adjacent_sequence\n";
+                }
+                close ADJACENT;
+
+                # cluster the adjacent sequences, remove duplicates, and print aligned file without duplicates
+                my $clustering_out_file = File::Temp->new(UNLINK => 1); # output of cd-hit
+                `cd-hit -i $adjacent_sequences -o  $clustering_out_file -T 0`;
+                if ($?) { die "ERROR running cd-hit: error code $?\n"}
+                my %representative_sequences = fastatohash($clustering_out_file); # this will have one representative sequence for each cluster
+                my $aligned_file_name = "$cluster_directory/cluster$cluster_number-aligned_nucleotides.fa";
+                open (OUTPUT, ">", $aligned_file_name) or die "ERROR: Cannot create file $aligned_file_name\n";
+                foreach my $sequence_name (keys %oriented_sequences) {
+                    if (exists $representative_sequences{$sequence_name}) { 
+                        print OUTPUT ">$sequence_name\n";
+                        print OUTPUT "$oriented_sequences{$sequence_name}\n";
+                    }
+                    else {
+                        print CLREADME "\tIgnoring BLASTn output sequence because it is duplicated in the genome: $sequence_name\n";
+                    }
+                }
+                print CLREADME "\tFile $aligned_file_name contains aligned, oriented, and non-duplicated sequences of this cluster\n";
+                close OUTPUT;
             }
-            # # create the output file
-            # if (keys %element_bounds) { # test to see if there are sequences left to print, in theory all the elements could have been deleted because of duplications
-                
-            #     my $alignment_output_file_name = "$cluster_directory/cluster$cluster_number-aligned_nucleotides.fa";
-            #     # `bedtools getfasta -fi $INPUT_GENOME -bed $TSD_bounds_bed > $sequence_file_not_oriented`;
-            #     # if ($?) { die "ERROR running bedtools getfasta: error code $?\n"}
-            #     `mafft --adjustdirection --quiet $sequence_file_not_oriented > $alignment_output_file_name`;
-            #     if ($?) { die "ERROR running MAFFT with --adjustdirection option: error code $?\n"}
-            #     my $datestring = localtime();
-            #     print CLREADME "$datestring, File $alignment_output_file_name contains the cluster sequences\n";
-            # }
         }
         unless (keys %element_bounds) { # No sequences were found, move the elements into the rejected folder and remove the cluster folder
             my $datestring = localtime();
