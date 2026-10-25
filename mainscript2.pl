@@ -28,6 +28,7 @@ use Graph; # use sudo apt install libgraph-perl to install this
 use Term::ANSIColor qw(colored colorstrip);
 use URI::Escape; # this is to handle weird characters
 use POSIX qw(strftime); # to format time 
+use GD::Graph::bars;
 
 ### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
@@ -1714,7 +1715,8 @@ if ($STEP == 5) { # check if this step should be performed or not
                 
                 # Load the nucleotide sequences for this cluster
                 my $nuc_alignment_file_name = $current_cluster_folder . "/" . $cluster_name . "-aligned_nucleotides.fa";
-                my %alignment_sequences = fastatohash($nuc_alignment_file_name); # load the existing alignments
+                my %alignment_sequences = fastatohash($nuc_alignment_file_name); # this variable will hold hold all the selected sequences, it starts with all the sequences, but can change over time
+                my $total_alignment_size = keys(%alignment_sequences); # size of all the sequences in the alignment
 
                 # Set the consensus parameters depending on the size of the alignment
                 if (keys %alignment_sequences == 2) {
@@ -1732,8 +1734,8 @@ if ($STEP == 5) { # check if this step should be performed or not
                 my @menu1_items; # holds the text of menu 1 choices
                 push @menu1_items, "Quit the program"; # item 0
                 push @menu1_items, "Move to the next cluster"; # item 1
-                push @menu1_items, "View the nucleotide alignment file"; # item 2
-                push @menu1_items, "Calculate consensus sequence based on all sequences"; # item 3                                   
+                push @menu1_items, "View the nucleotide alignment file and histogram"; # item 2
+                push @menu1_items, "Select sequences and create consensus"; # item 3                                   
                 push @menu1_items, "Do NCBI BLASTx search on the nr database"; # item 4
                 push @menu1_items, "Find nucleotide alignment sequence(s) with most intact transposase"; # item 5
                 push @menu1_items, "Find transposase in nucleotide sequence"; # item 6
@@ -1744,8 +1746,9 @@ if ($STEP == 5) { # check if this step should be performed or not
                 push @menu1_items, "Extract query sequence from BLASTx output"; # item 11
                 my $menu1 = 1; # boolean, set to one until the user is done with menu 1
                 while ($menu1) {
+                    my $currently_slected_sequence_number = keys (%alignment_sequences);
                     my $menu1_choice = prompt('m', {
-                        title => colored("Reviewing $cluster_name, there are $folders_left clusters left to review of a total of $total_folders", "bold green"),
+                        title => colored("Reviewing $cluster_name, $currently_slected_sequence_number of $total_alignment_size sequences selected, $folders_left of $total_folders clusters left to review", "bold green"),
                         prompt => 'What would you like to do?',
                         display_base => 0,
                         return_base => 0,
@@ -1757,15 +1760,47 @@ if ($STEP == 5) { # check if this step should be performed or not
                     # process answer to menu 1
                     if ($menu1_choice == 0) {
                         `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
+                        `pkill feh`; # kill all previous instances of feh
                         close ANALYSIS;
                         exit;
                     }
                     if ($menu1_choice == 1) { # the user is done with this cluster
                         $menu1 = 0;
                     }
-                    if ($menu1_choice == 2) { # the user wants to see the nucleotide alignment
+                    if ($menu1_choice == 2) { # the user wants to see the nucleotide alignment and histogram
                         `aliview $nuc_alignment_file_name `;
                         if ($?) { die "ERROR: Could not open program aliview: error code $?\n"}
+
+                        # create histogram
+                        my %label_value_pairs; # holds length of the sequence (label) as key and frequency as value
+                        my %all_aligned_sequences = fastatohash($nuc_alignment_file_name); # load all the sequences, historgrams always are of all sequences
+                        foreach my $sequence (keys %all_aligned_sequences) {
+                            my $no_gap_sequence = $all_aligned_sequences{$sequence} =~ s/-//gr;
+                            $label_value_pairs{length $no_gap_sequence} += 1;
+                        }
+                        my @labels = sort { $a <=> $b } keys %label_value_pairs;
+                        my @counts = map { $label_value_pairs{$_} } @labels;
+                        my $max_count = (sort { $b <=> $a } @counts)[0];
+                        my $min_count = (sort { $a <=> $b } @counts)[0];
+                        my $graph = GD::Graph::bars->new(800, 500);
+                        $graph->set(
+                            y_min_value       => $min_count,
+                            y_max_value       => $max_count + 1,
+                            y_tick_number     => ($max_count + 1 > 10 ? 10 : $max_count + 1),
+                            y_plot_values     => 0,    # 1) hide the Y axis numbers
+                            show_values       => 1,    # 2) frequency above each bar
+                            x_labels_vertical => 1,    # 3) vertical X axis labels
+                            bar_spacing       => 2,
+                            transparent       => 0,
+                        ) or die $graph->error;
+                        my $gd = $graph->plot([ \@labels, \@counts ]) or die $graph->error;
+                        my $histogram_outfile = "/tmp/feh.out"; # cannot be a temporary file
+                        open my $fh, '>', $histogram_outfile or die "ERROR: Cannot write $histogram_outfile: $!\n";
+                        binmode $fh;
+                        print $fh $gd->png;
+                        close $fh;
+                        system("feh --geometry 800x500-0-0 '$histogram_outfile' &"); # October 2026, I cannot find a way to capture an error here that still works wit the "prompt" menus
+                        
                         $menu1 = 1; # stay in menu 1
                         $next_step = 3;
                     }
@@ -1853,6 +1888,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                             open (OUTPUT, '>', $nucleotide_inputfile_name) or die "ERROR: Cannot create tempoary file $nucleotide_inputfile_name\n";
                             foreach my $header (keys %alignment_sequences) {
                                 print OUTPUT ">" . $header . "\n";
+                    #### need to change this below ###########
                                 $alignment_sequences{$header} =~ s/-//g; # remove gaps from the sequence
                                 print OUTPUT $alignment_sequences{$header} . "\n";
                             }
