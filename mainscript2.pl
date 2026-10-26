@@ -1455,7 +1455,7 @@ if ($STEP == 4) { # check if this step should be performed or not
         # get the TIR sequences for this cluster
         my $tir1_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[1]);
         my $tir2_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[2]);
-        #$TIR_length = length($tir1_seq);
+        my $TIR_length = length($tir1_seq);
         my $TIRs_set = 1; # boolean, set to 1 if TIR sequence are ok, or zero if not
         if (($tir1_seq =~/n/i) or ($tir2_seq =~ /n/i)) { # if the tir sequences include "n" characters warn the user and stop processing
             print STDERR colored ("WARNING: The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_number}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n", "yellow");
@@ -1471,6 +1471,7 @@ if ($STEP == 4) { # check if this step should be performed or not
         else {
             $TSD_length = length ($TSD_type)
         }
+        print CLREADME "\tTSD type $TSD_type, TSD length $TSD_length, TIR sequences $tir1_seq $tir2_seq\n";
 
         # identify the nucleotide sequences between TIR locations
         if ($TIRs_set) { # only continue if the TIR sequence are ok
@@ -1676,7 +1677,7 @@ my $KNOWN_TNP_DATABASE = "/home/peter/TE-discovery/known_transposases/tnps_seque
 if ($STEP == 5) { # check if this step should be performed or not
     ## update the analysis file with what is going on
     my $datestring = localtime();
-    print ANALYSIS "Running STEP 6 on $datestring\n";
+    print ANALYSIS "Running STEP 5 on $datestring\n";
     
     ## check that all the inputs are ok
     opendir(my $dh, $CLUSTER_FOLDER) or die "ERROR: Cannot open cluster folder $CLUSTER_FOLDER, $!";
@@ -1684,11 +1685,10 @@ if ($STEP == 5) { # check if this step should be performed or not
         die "ERROR: Cannot find the database of known transposases $KNOWN_TNP_DATABASE . This database must formatted with NCBI's makeblastdb.\n";
     }
 
-   # my %seen_tirs; # hash of arrays that has the unique tsd-tir1-tir2 string as key, and array of with data on this combination
     while (readdir $dh) {
         my $cluster_name = $_;
-        #my $cluster_name = "cluster24";
         unless (($cluster_name =~ /^\./) or ($cluster_name =~ /.fa$/)) { # prevents reading invisible files . and .. as well as fasta files in that directory 
+            
             # Setup cluster specific variables
             my $CONSENSUS_LEVEL; # minimum proportion of non-gap positions that must agree to call a position
             my $MIN_FOR_POSITION; # minumum number of nucleotides or amino acids to call a position (not ignore it)
@@ -1702,7 +1702,22 @@ if ($STEP == 5) { # check if this step should be performed or not
             my $current_sequence_name;
             my $tsd_length;  
             my $tir_length;
-            my $next_step = 2; # a guess from the script for the next step the user might want to do 
+            my $TSD_type;
+            my $next_step = 3; # a guess from the script for the next step the user might want to do 
+
+            # read the README file to get the TSD and TIR information
+            my $README_FILE = $CLUSTER_FOLDER . "/$cluster_name" . "/README.txt";  # full path to README file
+            my $info_line = `grep "TSD type" $README_FILE`;
+            if ($info_line =~ /TSD\stype\s(\S+),\sTSD\slength\s(\d+),\sTIR\ssequences\s(\S+)\s\S+/) {
+                $TSD_type = $1;
+                $tsd_length = $2;
+                $tir_length = length ($3);
+            }
+            else {
+                print colored ("WARNING: Could not find TSD and TIR information line in README file\n", "yellow");
+            }
+
+
             unless (-e $cluster_report_path) { # only continue if this cluster does not have a report yet
                 print ANALYSIS "\tStarting review of cluster $cluster_name\n"; # update the analysis log
 
@@ -1711,31 +1726,53 @@ if ($STEP == 5) { # check if this step should be performed or not
                 my $folders_left = $total_folders - $folders_with_report;
 
                 # Variables used accross menu items
-                my $blastx_negative_strand; # used when writting the report 
-                
-                # Load the nucleotide sequences for this cluster
+                my $blastx_negative_strand; # used when writting the report             
                 my $nuc_alignment_file_name = $current_cluster_folder . "/" . $cluster_name . "-aligned_nucleotides.fa";
-                my %alignment_sequences = fastatohash($nuc_alignment_file_name); # this variable will hold hold all the selected sequences, it starts with all the sequences, but can change over time
-                my $total_alignment_size = keys(%alignment_sequences); # size of all the sequences in the alignment
+                my %alignment_sequences = fastatohash($nuc_alignment_file_name); # this variable will hold hold all the selected sequences
+                my %selected_sequences = %alignment_sequences; # sequences selected for analysis, starts off with all the sequences
 
-                # Set the consensus parameters depending on the size of the alignment
-                if (keys %alignment_sequences == 2) {
-                    $MIN_FOR_POSITION = 1;
-                    $CONSENSUS_LEVEL = 0.6
-                }
-                else {
-                    $MIN_FOR_POSITION = 2;
-                    $CONSENSUS_LEVEL = 0.6
-                }
-
+                # remove any open windows from previous runs
                 `pkill java`; # kill a previous aliview window, this could be dangerous in the long run otherwise
-
+                `pkill feh`; # kill all previous instances of feh
+                
+                # create histogram
+                my %label_value_pairs; # holds length of the sequence (label) as key and frequency as value
+                my %length_to_name; # holds the sequence length as key and an array with the names of the sequences as values
+                my %all_aligned_sequences = fastatohash($nuc_alignment_file_name); # load all the sequences, historgrams always are of all sequences
+                foreach my $sequence_name (keys %all_aligned_sequences) {
+                    my $no_gap_sequence = $all_aligned_sequences{$sequence_name} =~ s/-//gr;
+                    $label_value_pairs{length $no_gap_sequence} += 1;
+                    push @{ $length_to_name{length $no_gap_sequence}}, $sequence_name;
+                }
+                my @labels = sort { $a <=> $b } keys %label_value_pairs; # lables are the lengths of the sequences
+                my @counts = map { $label_value_pairs{$_} } @labels;
+                my $max_count = (sort { $b <=> $a } @counts)[0];
+                my $min_count = (sort { $a <=> $b } @counts)[0];
+                my $graph = GD::Graph::bars->new(800, 500);
+                $graph->set(
+                    y_min_value       => $min_count,
+                    y_max_value       => $max_count + 1,
+                    y_tick_number     => ($max_count + 1 > 10 ? 10 : $max_count + 1),
+                    y_plot_values     => 0,    # 1) hide the Y axis numbers
+                    show_values       => 1,    # 2) frequency above each bar
+                    x_labels_vertical => 1,    # 3) vertical X axis labels
+                    bar_spacing       => 2,
+                    transparent       => 0,
+                ) or die $graph->error;
+                my $gd = $graph->plot([ \@labels, \@counts ]) or die $graph->error;
+                my $histogram_outfile = "/tmp/feh.out"; # cannot be a temporary file
+                open my $fh, '>', $histogram_outfile or die "ERROR: Cannot write $histogram_outfile: $!\n";
+                binmode $fh;
+                print $fh $gd->png;
+                close $fh;
+                system("feh --geometry 800x500-0-0 '$histogram_outfile' &"); # October 2026, I cannot find a way to capture an error here that still works wit the "prompt" menus
+                
                 # Setup and display menu 1
                 my @menu1_items; # holds the text of menu 1 choices
                 push @menu1_items, "Quit the program"; # item 0
                 push @menu1_items, "Move to the next cluster"; # item 1
-                push @menu1_items, "View the nucleotide alignment file and histogram"; # item 2
-                push @menu1_items, "Select sequences and create consensus"; # item 3                                   
+                push @menu1_items, "View the nucleotide alignment file of selected sequences"; # item 2
+                push @menu1_items, "Create consensus based on selected sequences"; # item 3                                   
                 push @menu1_items, "Do NCBI BLASTx search on the nr database"; # item 4
                 push @menu1_items, "Find nucleotide alignment sequence(s) with most intact transposase"; # item 5
                 push @menu1_items, "Find transposase in nucleotide sequence"; # item 6
@@ -1746,9 +1783,10 @@ if ($STEP == 5) { # check if this step should be performed or not
                 push @menu1_items, "Extract query sequence from BLASTx output"; # item 11
                 my $menu1 = 1; # boolean, set to one until the user is done with menu 1
                 while ($menu1) {
-                    my $currently_slected_sequence_number = keys (%alignment_sequences);
+                    my $currently_selected_sequence_number = keys (%selected_sequences);
+                    my $total_alignment_size = keys(%alignment_sequences); # size of all the sequences in the alignment
                     my $menu1_choice = prompt('m', {
-                        title => colored("Reviewing $cluster_name, $currently_slected_sequence_number of $total_alignment_size sequences selected, $folders_left of $total_folders clusters left to review", "bold green"),
+                        title => colored("Reviewing $cluster_name, $currently_selected_sequence_number of $total_alignment_size sequences selected, $folders_left of $total_folders clusters left to review", "bold green"),
                         prompt => 'What would you like to do?',
                         display_base => 0,
                         return_base => 0,
@@ -1768,58 +1806,90 @@ if ($STEP == 5) { # check if this step should be performed or not
                         $menu1 = 0;
                     }
                     if ($menu1_choice == 2) { # the user wants to see the nucleotide alignment and histogram
-                        `aliview $nuc_alignment_file_name `;
+                        my $selected_sequences_file = "/tmp/aliview.fa"; # file name to display
+                        my $trimmed_sequence_file = "/tmp/trimmed.fa";
+                        open (OUTPUT, ">", $selected_sequences_file) or die "ERROR: cannot create temparary file $selected_sequences_file\n";
+                        foreach my $sequence_name (keys %selected_sequences) {
+                            print OUTPUT ">$sequence_name\n";
+                            print OUTPUT "$selected_sequences{$sequence_name}\n";
+                        }
+                        close OUTPUT;
+                        `trimal -in $selected_sequences_file -out $trimmed_sequence_file -noallgaps -keepheader`;
+                        if ($?) { 
+                            print colored ("WARNING: Could not find program trimal, alignment not trimmed\n", "yellow");
+                            $trimmed_sequence_file = $selected_sequences_file;
+                        }
+                        `aliview $trimmed_sequence_file`;
                         if ($?) { die "ERROR: Could not open program aliview: error code $?\n"}
 
-                        # create histogram
-                        my %label_value_pairs; # holds length of the sequence (label) as key and frequency as value
-                        my %all_aligned_sequences = fastatohash($nuc_alignment_file_name); # load all the sequences, historgrams always are of all sequences
-                        foreach my $sequence (keys %all_aligned_sequences) {
-                            my $no_gap_sequence = $all_aligned_sequences{$sequence} =~ s/-//gr;
-                            $label_value_pairs{length $no_gap_sequence} += 1;
-                        }
-                        my @labels = sort { $a <=> $b } keys %label_value_pairs;
-                        my @counts = map { $label_value_pairs{$_} } @labels;
-                        my $max_count = (sort { $b <=> $a } @counts)[0];
-                        my $min_count = (sort { $a <=> $b } @counts)[0];
-                        my $graph = GD::Graph::bars->new(800, 500);
-                        $graph->set(
-                            y_min_value       => $min_count,
-                            y_max_value       => $max_count + 1,
-                            y_tick_number     => ($max_count + 1 > 10 ? 10 : $max_count + 1),
-                            y_plot_values     => 0,    # 1) hide the Y axis numbers
-                            show_values       => 1,    # 2) frequency above each bar
-                            x_labels_vertical => 1,    # 3) vertical X axis labels
-                            bar_spacing       => 2,
-                            transparent       => 0,
-                        ) or die $graph->error;
-                        my $gd = $graph->plot([ \@labels, \@counts ]) or die $graph->error;
-                        my $histogram_outfile = "/tmp/feh.out"; # cannot be a temporary file
-                        open my $fh, '>', $histogram_outfile or die "ERROR: Cannot write $histogram_outfile: $!\n";
-                        binmode $fh;
-                        print $fh $gd->png;
-                        close $fh;
-                        system("feh --geometry 800x500-0-0 '$histogram_outfile' &"); # October 2026, I cannot find a way to capture an error here that still works wit the "prompt" menus
-                        
                         $menu1 = 1; # stay in menu 1
                         $next_step = 3;
                     }
                     
-                    if ($menu1_choice == 3) { # the user wants make a consensus based on all the sequences in the alignment                            
-                        # Turn this fasta file into a single text file, this is so that it's consistent with the clipboard entry of fasta files.
-                        my $fasta_text; 
-                        foreach my $sequence_name (keys %alignment_sequences){ 
-                            if ($sequence_name =~ /\d_(\d+)_\d+$/) { # only add sequences that have DNA and record the TSD length
-                                $fasta_text .= ">$sequence_name\n" . "$alignment_sequences{$sequence_name}\n";
+                    if ($menu1_choice == 3) { # the user wants make a consensus based on all or certain sequences
+                        # read and parse the size ranges to include in the consensus
+                        my $selected_sequence_sizes = prompt('x', "Enter sequence size or range, separated by commas", "", "all");
+                        my @sequence_lengths; # holds the nucleotides sizes to include
+                        if ($selected_sequence_sizes =~ /all/) { # add all the sizes
+                            @sequence_lengths = @labels; # this is from the histogram, getting all the sizes
+                        }
+                        else { # add only selected sizes
+                            for my $part (split /\s*,\s*/, $selected_sequence_sizes) {
+                                $part =~ s/^\s+|\s+$//g;    # trim whitespace
+                                next if $part eq '';
+                                if ($part =~ /^(\d+)\s*-\s*(\d+)$/) {
+                                    my ($start, $end) = ($1, $2);
+                                    ($start, $end) = ($end, $start) if $start > $end;
+                                    push @sequence_lengths, $start .. $end;
+                                }
+                                elsif ($part =~ /^\d+$/) {
+                                    push @sequence_lengths, $part;
+                                }
+                                else {
+                                    warn "Skipping unrecognized range: '$part'\n";
+                                }
                             }
                         }
-                        if (defined $fasta_text && length $fasta_text) { 
-                            ($current_nucleotide_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
-                            print colored ("\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$current_nucleotide_sequence\n\n", "bold");
+
+                        # add selected sequences to %selected_sequences
+                        %selected_sequences = ();
+                        for my $length (@sequence_lengths) {
+                            if (exists $length_to_name{$length}) {
+                               foreach my $sequence_name (@{ $length_to_name{$length} }) {
+                                    $selected_sequences{$sequence_name} = $alignment_sequences{$sequence_name};
+                               }
+                            }
+                            else {
+                                print colored ("WARNING: sequence size $length does not exist for this cluster, ignoring it\n", "yellow");
+                            }
+                        }                         
+                           
+                        # Set the consensus parameters depending on the size of the alignment
+                        if (keys %selected_sequences == 2) {
+                            $MIN_FOR_POSITION = 1;
+                            $CONSENSUS_LEVEL = 0.6
                         }
                         else {
-                            warn "File $nuc_alignment_file_name does not contain fasta formated sequences.\n"; 
+                            $MIN_FOR_POSITION = 2;
+                            $CONSENSUS_LEVEL = 0.6
                         }
+                        
+                        # Turn this fasta file into a single text file, this is so that it's consistent with the clipboard entry of fasta files.
+                        my $fasta_text; 
+                        foreach my $sequence_name (keys %selected_sequences){ 
+                            #if ($sequence_name =~ /\d_(\d+)_\d+$/) { # only add sequences that have DNA and record the TSD length
+                                $fasta_text .= ">$sequence_name\n" . "$selected_sequences{$sequence_name}\n";
+                            #}
+                        }
+                        if (defined $fasta_text && length $fasta_text) { 
+                            ($current_nucleotide_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n', $tsd_length, $tir_length); # get the consensus
+                            print colored ("\n>consensus-$selected_sequence_sizes\n$current_nucleotide_sequence\n\n", "bold");
+                        }
+                        else { # no sequences were selected
+                            %selected_sequences = %alignment_sequences;
+                            print colored "WARNING: No sequences were selected, defaulting back to selecting all sequences\n"; 
+                        }
+
                         $menu1 = 1; # stay in menu 1
                         $next_step = 4;
                     }
@@ -2690,7 +2760,7 @@ sub adjust_alignment {
 # Take a fasta file as a single text file as input and returns a consensus sequence
 sub consensus {
 
-    my ($text, $consensus_level, $min_for_position, $reverse_complement, $type) = @_; # text with fasta file and parameters
+    my ($text, $consensus_level, $min_for_position, $reverse_complement, $type, $tsd_length, $tir_length) = @_; # text with fasta file and parameters
         
     ### Parse the fasta text
     my %sequences;
@@ -2777,17 +2847,19 @@ sub consensus {
     }
 
     # Determine the lengths of the TSD and TIR sequences from the header
-    my $tir_length;
-    my $tsd_length;
-    ($header) = keys %sequences; # random header with the TSD and TIR information  
-    if ($header =~ /\d+_(\d+)_(\d+)$/) {
-        $tsd_length = $1;
-        $tir_length = $2;
-    } 
-    else {
-        warn "WARNING: could not determine the TSD and TIR length from the header below\n$header\n";
-        $tsd_length = 0;
-        $tir_length = 0;
+#    my $tir_length;
+#    my $tsd_length;
+    unless ($tir_length and $tsd_length) { # determine the TSD and TIR length from header unless it's been specified
+        ($header) = keys %sequences; # random header with the TSD and TIR information  
+        if ($header =~ /\d+_(\d+)_(\d+)$/) {
+            $tsd_length = $1;
+            $tir_length = $2;
+        } 
+        else {
+           warn "WARNING: could not determine the TSD and TIR length from the header below\n$header\n";
+            $tsd_length = 0;
+            $tir_length = 0;
+        }
     }
 
     # Remove the TSD sequences from the consensus
