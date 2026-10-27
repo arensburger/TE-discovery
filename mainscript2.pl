@@ -1956,11 +1956,11 @@ if ($STEP == 5) { # check if this step should be performed or not
                             # Copy alignment file to temporary file and remove gaps
                             my $nucleotide_inputfile_name = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); 
                             open (OUTPUT, '>', $nucleotide_inputfile_name) or die "ERROR: Cannot create tempoary file $nucleotide_inputfile_name\n";
-                            foreach my $header (keys %alignment_sequences) {
+                            foreach my $header (keys %selected_sequences) {
                                 print OUTPUT ">" . $header . "\n";
-                    #### need to change this below ###########
-                                $alignment_sequences{$header} =~ s/-//g; # remove gaps from the sequence
-                                print OUTPUT $alignment_sequences{$header} . "\n";
+                                my $no_gap_sequence = $selected_sequences{$header}; # copy the relevant sequence over before changing it
+                                $no_gap_sequence =~ s/-//g; # remove gaps 
+                                print OUTPUT "$no_gap_sequence\n";
                             }
                             close OUTPUT;
 
@@ -2005,16 +2005,11 @@ if ($STEP == 5) { # check if this step should be performed or not
                         $current_sequence_name = prompt('x', "Enter either an alignment sequence name or input 0 to enter a nucleotide sequence instead:", "", "$current_sequence_name");
                         if ($current_sequence_name) {
                             if (exists $alignment_sequences{$current_sequence_name}) {
+                                # clean up the sequence
                                 $current_nucleotide_sequence = uc($alignment_sequences{$current_sequence_name});
                                 $current_nucleotide_sequence =~ s/-//g; # remove any gaps from the sequence
                                 # Remove the TSD sequences from the nucleotide sequence
-                                if ($current_sequence_name =~ /\d+_(\d+)_\d+$/) {
-                                    $tsd_length = $1;
-                                    $current_nucleotide_sequence = substr $current_nucleotide_sequence, $tsd_length, (length $current_nucleotide_sequence) - (2*$tsd_length);
-                                } 
-                                else {
-                                    warn "WARNING: TSD length could not be determined from the title below, TSD sequences not removed\n$current_sequence_name\n";
-                                }
+                                $current_nucleotide_sequence = substr $current_nucleotide_sequence, $tsd_length, (length $current_nucleotide_sequence) - (2*$tsd_length);
                             }
                             else {
                                 warn "Error: Did not get a nucleotide sequence\n";
@@ -2142,17 +2137,10 @@ if ($STEP == 5) { # check if this step should be performed or not
                         }
                         else {
                             if (exists $alignment_sequences{$current_sequence_name}) {
-                                if ($current_sequence_name =~ /\S+_\d+_(\d+)_(\d+)/) {
-                                    $tsd_length  = $1;
-                                    $tir_length = $2;
                                     $current_nucleotide_sequence = uc($alignment_sequences{$current_sequence_name});
                                     $current_nucleotide_sequence =~ s/-//g; # remove any gaps from the sequence
                                     $current_nucleotide_sequence = substr $current_nucleotide_sequence, $tsd_length, (length $current_nucleotide_sequence) - (2*$tsd_length); # remove the TSDs
                                     $notes .= "Reference nucleotide sequence is $current_sequence_name\n";
-                                }
-                                else {
-                                    die "ERROR: Could not parse the TSD and TIR lengths from name $current_sequence_name\n";
-                                }
                             }
                             else {
                                 print colored ("WARNING: The current alignment does not have a sequence called $current_sequence_name. The report will not be printed\n", "yellow");
@@ -2241,7 +2229,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                             my $TSD_idx = prompt('m',
                                 {
                                     title        => '',
-                                    prompt       => 'Enter the TSD type:',
+                                    prompt       => 'Enter the TSD type (In step 3 it was identified as $TSD_type):',
                                     items        => \@TSD_items,
                                     display_base => 1,
                                     return_base  => 1,
@@ -2258,8 +2246,6 @@ if ($STEP == 5) { # check if this step should be performed or not
                             }
 
                             # Get the taxonomy
-                            
-
                             my @taxonomy_items = qw(Tc tigger mariner hAT other unknown blank);
                             my $taxonomy_idx = prompt('m',
                                 {
