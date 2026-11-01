@@ -1760,7 +1760,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                     transparent       => 0,
                 ) or die $graph->error;
                 my $gd = $graph->plot([ \@labels, \@counts ]) or die $graph->error;
-                my $histogram_outfile = "/tmp/feh.out"; # cannot be a temporary file
+                my $histogram_outfile = $current_cluster_folder . "/histogram.png"; # cannot be a temporary file
                 open my $fh, '>', $histogram_outfile or die "ERROR: Cannot write $histogram_outfile: $!\n";
                 binmode $fh;
                 print $fh $gd->png;
@@ -2121,15 +2121,23 @@ if ($STEP == 5) { # check if this step should be performed or not
                     if ($menu1_choice == 7) { # print report
                         my $notes; # text to add to the Notes section of the report   
                         my $continue_report = 1; # boolean used to abort the report if problems arrise
+                        my $autonomous_element; # boolean set to 0 if it's a MITE set to 1 if it's an autonomous element 
 
-                        # Get the nucleotide sequence the user wants to use 
-                        $current_sequence_name = uc(prompt('x', "Enter full name of the alignment sequence to use, enter 0 to enter a different kind of sequence, of -1 to abort this step:", "", "$current_sequence_name"));
+                        # Figure out if this an autonomous element or a MITE
+                        my $MIN_AUTONOMOUS_SIZE = 1000; # size in bp below which the sequences is likely a MITE rather than an autonomous element
+                        my $default_answer = 'y'; # default answer to the MITE vs autonomous
+                        if ($current_nucleotide_sequence < $MIN_AUTONOMOUS_SIZE) {
+                            $default_answer = 'n';
+                        }
+                        $autonomous_element = prompt('y', 'Is this an autonomous element sequence?', '', $default_answer);
+                        # Get the reference nucleotide sequence the user wants to use 
+                        $current_sequence_name = uc(prompt('x', "Reference nucleotide sequence. Either input the name of an alignment sequence or 0 for another type of sequence: ", "", "$current_sequence_name"));
                         my $TIR1seq; # TIR sequences to use in the report
                         my $TIR2seq;
                         if ($current_sequence_name eq "0") { # user want to enter a sequence manually
-                            $current_nucleotide_sequence = prompt('x', "Enter the nucleotide sequence without TSDs:", "", "$current_nucleotide_sequence");
+                            $current_nucleotide_sequence = prompt('x', "Enter the nucleotide sequence without TSDs (-1 to abort):", "", "$current_nucleotide_sequence");
                             $current_nucleotide_sequence = uc($current_nucleotide_sequence);
-                            $tir_length = prompt('n', "Enter the length of the TIRs at the end of the sequence:", "", "$tir_length");
+                           # $tir_length = prompt('n', "Enter the length of the TIRs at the end of the sequence:", "", "$tir_length");
                             $notes .= "Reference nucleotide sequence is not one of the alignment sequences\n";
                         }
                         elsif ($current_sequence_name eq "-1") { # user wants to abort
@@ -2143,7 +2151,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                                     $notes .= "Reference nucleotide sequence is $current_sequence_name\n";
                             }
                             else {
-                                print colored ("WARNING: The current alignment does not have a sequence called $current_sequence_name. The report will not be printed\n", "yellow");
+                                print colored ("WARNING: The current alignment does not have a sequence called $current_sequence_name. This report will not be printed\n", "yellow");
                                 $continue_report = 0;
                             }
                         }
@@ -2164,88 +2172,91 @@ if ($STEP == 5) { # check if this step should be performed or not
                             }
                         }
 
-                        # Get the transposase information
+                        # Get the transposase information if it's an autonomous element
                         my $transposase;
-                        if ($continue_report) {
-                            $transposase = prompt('x', "Enter the transposase sequence:", "", "none");
-                            unless ($transposase eq "none") {
+                        if ($autonomous_element) { # only continue if it's an autonomous element 
+                            if ($continue_report) {
+                                $transposase = prompt('x', "Enter the transposase sequence:", "", "none");
+                                unless ($transposase eq "none") {
 
-                                # Check that the transposase and the nucleotide sequences are in the same orientation and align well
-                                my $protein_input_file = fasta_tempfile($transposase);
-                                my $nucleotide_input_file = fasta_tempfile($current_nucleotide_sequence);
-                                my $blastx_output = `blastx -subject $protein_input_file -query $nucleotide_input_file -outfmt "6 length qframe"`;
-                                my @blastx_array = split "\n", $blastx_output;
-                                my @topline_data = split " ", $blastx_array[0];
-                                my $match_proportion = $topline_data[0]/(length $transposase);
-                                if (($topline_data[1] < 0) or ($match_proportion < 0.75)) {
-                                    print colored ("WARNING: The nucleotide sequence and transposase don't seem to match:\n", "yellow");
-                                    print colored ("Transpoase orientation: $topline_data[1]\n", "bold");
-                                    print colored ("Proportion of transpoase mapping to nucleotide: $match_proportion\n", "bold");
-                                    $continue_report = prompt('y', 'Should printing this report be continued?', '', 'n');
-                                }
+                                    # Check that the transposase and the nucleotide sequences are in the same orientation and align well
+                                    my $protein_input_file = fasta_tempfile($transposase);
+                                    my $nucleotide_input_file = fasta_tempfile($current_nucleotide_sequence);
+                                    my $blastx_output = `blastx -subject $protein_input_file -query $nucleotide_input_file -outfmt "6 length qframe"`;
+                                    my @blastx_array = split "\n", $blastx_output;
+                                    my @topline_data = split " ", $blastx_array[0];
+                                    my $match_proportion = $topline_data[0]/(length $transposase);
+                                    if (($topline_data[1] < 0) or ($match_proportion < 0.75)) {
+                                        print colored ("WARNING: The nucleotide sequence and transposase don't seem to match:\n", "yellow");
+                                        print colored ("Transpoase orientation: $topline_data[1]\n", "bold");
+                                        print colored ("Proportion of transpoase mapping to nucleotide: $match_proportion\n", "bold");
+                                        $continue_report = prompt('y', 'Should printing this report be continued?', '', 'n');
+                                    }
 
-                                if ($continue_report) {
-                                    my $default_transposase_full = 'n'; # guessing if the transposase is full length
-                                    my $default_transposase_intact = 'n'; # guessing if the transposase is intact
-                                    my $trimmed = substr($transposase, 0, -1); # remove the last character
-                                    my $count_stops = () = $trimmed =~ /\*/g; # count the number of * characters
-                                    if ($transposase =~ /^M.+\*$/) { # check that the transposes starts with M and ends with *
-                                        $default_transposase_full = 'y';
-                                    }
-                                    if ($count_stops == 0) { # check if there are stop codons other than at the end of the transpoase
-                                        $default_transposase_intact = 'y';
-                                    }
-                                    my $full_length_protein = prompt('y', 'Is this likely a full length transposase?', '', $default_transposase_full);
-                                    if ($full_length_protein) {
-                                        $notes .= "Full length transposase\n";
-                                    }
-                                    else {
-                                        $notes .= "Partial transposase\n";
-                                    }
-                                    my $intact_protein = prompt('y', 'Is the transpoase sequence likely intact?', '', $default_transposase_intact);
-                                    if ($intact_protein) {
-                                        $notes .= "Transposase sequence is intact\n";
-                                    }
-                                    else {
-                                        $notes .= "Transposase sequence is not intact\n";
+                                    if ($continue_report) {
+                                        my $default_transposase_full = 'n'; # guessing if the transposase is full length
+                                        my $default_transposase_intact = 'n'; # guessing if the transposase is intact
+                                        my $trimmed = substr($transposase, 0, -1); # remove the last character
+                                        my $count_stops = () = $trimmed =~ /\*/g; # count the number of * characters
+                                        if ($transposase =~ /^M.+\*$/) { # check that the transposes starts with M and ends with *
+                                            $default_transposase_full = 'y';
+                                        }
+                                        if ($count_stops == 0) { # check if there are stop codons other than at the end of the transpoase
+                                            $default_transposase_intact = 'y';
+                                        }
+                                        my $full_length_protein = prompt('y', 'Is this likely a full length transposase?', '', $default_transposase_full);
+                                        if ($full_length_protein) {
+                                            $notes .= "Full length transposase\n";
+                                        }
+                                        else {
+                                            $notes .= "Partial transposase\n";
+                                        }
+                                        my $intact_protein = prompt('y', 'Is the transpoase sequence likely intact?', '', $default_transposase_intact);
+                                        if ($intact_protein) {
+                                            $notes .= "Transposase sequence is intact\n";
+                                        }
+                                        else {
+                                            $notes .= "Transposase sequence is not intact\n";
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        if ($continue_report) { # only continue if not fatal errors have been generated
-                            # Get the TSD type
-                            my $default_tsd = 1; # trying to guess what the TSD will be
-                            my $default_taxonomy = 1; # trying to guess what the taxonomy will be
-                            if ($tsd_length == 8) {
-                                $default_tsd = 8;
-                                $default_taxonomy = 4;
-                            }
-                            elsif ($tsd_length == 2) {
-                                $default_tsd = 1;
-                                $default_taxonomy = 1;
-                            }
-                            my @TSD_items = qw(TA 2 3 4 5 6 7 8 9 10 blank);
-                            my $TSD_idx = prompt('m',
-                                {
-                                    title        => '',
-                                    prompt       => 'Enter the TSD type (In step 3 it was identified as $TSD_type):',
-                                    items        => \@TSD_items,
-                                    display_base => 1,
-                                    return_base  => 1,
-                                },
-                                'Choose TA or a number between 2 and 10',
-                                $default_tsd);
+                        if ($continue_report) { # only continue if no fatal errors have been generated
+                            
+                            # # Get the TSD type
+                            # my $default_tsd = 1; # trying to guess what the TSD will be
+                            # my $default_taxonomy = 1; # trying to guess what the taxonomy will be
+                            # if ($tsd_length == 8) {
+                            #     $default_tsd = 8;
+                            #     $default_taxonomy = 4;
+                            # }
+                            # elsif ($tsd_length == 2) {
+                            #     $default_tsd = 1;
+                            #     $default_taxonomy = 1;
+                            # }
+                            # my @TSD_items = qw(TA 2 3 4 5 6 7 8 9 10 blank);
+                            # my $TSD_idx = prompt('m',
+                            #     {
+                            #         title        => '',
+                            #         prompt       => 'Enter the TSD type (In step 3 it was identified as $TSD_type):',
+                            #         items        => \@TSD_items,
+                            #         display_base => 1,
+                            #         return_base  => 1,
+                            #     },
+                            #     'Choose TA or a number between 2 and 10',
+                            #     $default_tsd);
 
-                            my $TSD_type = $TSD_items[$TSD_idx - 1];  # subtract return_base to get 0-indexed
-                            if ($TSD_type == 8) {
-                                my $TA_TSD = prompt('y', 'Do the TSDs have TA at positions 4 and 5?', '', 'n');
-                                if ($TA_TSD) {
-                                    $notes .= "TSDs have TA at positions 4 and 5\n";
-                                }
-                            }
+                            # my $TSD_type = $TSD_items[$TSD_idx - 1];  # subtract return_base to get 0-indexed
+                            # if ($TSD_type == 8) {
+                            #     my $TA_TSD = prompt('y', 'Do the TSDs have TA at positions 4 and 5?', '', 'n');
+                            #     if ($TA_TSD) {
+                            #         $notes .= "TSDs have TA at positions 4 and 5\n";
+                            #     }
+                            # }
 
-                            # Get the taxonomy
+                            ## Get the taxonomy
                             my @taxonomy_items = qw(Tc tigger mariner hAT other unknown blank);
                             my $taxonomy_idx = prompt('m',
                                 {
@@ -2256,7 +2267,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                                     return_base  => 1,
                                 },
                                 '',
-                                $default_taxonomy);
+                                '');
 
                             my $taxonomy = $taxonomy_items[$taxonomy_idx - 1];
                             if ($taxonomy eq "other") {
@@ -2264,37 +2275,58 @@ if ($STEP == 5) { # check if this step should be performed or not
                                 $notes .= "Taxonomy note: $taxonomy_note\n";
                             }
 
-                            # Create the report
-                            open (OUTPUT, '>', $cluster_report_path) or die "ERROR: Cannot create report at $cluster_report_path\n";
-                            print OUTPUT "# Report $cluster_name\n";
-                            print OUTPUT "## Nucleotide sequence:\n";
+                            ## Create the report
+                            # figure out the title
+                            my $report_title=0; # boolean set to 1 if the report has not yet been written and needs a title
+                            unless (-e $cluster_report_path) {
+                                $report_title=1;
+                            }
+                            open (OUTPUT, '>>', $cluster_report_path) or die "ERROR: Cannot create report at $cluster_report_path\n";
+                            if ($report_title) {
+                                print OUTPUT "# Report $cluster_name\n";
+                            }
+
+                            # print the type of element
+                            if ($autonomous_element) {
+                                print OUTPUT "## autonomous element\n";
+                            }
+                            else {
+                                print OUTPUT "## non-autonomous element\n";
+                            }
+
+                            print OUTPUT "### Nucleotide sequence:\n";
                             print OUTPUT "$current_nucleotide_sequence\n";
-                            print OUTPUT "## TSD Type\n";
+                            print OUTPUT "### TSD Type\n";
                             if ($TSD_type eq "blank") {
                                 print OUTPUT "\n";
                             }
                             else {
                                 print OUTPUT "$TSD_type\n";
                             }
-                            print OUTPUT "## TIR sequences\n";
+                            print OUTPUT "### TIR sequences\n";
                             print OUTPUT "- 5' TIR: $TIR1seq\n";
                             print OUTPUT "- 3' TIR: $TIR2seq\n";
-                            print OUTPUT "## Protein sequence\n";
-                            print OUTPUT "$transposase\n";
-                            print OUTPUT "## Element taxonomy:\n";
+
+                            if ($autonomous_element) {
+                                print OUTPUT "### Transposase sequence\n";
+                                print OUTPUT "$transposase\n";
+                            }
+                            print OUTPUT "### Element taxonomy:\n";
                             if ($taxonomy eq "blank") {
                                 print OUTPUT "\n";
                             }
                             else {
                                 print OUTPUT "$taxonomy\n";
                             }
-                            print OUTPUT "## Notes:\n";
+                            print OUTPUT "### Notes:\n";
                             print OUTPUT $notes;
+
+                            print OUTPUT "\n---\n"; # divider at the end of the current seqeuence
                             close (OUTPUT);
 
                             # Update the user and the analysis log
-                            print "Report written to $cluster_report_path\n";
-                            print ANALYSIS "\tReport written to $cluster_report_path\n"; # update the analysis log
+                            print "Report written/updated to $cluster_report_path\n";
+                            print ANALYSIS "\tReport written/updated to $cluster_report_path\n"; # update the analysis log
                         }
 
                         $menu1 = 1; # stay in menu 1
