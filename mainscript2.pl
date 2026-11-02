@@ -1673,6 +1673,7 @@ my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must a
 my $MIN_FOR_POSITION = 2; # minumum number of nucleotides or amino acids to call a position (not ignore it)
 my $RVCMP; # optional, reverse complement the fasta file input
 my $KNOWN_TNP_DATABASE = "/home/peter/TE-discovery/known_transposases/tnps_sequences.fa"; # location of known transpoase sequences, fomated with makeblastdb
+my $MIN_AUTONOMOUS_SIZE = 1000; # size in bp below which the sequences is likely a MITE rather than an autonomous element
 
 if ($STEP == 5) { # check if this step should be performed or not
     ## update the analysis file with what is going on
@@ -1704,6 +1705,7 @@ if ($STEP == 5) { # check if this step should be performed or not
             my $tir_length;
             my $TSD_type;
             my $next_step = 3; # a guess from the script for the next step the user might want to do 
+            my $repoen_report = 0; # boolean, set to 1 if the user want an exising report reopened
 
             # read the README file to get the TSD and TIR information
             my $README_FILE = $CLUSTER_FOLDER . "/$cluster_name" . "/README.txt";  # full path to README file
@@ -1717,8 +1719,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                 print colored ("WARNING: Could not find TSD and TIR information line in README file\n", "yellow");
             }
 
-
-            unless (-e $cluster_report_path) { # only continue if this cluster does not have a report yet
+            if (!-e $cluster_report_path) { # only continue if this cluster does not have a report yet, the user wants to reopen a report
                 print ANALYSIS "\tStarting review of cluster $cluster_name\n"; # update the analysis log
 
                 # update the user on how many folders are left to review
@@ -1730,6 +1731,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                 my $nuc_alignment_file_name = $current_cluster_folder . "/" . $cluster_name . "-aligned_nucleotides.fa";
                 my %alignment_sequences = fastatohash($nuc_alignment_file_name); # this variable will hold hold all the selected sequences
                 my %selected_sequences = %alignment_sequences; # sequences selected for analysis, starts off with all the sequences
+                my $element_name_number=0; # number used to give each element in this cluster a unique name
 
                 # remove any open windows from previous runs
                 `pkill java`; # kill a previous aliview window, this could be dangerous in the long run otherwise
@@ -1778,9 +1780,8 @@ if ($STEP == 5) { # check if this step should be performed or not
                 push @menu1_items, "Find transposase in nucleotide sequence"; # item 6
                 push @menu1_items, "Create report"; # item 7
                 push @menu1_items, "Open report in text editor"; # item 8
-                push @menu1_items, "Calculate consensus sequence based on selected sequences"; # item 8
-                push @menu1_items, "Change consensus sequence parameters"; # item 10
-                push @menu1_items, "Extract query sequence from BLASTx output"; # item 11
+                push @menu1_items, "Calculate consensus sequence based on selected sequences"; # item 9
+                push @menu1_items, "Extract query sequence from BLASTx output"; # item 10
                 my $menu1 = 1; # boolean, set to one until the user is done with menu 1
                 while ($menu1) {
                     my $currently_selected_sequence_number = keys (%selected_sequences);
@@ -1877,9 +1878,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                         # Turn this fasta file into a single text file, this is so that it's consistent with the clipboard entry of fasta files.
                         my $fasta_text; 
                         foreach my $sequence_name (keys %selected_sequences){ 
-                            #if ($sequence_name =~ /\d_(\d+)_\d+$/) { # only add sequences that have DNA and record the TSD length
-                                $fasta_text .= ">$sequence_name\n" . "$selected_sequences{$sequence_name}\n";
-                            #}
+                            $fasta_text .= ">$sequence_name\n" . "$selected_sequences{$sequence_name}\n";
                         }
                         if (defined $fasta_text && length $fasta_text) { 
                             ($current_nucleotide_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n', $tsd_length, $tir_length); # get the consensus
@@ -1891,7 +1890,13 @@ if ($STEP == 5) { # check if this step should be performed or not
                         }
 
                         $menu1 = 1; # stay in menu 1
-                        $next_step = 4;
+                        # if it's a MITE go straight to report
+                        if ((length $current_nucleotide_sequence) < $MIN_AUTONOMOUS_SIZE){ 
+                            $next_step = 7;
+                        }
+                        else {
+                            $next_step = 4;
+                        }
                     }
 
                     if ($menu1_choice == 4) { # user wants to search with BLASTx
@@ -2124,7 +2129,6 @@ if ($STEP == 5) { # check if this step should be performed or not
                         my $autonomous_element; # boolean set to 0 if it's a MITE set to 1 if it's an autonomous element 
 
                         # Figure out if this an autonomous element or a MITE
-                        my $MIN_AUTONOMOUS_SIZE = 1000; # size in bp below which the sequences is likely a MITE rather than an autonomous element
                         my $default_answer = 'y'; # default answer to the MITE vs autonomous
                         if ($current_nucleotide_sequence < $MIN_AUTONOMOUS_SIZE) {
                             $default_answer = 'n';
@@ -2224,37 +2228,6 @@ if ($STEP == 5) { # check if this step should be performed or not
                         }
 
                         if ($continue_report) { # only continue if no fatal errors have been generated
-                            
-                            # # Get the TSD type
-                            # my $default_tsd = 1; # trying to guess what the TSD will be
-                            # my $default_taxonomy = 1; # trying to guess what the taxonomy will be
-                            # if ($tsd_length == 8) {
-                            #     $default_tsd = 8;
-                            #     $default_taxonomy = 4;
-                            # }
-                            # elsif ($tsd_length == 2) {
-                            #     $default_tsd = 1;
-                            #     $default_taxonomy = 1;
-                            # }
-                            # my @TSD_items = qw(TA 2 3 4 5 6 7 8 9 10 blank);
-                            # my $TSD_idx = prompt('m',
-                            #     {
-                            #         title        => '',
-                            #         prompt       => 'Enter the TSD type (In step 3 it was identified as $TSD_type):',
-                            #         items        => \@TSD_items,
-                            #         display_base => 1,
-                            #         return_base  => 1,
-                            #     },
-                            #     'Choose TA or a number between 2 and 10',
-                            #     $default_tsd);
-
-                            # my $TSD_type = $TSD_items[$TSD_idx - 1];  # subtract return_base to get 0-indexed
-                            # if ($TSD_type == 8) {
-                            #     my $TA_TSD = prompt('y', 'Do the TSDs have TA at positions 4 and 5?', '', 'n');
-                            #     if ($TA_TSD) {
-                            #         $notes .= "TSDs have TA at positions 4 and 5\n";
-                            #     }
-                            # }
 
                             ## Get the taxonomy
                             my @taxonomy_items = qw(Tc tigger mariner hAT other unknown blank);
@@ -2275,7 +2248,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                                 $notes .= "Taxonomy note: $taxonomy_note\n";
                             }
 
-                            ## Create the report
+                            ## Print the report
                             # figure out the title
                             my $report_title=0; # boolean set to 1 if the report has not yet been written and needs a title
                             unless (-e $cluster_report_path) {
@@ -2286,39 +2259,43 @@ if ($STEP == 5) { # check if this step should be performed or not
                                 print OUTPUT "# Report $cluster_name\n";
                             }
 
+                            # element name
+                            $element_name_number++;
+                            print OUTPUT "## Name: $cluster_name-$element_name_number\n";
+
                             # print the type of element
                             if ($autonomous_element) {
-                                print OUTPUT "## autonomous element\n";
+                                print OUTPUT "## Type: autonomous element\n";
                             }
                             else {
-                                print OUTPUT "## non-autonomous element\n";
+                                print OUTPUT "## Type: non-autonomous element\n";
                             }
 
-                            print OUTPUT "### Nucleotide sequence:\n";
+                            print OUTPUT "## Nucleotide sequence:\n";
                             print OUTPUT "$current_nucleotide_sequence\n";
-                            print OUTPUT "### TSD Type\n";
+                            print OUTPUT "## TSD Type: ";
                             if ($TSD_type eq "blank") {
                                 print OUTPUT "\n";
                             }
                             else {
                                 print OUTPUT "$TSD_type\n";
                             }
-                            print OUTPUT "### TIR sequences\n";
-                            print OUTPUT "- 5' TIR: $TIR1seq\n";
-                            print OUTPUT "- 3' TIR: $TIR2seq\n";
+                            print OUTPUT "## TIR sequences:\n";
+                            print OUTPUT "- 5'TIR: $TIR1seq\n";
+                            print OUTPUT "- 3'TIR: $TIR2seq\n";
 
                             if ($autonomous_element) {
-                                print OUTPUT "### Transposase sequence\n";
+                                print OUTPUT "## Transposase sequence:\n";
                                 print OUTPUT "$transposase\n";
                             }
-                            print OUTPUT "### Element taxonomy:\n";
+                            print OUTPUT "## Element taxonomy: ";
                             if ($taxonomy eq "blank") {
                                 print OUTPUT "\n";
                             }
                             else {
                                 print OUTPUT "$taxonomy\n";
                             }
-                            print OUTPUT "### Notes:\n";
+                            print OUTPUT "## Notes:\n";
                             print OUTPUT $notes;
 
                             print OUTPUT "\n---\n"; # divider at the end of the current seqeuence
@@ -2372,15 +2349,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                         $next_step = 4;
                     }
 
-                    if ($menu1_choice == 10) { # the user wants to change the consensus sequence parameter
-                        $RVCMP = prompt('y', "Should the nucletides be reverse complemented:", '', $RVCMP); 
-                        $CONSENSUS_LEVEL = prompt('f', "Consensus level:", '', $CONSENSUS_LEVEL);
-                        $MIN_FOR_POSITION = prompt('f', "Minumum number for position:", '', $MIN_FOR_POSITION);
-                        $menu1 = 1; # stay in menu 1
-                        $next_step = 3;
-                    }
-
-                    if ($menu1_choice == 11) { # the user wants extract the query sequence from BLASTx output
+                    if ($menu1_choice == 10) { # the user wants extract the query sequence from BLASTx output
                         # read the data from the clipboard and check that it's ok
                         my $clipboard_text = `xclip -selection clipboard -o 2>/dev/null`; 
                         my $query_sequence;
@@ -2407,6 +2376,7 @@ if ($STEP == 5) { # check if this step should be performed or not
                         }
                     }
                 }
+                
             }
         }
     }  
