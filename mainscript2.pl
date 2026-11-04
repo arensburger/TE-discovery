@@ -2365,8 +2365,7 @@ sub process_cluster {
     my $nuc_alignment_file_name = $current_cluster_folder . "/" . $cluster_name . "-aligned_nucleotides.fa";
     my %alignment_sequences = fastatohash($nuc_alignment_file_name); # this variable will hold hold all the selected sequences
     my %selected_sequences = %alignment_sequences; # sequences selected for analysis, starts off with all the sequences
-    my $element_name_number=0; # number used to give each element in this cluster a unique name
-
+    
     # remove any open windows from previous runs
     `pkill java`; # kill a previous aliview window, this could be dangerous in the long run otherwise
     `pkill feh`; # kill all previous instances of feh
@@ -2888,7 +2887,7 @@ sub process_cluster {
                 if ($notes) {
                     print colored ("Notes for the current sequence\n", "blue");
                     print colored ("$notes\n", "bold");
-                    print "Any additional notes? (press ENTER for none):\n";
+                    print "Any additional notes? (press ENTER for none): ";
                 }
                 else {
                     print colored ("There are no notes for this sequence", "blue");
@@ -2899,58 +2898,63 @@ sub process_cluster {
                 $notes .= $input if defined $input && length $input;
 
                 ## Print the report
-                # figure out the title
-                my $report_title=0; # boolean set to 1 if the report has not yet been written and needs a title
-                unless (-e $cluster_report_path) {
-                    $report_title=1;
+                # Open and read any existing report, add a title and get highest element number from existing report
+                my $write_report_title = 1;   # assume a title is needed until one is found
+                my $element_name_number = 0;
+                open(my $fh, '+>>', $cluster_report_path) or die "ERROR: Cannot open report at $cluster_report_path: $!\n";
+                seek($fh, 0, 0);   # rewind to read from the beginning
+                while (my $line = <$fh>) {
+                    $write_report_title = 0 if $line =~ /^#\sReport/;
+                    if ($line =~ /^##\sName:\s\S+-(\d+)/) {
+                        $element_name_number = $1 if $1 > $element_name_number;
+                    }
                 }
-                open (OUTPUT, '>>', $cluster_report_path) or die "ERROR: Cannot create report at $cluster_report_path\n";
-                if ($report_title) {
-                    print OUTPUT "# Report $cluster_name\n";
+                if ($write_report_title) {
+                    print $fh "# Report $cluster_name\n";
                 }
 
                 # element name
                 $element_name_number++;
-                print OUTPUT "## Name: $cluster_name-$element_name_number\n";
+                print $fh "## Name: $cluster_name-$element_name_number\n";
 
                 # print the type of element
                 if ($autonomous_element) {
-                    print OUTPUT "## Type: autonomous element\n";
+                    print $fh "## Type: autonomous element\n";
                 }
                 else {
-                    print OUTPUT "## Type: non-autonomous element\n";
+                    print $fh "## Type: non-autonomous element\n";
                 }
 
-                print OUTPUT "## Nucleotide sequence:\n";
-                print OUTPUT "$current_nucleotide_sequence\n";
-                print OUTPUT "## TSD Type: ";
+                print $fh "## Nucleotide sequence:\n";
+                print $fh "$current_nucleotide_sequence\n";
+                print $fh "## TSD Type: ";
                 if ($TSD_type eq "blank") {
-                    print OUTPUT "\n";
+                    print $fh "\n";
                 }
                 else {
-                    print OUTPUT "$TSD_type\n";
+                    print $fh "$TSD_type\n";
                 }
-                print OUTPUT "## TIR sequences:\n";
-                print OUTPUT "- 5'TIR: $TIR1seq\n";
-                print OUTPUT "- 3'TIR: $TIR2seq\n";
+                print $fh "## TIR sequences:\n";
+                print $fh "- 5'TIR: $TIR1seq\n";
+                print $fh "- 3'TIR: $TIR2seq\n";
 
                 if ($autonomous_element) {
-                    print OUTPUT "## Transposase sequence:\n";
-                    print OUTPUT "$transposase\n";
+                    print $fh "## Transposase sequence:\n";
+                    print $fh "$transposase\n";
                 }
-                print OUTPUT "## Element taxonomy: ";
+                print $fh "## Element taxonomy: ";
                 if ($taxonomy eq "blank") {
-                    print OUTPUT "\n";
+                    print $fh "\n";
                 }
                 else {
-                    print OUTPUT "$taxonomy\n";
+                    print $fh "$taxonomy\n";
                 }
-                print OUTPUT "## Notes:\n";
-                print OUTPUT $notes;
+                print $fh "## Notes:\n";
+                print $fh $notes;
                 $notes=""; # reset the notes so they don't carry to the next element 
 
-                print OUTPUT "\n---\n"; # divider at the end of the current seqeuence
-                close (OUTPUT);
+                print $fh "\n---\n"; # divider at the end of the current seqeuence
+                close ($fh);
 
                 # Update the user and the analysis log
                 print "Report for element $cluster_name-$element_name_number written/updated to file $cluster_report_path\n";
