@@ -107,14 +107,9 @@ if (($STEP == 1) or ($STEP == 12)) {
         if ($?) { die "ERROR creating directory: error code $?\n"}
     }
 }
-elsif (($STEP == 2) or ($STEP == 3)) {
+elsif (($STEP == 2) or ($STEP == 3) or ($STEP == 4)) {
     unless ((-d $ANALYSIS_FOLDER) and (-d $ELEMENT_FOLDER) and (-d $reject_folder_path)) {
         die "ERROR: Expecting folders $current_directry/$ANALYSIS_FOLDER, $current_directry/$ELEMENT_FOLDER, and $current_directry/$reject_folder_path would have been created prior to running step $STEP\n"
-    }
-}
-elsif ($STEP == 4) {
-    unless ((-d $ANALYSIS_FOLDER) and (-d $ELEMENT_FOLDER)) {
-        die "ERROR: Expecting folders $current_directry/$ANALYSIS_FOLDER and $current_directry/$ELEMENT_FOLDER would have been created prior to running step $STEP\n"
     }
 }
 elsif ($STEP == 5) {
@@ -1485,6 +1480,7 @@ if ($STEP == 4) { # check if this step should be performed or not
             print TIRSEQ ">TIR2\n$tir2_seq\n";
             close (TIRSEQ);
             my $BLAST_output_file_name = File::Temp->new(UNLINK => 1); # file with output of blast
+`cp $TIR_input_file_name /home/peter/blast_input.fa`; exit;
             `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 1e-5 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
             if ($?) { die "ERROR running blastn, error code $?\n"}
             # identify sequences bound by the two TIRs
@@ -1673,10 +1669,10 @@ if ($STEP == 4) { # check if this step should be performed or not
         close CLREADME;
     }
 
-    #Clean up folders, move the -element and -further_review folders into the -analysis folder and make a record of this
-    `mv $ELEMENT_FOLDER $ANALYSIS_FOLDER`;
-    if ($?) { die "ERROR moving folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER $?\n"}
-    print ANALYSIS "\tMoving the folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER\n";
+    # #Clean up folders, move the -element folders into the -analysis folder and make a record of this
+    # `mv $ELEMENT_FOLDER $ANALYSIS_FOLDER`;
+    # if ($?) { die "ERROR moving folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER $?\n"}
+    # print ANALYSIS "\tMoving the folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER\n";
 }
 
 ### PIPELINE STEP 5 
