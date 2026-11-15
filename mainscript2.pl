@@ -1480,9 +1480,11 @@ if ($STEP == 4) { # check if this step should be performed or not
             print TIRSEQ ">TIR2\n$tir2_seq\n";
             close (TIRSEQ);
             my $BLAST_output_file_name = File::Temp->new(UNLINK => 1); # file with output of blast
-`cp $TIR_input_file_name /home/peter/blast_input.fa`; exit;
-            `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 1e-5 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
+#            `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 1e-5 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
+`cp $TIR_input_file_name /home/peter/Desktop/blast.in`;
+            `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 2 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
             if ($?) { die "ERROR running blastn, error code $?\n"}
+`cp $BLAST_output_file_name /home/peter/Desktop/blast.out`;
             # identify sequences bound by the two TIRs
             my $TIR1_bed_file = File::Temp->new(UNLINK => 1); # bed file with locations of TIR1
             my $TIR2_bed_file = File::Temp->new(UNLINK => 1); # bed file with locations of TIR2
@@ -1517,13 +1519,15 @@ if ($STEP == 4) { # check if this step should be performed or not
             close INPUT;
             close TIR1_BED;
             close TIR2_BED;
-
+`cp $TIR1_bed_file /home/peter/Desktop/T1.bed`;
+`cp $TIR2_bed_file /home/peter/Desktop/T2.bed`;
             # identify TIRs facing each other and remove reverse-complemented duplicate entries
             my $TIR_locations = File::Temp->new(UNLINK => 1); # has the bounds of the elements
             `bedtools window -a $TIR1_bed_file -b $TIR2_bed_file -l 0 -r $MAX_ELEMENT_SIZE -sw -sm > $TIR_locations`;
             if ($?) { die "ERROR running bedtools window, error code $?\n"}
             open (INPUT, $TIR_locations) or die "ERROR: Cannot open file $TIR_locations $!\n";
             while (my $line = <INPUT>) {
+print "$cluster_number\n";
                 my $b1;
                 my $b2;
                 my @parsed_line = split " ", $line;
@@ -1536,6 +1540,7 @@ if ($STEP == 4) { # check if this step should be performed or not
                     $b2 = $parsed_line[2];
                 }
                 if ($b1 and $b2) { # only record if the two TIRs were found facing each other on the same strand
+print "got in\n";
                     if ($b1 < $b2) {
                         $element_bounds{"$parsed_line[0]:$b1-$b2"} = $parsed_line[0] . "\t" . $b1 . "\t". $b2 . "\t" . $cluster_number . "\t" . 0 . "\t" . "+"; 
                     }
