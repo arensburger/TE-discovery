@@ -33,7 +33,8 @@ use GD::Graph::bars;
 ### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
 my $TBLASTN_FILE; # name of the file containing the out put of the tblastn
-my $INPUT_GENOME; # fasta formated file with genome that input proteins
+my $INPUT_GENOME; # fasta formated file with genome that was used with input proteins
+my $BOWTIE_GENOME; # bowtie index file of the genome
 my $ANALYSIS_NAME; # base name for the analysis the analysis folder and element folder will be created based on this
 my $INTERPRO_FILENAME; # name of intrepro file with protein searches
 my $ANALYSIS_FOLDER; # name of folder to store analysis files into
@@ -51,6 +52,7 @@ GetOptions(
 	'p:s'   => \$INPUT_PROTEIN_SEQUENCES,
 	't:s'   => \$TBLASTN_FILE,
 	'g:s'   => \$INPUT_GENOME,
+    'b:s'   => \$BOWTIE_GENOME,
     'n:s'   => \$ANALYSIS_NAME,
     'in:s'  => \$INTERPRO_FILENAME,
     's:s'   => \$STEP,
@@ -1308,14 +1310,14 @@ if ($STEP == 4) { # check if this step should be performed or not
     my $GENOMIC_CONTEXT_LENGTH = 20; # number of bp. on each side of the element to use to determine if elements are duplications
 
     # making sure all the required information has been provided
-    unless ($INPUT_GENOME){
-        die "ERROR: for this step you need to provide a fasta formated genome file, using the -g parameter\n";
+    unless ($BOWTIE_GENOME){
+        die "ERROR: for this step you need to provide a bowtie formated genome file, using the -b parameter\n";
     }
 
     ## update the analysis file with what is going on
     my $datestring = localtime();
     print ANALYSIS "Running STEP 4 on $datestring\n";
-    print ANALYSIS "\tGenome: $INPUT_GENOME\n";
+    print ANALYSIS "\tBowtie index: $BOWTIE_GENOME\n";
     print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
     print ANALYSIS "\tGENOMIC_CONTEXT_LENGTH = $GENOMIC_CONTEXT_LENGTH\n";
 
@@ -1479,33 +1481,46 @@ if ($STEP == 4) { # check if this step should be performed or not
             print TIRSEQ ">TIR1\n$tir1_seq\n";
             print TIRSEQ ">TIR2\n$tir2_seq\n";
             close (TIRSEQ);
-            my $BLAST_output_file_name = File::Temp->new(UNLINK => 1); # file with output of blast
+            my $BOWTIE_output_file_name = File::Temp->new(UNLINK => 1); # file with output of blast
 #            `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 1e-5 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
 `cp $TIR_input_file_name /home/peter/Desktop/blast.in`;
-            `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 2 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
-            if ($?) { die "ERROR running blastn, error code $?\n"}
-`cp $BLAST_output_file_name /home/peter/Desktop/blast.out`;
+#            `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 2 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
+            `bowtie -f -v 1 -a -p $NUM_THREADS $BOWTIE_GENOME > $BOWTIE_output_file_name`;
+            if ($?) { die "ERROR running bowtie, error code $?\n"}
+#`cp $BLAST_output_file_name /home/peter/Desktop/blast.out`;
             # identify sequences bound by the two TIRs
             my $TIR1_bed_file = File::Temp->new(UNLINK => 1); # bed file with locations of TIR1
             my $TIR2_bed_file = File::Temp->new(UNLINK => 1); # bed file with locations of TIR2
             open (TIR1_BED, ">", $TIR1_bed_file ) or die "ERROR: Cannot created file $TIR1_bed_file\n";
             open (TIR2_BED, ">", $TIR2_bed_file ) or die "ERROR: Cannot created file $TIR2_bed_file\n";
-            open (INPUT, $BLAST_output_file_name) or die "ERROR: Cannot open file $BLAST_output_file_name $!\n";
+            open (INPUT, $BOWTIE_output_file_name) or die "ERROR: Cannot open file $BOWTIE_output_file_name $!\n";
             while (my $line = <INPUT>) {
                 my @line_elements = split "\t", $line;
                 my $b1; 
                 my $b2;
-                my $orientation;
-                if ($line_elements[8] < $line_elements[9]) {
-                    $b1 = $line_elements[8];
-                    $b2 = $line_elements[9];
-                    $orientation = "+";
+                my $orientation = $line_elements[1];
+                if ($orientation eq "+") {
+                    $b1 = $line_elements[3];
+                    $b2 = $line_elements[3] + length ($line_elements[4]) + 1;
+                }
+                elsif ($orientation eq "-") {
+                    $b1 = $line_elements[3] - length ($line_elements[4]) - 1;
+                    $b2 = $line_elements[3];
                 }
                 else {
-                    $b1 = $line_elements[9];
-                    $b2 = $line_elements[8];
-                    $orientation = "-";
+                    die "Error: Could not parse bowtie line\n$line";
                 }
+                # if ($line_elements[8] < $line_elements[9]) {
+                #     $b1 = $line_elements[8];
+                #     $b2 = $line_elements[9];
+                #     $orientation = "+";
+                # }
+                # else {
+                #     $b1 = $line_elements[9];
+                #     $b2 = $line_elements[8];
+                #     $orientation = "-";
+                # }
+exit;
                 if ($line_elements[0] eq "TIR1") {
                     print TIR1_BED "$line_elements[1]\t$b1\t$b2\tTIR1\t$line_elements[2]\t$orientation\n";
                 }
@@ -1513,7 +1528,7 @@ if ($STEP == 4) { # check if this step should be performed or not
                     print TIR2_BED "$line_elements[1]\t$b1\t$b2\tTIR2\t$line_elements[2]\t$orientation\n";
                 }
                 else {
-                    die "ERROR: Expect all the lines in file $BLAST_output_file_name to start with TIR1 or TIR2, but got\n$line";
+                    die "ERROR: Expect all the lines in file $BOWTIE_output_file_name to start with TIR1 or TIR2, but got\n$line";
                 }
             }
             close INPUT;
