@@ -317,7 +317,7 @@ my %EXAMINE_CODES=("1111" => 1, "1101" => 2,  "1110" => 3); # success codes to e
 my $HIGH_POSITION_CONSENSUS=0.75; # proportion of conservation at an alignment position to call it highly conserved
 my $SEARCH_WINDOW_SIZE=20; # how big a window to search on either side of a potential transition postion
 my $MAX_GAP_N_AT_POSITION=0.5; # maximum proportion of gaps or N's at an alignment position, if above the position is ignored in this analysis
-my $TIR_SEARCH_RANGE = 6; # how many bp away from the alignement transistion to search for TIRs
+my $TIR_SEARCH_RANGE = 6; # how many bp away from the alignment transistion to search for TIRs
 
 if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or not  
     print STDERR "Working on STEP 2 ...\n";
@@ -1487,7 +1487,7 @@ if ($STEP == 4) { # check if this step should be performed or not
 #            `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 2 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
             `bowtie -f -v 1 -a -p $NUM_THREADS $BOWTIE_GENOME > $BOWTIE_output_file_name`;
             if ($?) { die "ERROR running bowtie, error code $?\n"}
-#`cp $BLAST_output_file_name /home/peter/Desktop/blast.out`;
+`cp $BOWTIE_output_file_name /home/peter/Desktop/bowtie.tsv`; exit;
             # identify sequences bound by the two TIRs
             my $TIR1_bed_file = File::Temp->new(UNLINK => 1); # bed file with locations of TIR1
             my $TIR2_bed_file = File::Temp->new(UNLINK => 1); # bed file with locations of TIR2
