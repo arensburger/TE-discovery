@@ -7,7 +7,8 @@ use strict;
 use Getopt::Long;
 use File::Temp qw(tempfile);
 use List::UtilsBy qw(max_by);
-use List::Util qw(max);
+#use List::Util qw(max);
+use List::Util qw(min max);
 use Scalar::Util qw(looks_like_number);
 use Term::Prompt;
 use Term::ReadKey;
@@ -27,11 +28,13 @@ use Graph; # use sudo apt install libgraph-perl to install this
 use Term::ANSIColor qw(colored colorstrip);
 use URI::Escape; # this is to handle weird characters
 use POSIX qw(strftime); # to format time 
+use GD::Graph::bars;
 
 ### INPUTs from command line, top level variables are in uppercase
 my $INPUT_PROTEIN_SEQUENCES; # fasta formated file with input protein sequences
 my $TBLASTN_FILE; # name of the file containing the out put of the tblastn
-my $INPUT_GENOME; # fasta formated file with genome that input proteins
+my $INPUT_GENOME; # fasta formated file with genome that was used with input proteins
+my $BOWTIE_GENOME; # bowtie index file of the genome
 my $ANALYSIS_NAME; # base name for the analysis the analysis folder and element folder will be created based on this
 my $INTERPRO_FILENAME; # name of intrepro file with protein searches
 my $ANALYSIS_FOLDER; # name of folder to store analysis files into
@@ -42,15 +45,18 @@ my $STEP; # analysis step to perform
 my $START_STEP; # analysis step to start at
 my $END_STEP; # analysis step to end at
 my $SHOW_HELP; # call for help 
+my $ITEM_NAME; # specific item to be examined at the step
 
 ### CHECK INPUTS Read and check that the inputs have been provided
 GetOptions(
 	'p:s'   => \$INPUT_PROTEIN_SEQUENCES,
 	't:s'   => \$TBLASTN_FILE,
 	'g:s'   => \$INPUT_GENOME,
+    'b:s'   => \$BOWTIE_GENOME,
     'n:s'   => \$ANALYSIS_NAME,
     'in:s'  => \$INTERPRO_FILENAME,
     's:s'   => \$STEP,
+    'e:s'   => \$ITEM_NAME,
     'h'     => \$SHOW_HELP,
 );
 
@@ -77,7 +83,7 @@ my $COMBINED_CLUSTERS_OUTPUT_FILENAME = $CLUSTER_FOLDER . "/" . $ANALYSIS_NAME .
 my $current_directry = getcwd();
 if (($STEP == 1) or ($STEP == 12)) {
     if (-d $ANALYSIS_FOLDER) { 
-        print colored ("WARNING: folder $current_directry/$ANALYSIS_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
+        print STDERR colored ("WARNING: folder $current_directry/$ANALYSIS_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
     }
     else {
         print STDERR "Creating directory $ANALYSIS_FOLDER for storing analysis files\n";
@@ -86,7 +92,7 @@ if (($STEP == 1) or ($STEP == 12)) {
     }
 
     if (-d $ELEMENT_FOLDER) { 
-        print colored ("WARNING: folder $ELEMENT_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
+        print STDERR colored ("WARNING: folder $ELEMENT_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
     }
     else {
         print STDERR "Creating directory $ELEMENT_FOLDER for storing element files\n";
@@ -95,7 +101,7 @@ if (($STEP == 1) or ($STEP == 12)) {
     }
 
     if (-d $reject_folder_path) { 
-        print colored ("WARNING: folder $reject_folder_path already exists, using this folder rather than creating a new one\n", "yellow");
+        print STDERR colored ("WARNING: folder $reject_folder_path already exists, using this folder rather than creating a new one\n", "yellow");
     }
     else {
         print STDERR "Creating directory $reject_folder_path for reject elements\n";
@@ -103,17 +109,12 @@ if (($STEP == 1) or ($STEP == 12)) {
         if ($?) { die "ERROR creating directory: error code $?\n"}
     }
 }
-elsif (($STEP == 2) or ($STEP == 3)) {
+elsif (($STEP == 2) or ($STEP == 3) or ($STEP == 4)) {
     unless ((-d $ANALYSIS_FOLDER) and (-d $ELEMENT_FOLDER) and (-d $reject_folder_path)) {
         die "ERROR: Expecting folders $current_directry/$ANALYSIS_FOLDER, $current_directry/$ELEMENT_FOLDER, and $current_directry/$reject_folder_path would have been created prior to running step $STEP\n"
     }
 }
-elsif ($STEP == 4) {
-    unless ((-d $ANALYSIS_FOLDER) and (-d $ELEMENT_FOLDER)) {
-        die "ERROR: Expecting folders $current_directry/$ANALYSIS_FOLDER and $current_directry/$ELEMENT_FOLDER would have been created prior to running step $STEP\n"
-    }
-}
-elsif (($STEP == 5) or ($STEP == 6)) {
+elsif ($STEP == 5) {
     unless (-d $CLUSTER_FOLDER) {
         die "ERROR: Expecting folder $current_directry/$CLUSTER_FOLDER would have been created prior to running step $STEP\n"
     }
@@ -124,7 +125,7 @@ else {
 
 ## CHECK INPUTS Create or open files to store analysis parameters, and rejected sequences. 
 my $analysis_parameters_file_name = "$ANALYSIS_FOLDER/Analysis_run_and_parameters.txt"; # file to record parameters and how the run went
-my $rejection_file_name = "$ANALYSIS_FOLDER/Rejected_sequences.txt"; # file to store rejected sequences, and why
+my $rejection_file_name = "$ANALYSIS_FOLDER/Rejected_elements.txt"; # file to store rejected sequences, and why
 open (ANALYSIS,'>>', $analysis_parameters_file_name) or die "ERROR: cannot open file $analysis_parameters_file_name\n"; # create or append to file
 open (REJECT, '>>', $rejection_file_name) or die "ERROR, cannot create output file $rejection_file_name\n"; # create or append to file
 
@@ -136,7 +137,7 @@ my $GOOD_BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FOLDER/good_blast.o"; # blast file 
 my $BLAST_OUTPUT_FILE_NAME = "$ANALYSIS_FOLDER/tblastn.o"; # default name and location unless a file is provided
 my $GENOME_IDENTITY = 80; # IDENTIFYING PROTEINS, per protein, minimum percent identity between protein and genome
 my $COVERAGE_RATIO = 0.5; # IDENTIFYING PROTEINS, per protein, minimum ratio of (blast match length) / (query length)
-my $COPY_NUMBER = 3; # IDENTIFYING PROTEINS, minimum number of copies that hit different parts of the genome 
+my $COPY_NUMBER = 2; # IDENTIFYING PROTEINS, minimum number of copies that hit different parts of the genome 
 my $MIN_DISTANCE = 10000;   # IDENTIFYING PROTEINS, if two elements are on the same chromosome, how far they have to be, to be considered different elements
                             # NOTE: the minimum distance should bigger than the $BLAST_EXTEND variable, to avoid having the same element recorded twice    
 my $NUM_THREADS = `nproc --all`;# determine the number of processors on the current machine
@@ -316,7 +317,7 @@ my %EXAMINE_CODES=("1111" => 1, "1101" => 2,  "1110" => 3); # success codes to e
 my $HIGH_POSITION_CONSENSUS=0.75; # proportion of conservation at an alignment position to call it highly conserved
 my $SEARCH_WINDOW_SIZE=20; # how big a window to search on either side of a potential transition postion
 my $MAX_GAP_N_AT_POSITION=0.5; # maximum proportion of gaps or N's at an alignment position, if above the position is ignored in this analysis
-my $TIR_SEARCH_RANGE = 6; # how many bp away from the alignement transistion to search for TIRs
+my $TIR_SEARCH_RANGE = 6; # how many bp away from the alignment transistion to search for TIRs
 
 if (($STEP == 2) or ($STEP == 12)) { # check if this step should be performed or not  
     print STDERR "Working on STEP 2 ...\n";
@@ -1298,9 +1299,7 @@ if ($STEP == 3) { # check if this step should be performed or not
 }
 
 ### PIPELINE STEP 4 
-### Identify elements with unique TIR sequences, get their sequences from the genome, and make a file
-### of those sequences to use with Interpro. The titles of that file are 1) scaffold and location, 2) TIR cluster number
-### 3) length of TSDs, 4) length of TIRs. Outputted sequences include both the TSD and TIR sequence.
+### Identify sequences in the genome
 
 if ($STEP == 4) { # check if this step should be performed or not  
 
@@ -1308,18 +1307,19 @@ if ($STEP == 4) { # check if this step should be performed or not
 
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
+    my $GENOMIC_CONTEXT_LENGTH = 20; # number of bp. on each side of the element to use to determine if elements are duplications
 
     # making sure all the required information has been provided
-    unless ($INPUT_GENOME){
-        die "ERROR: for this step you need to provide a fasta formated genome file, using the -g parameter\n";
+    unless ($BOWTIE_GENOME){
+        die "ERROR: for this step you need to provide a bowtie formated genome file, using the -b parameter\n";
     }
 
     ## update the analysis file with what is going on
     my $datestring = localtime();
     print ANALYSIS "Running STEP 4 on $datestring\n";
-    print ANALYSIS "\tGenome: $INPUT_GENOME\n";
+    print ANALYSIS "\tBowtie index: $BOWTIE_GENOME\n";
     print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
-    #print ANALYSIS "\tCombined cluster nucleotide sequences printed to file $COMBINED_CLUSTERS_OUTPUT_FILENAME\n";
+    print ANALYSIS "\tGENOMIC_CONTEXT_LENGTH = $GENOMIC_CONTEXT_LENGTH\n";
 
     ## Read the README files and identify TIRs sequences and TSD  
     # load the element information from the README files
@@ -1418,7 +1418,7 @@ if ($STEP == 4) { # check if this step should be performed or not
 
     ## Create a new directory where that will now how the clusters, rather than the old 'elements' (need to rename all this)
     if (-d $CLUSTER_FOLDER) { 
-        print colored ("WARNING: folder $CLUSTER_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
+        print STDERR colored ("WARNING: folder $CLUSTER_FOLDER already exists, using this folder rather than creating a new one\n", "yellow");
     }
     else {
         `mkdir $CLUSTER_FOLDER`;
@@ -1429,16 +1429,36 @@ if ($STEP == 4) { # check if this step should be performed or not
     my %genome = fastatohash($INPUT_GENOME); # load the genome into memory
     my $TSD_type; # a number, or a specific sequence
     my $TSD_length;
-    my $TIR_length;
+    #my $TIR_length;
         
     foreach my $cluster_number (keys %clustering_info) { # go through the clusters individually     
+
+        my %element_bounds=(); # has just the genomic location as key and full bed file line as value, this way identical genomic loctions will not be duplicated
+
+        # Create directory cluster specific folder
+        my $cluster_directory = "$CLUSTER_FOLDER/cluster$cluster_number";
+        if (-d $cluster_directory) { 
+            print STDERR colored ("WARNING: folder $cluster_directory already exists, using this folder rather than creating a new one\n", "yellow");
+        }
+        else {
+            `mkdir $cluster_directory`;
+            if ($?) { die "ERROR creating directory $cluster_directory: error code $?\n"}
+        }
+
+        # Create and populate the README file for this cluster
+        open (CLREADME, ">>", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
+        my $datestring = localtime();
+        print CLREADME "$datestring, Clustering sequences in folder(s) $clustering_info{$cluster_number}[0]\n";
+
+
         # get the TIR sequences for this cluster
         my $tir1_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[1]);
         my $tir2_seq = lc($reviewed_tsdtirs{$clustering_info{$cluster_number}[1]}[2]);
-        $TIR_length = length($tir1_seq);
+        my $TIR_length = length($tir1_seq);
         my $TIRs_set = 1; # boolean, set to 1 if TIR sequence are ok, or zero if not
         if (($tir1_seq =~/n/i) or ($tir2_seq =~ /n/i)) { # if the tir sequences include "n" characters warn the user and stop processing
-            print colored ("WARNING: The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_number}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n", "yellow");
+            print STDERR colored ("WARNING: The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_number}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n", "yellow");
+            print CLREADME "The TIR sequences $tir1_seq and $tir2_seq for element(s) $clustering_info{$cluster_number}[0] contain one or more n characters, this is a problem for finding this element in the genome. Ignoring the element(s).\n";
             $TIRs_set = 0;
         }
 
@@ -1450,172 +1470,244 @@ if ($STEP == 4) { # check if this step should be performed or not
         else {
             $TSD_length = length ($TSD_type)
         }
+        print CLREADME "\tTSD type $TSD_type, TSD length $TSD_length, TIR sequences $tir1_seq $tir2_seq\n";
 
         # identify the nucleotide sequences between TIR locations
-        my %cluster_sequences; # holds the genomic sequence with intact tirs as well as tsd sequences, it's a hash to avoid duplications
+        my $all_loci_overlap = 0; # boolean, set to 1 if all the genomic loci overalp in their locations
         if ($TIRs_set) { # only continue if the TIR sequence are ok
-            foreach my $chr (keys %genome) { # go through each genome subsection (calling it "chr" here)
-                # Identify all the element sequences (including TSDs) in the forward orientation. Converting everything to lower case to avoid confusion with cases.
-                # Also providing the name of the chrososome and orientation so that the position of all the elements can recorded.
-                my %fw_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_type, $TSD_length, "+"); # look for TIRs on the + strand
-                %cluster_sequences = (%cluster_sequences, %fw_cluster_sequences); # add elements found on the + strand to %cluster_sequences
-                unless ($tir1_seq eq (rc($tir2_seq))) { # only look on the other strand if the TIRs are not symetrical, symetrical TIR will already have been found
-                    my %rc_cluster_sequences = identify_element_sequence(lc($genome{$chr}), $tir1_seq, $tir2_seq, $MAX_ELEMENT_SIZE, $chr, $TSD_type, $TSD_length, "-");
-                    %cluster_sequences = (%cluster_sequences, %rc_cluster_sequences); # add any new elements to the hash %cluster_sequences
+            # blast the TIR sequence
+            my $TIR_input_file_name = File::Temp->new(UNLINK => 1); # file with TIR sequences
+            open (TIRSEQ, ">", $TIR_input_file_name) or die "ERROR: Cannot create temporary file $TIR_input_file_name $!\n";
+            print TIRSEQ ">TIR1\n$tir1_seq\n";
+            print TIRSEQ ">TIR2\n$tir2_seq\n";
+            close (TIRSEQ);
+            my $BOWTIE_output_file_name = File::Temp->new(UNLINK => 1); # file with output of blast
+#            `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 1e-5 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
+`cp $TIR_input_file_name /home/peter/Desktop/blast.in`;
+#            `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 2 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
+            `bowtie -f -v 1 -a -p $NUM_THREADS $BOWTIE_GENOME > $BOWTIE_output_file_name`;
+            if ($?) { die "ERROR running bowtie, error code $?\n"}
+`cp $BOWTIE_output_file_name /home/peter/Desktop/bowtie.tsv`; exit;
+            # identify sequences bound by the two TIRs
+            my $TIR1_bed_file = File::Temp->new(UNLINK => 1); # bed file with locations of TIR1
+            my $TIR2_bed_file = File::Temp->new(UNLINK => 1); # bed file with locations of TIR2
+            open (TIR1_BED, ">", $TIR1_bed_file ) or die "ERROR: Cannot created file $TIR1_bed_file\n";
+            open (TIR2_BED, ">", $TIR2_bed_file ) or die "ERROR: Cannot created file $TIR2_bed_file\n";
+            open (INPUT, $BOWTIE_output_file_name) or die "ERROR: Cannot open file $BOWTIE_output_file_name $!\n";
+            while (my $line = <INPUT>) {
+                my @line_elements = split "\t", $line;
+                my $b1; 
+                my $b2;
+                my $orientation = $line_elements[1];
+                if ($orientation eq "+") {
+                    $b1 = $line_elements[3];
+                    $b2 = $line_elements[3] + length ($line_elements[4]) + 1;
                 }
-            } 
-        }
-
-        if(%cluster_sequences) { # only continue if sequences were found
-
-            # Create directory cluster specific folder
-            my $cluster_directory = "$CLUSTER_FOLDER/cluster$cluster_number";
-            if (-d $cluster_directory) { 
-                print colored ("WARNING: folder $cluster_directory already exists, using this folder rather than creating a new one\n", "yellow");
-            }
-            else {
-                `mkdir $cluster_directory`;
-                if ($?) { die "ERROR creating directory $cluster_directory: error code $?\n"}
-            }
-
-            # Create and populate the README file for this cluster
-            open (CLREADME, ">>", "$cluster_directory/README.txt") or die "ERROR: Cannot create README file $cluster_directory/README.txt, $!\n";
-            my $datestring = localtime();
-            print CLREADME "$datestring, Clustering sequences $clustering_info{$cluster_number}[0]\n";
-
-            # Identify, report and remove from further analysis any sequences that overlap with a cluster.
-            # This is done by creating a bed file and using bedtools to identify overlaps
-
-            # create the BED file
-            my $temp_bed_file = File::Temp->new(UNLINK => 1); # temporary bed file s
-            my $temp_bed_sorted_file = File::Temp->new(UNLINK => 1); # temporary bed file sorted
-            my $temp_overlap_file = File::Temp->new(UNLINK => 1); # temporary file with the output of the overap command
-            open (BED, ">", $temp_bed_file) or die "ERROR: cannot created temporary bed file $temp_bed_file\n"; 
-            foreach my $title (keys %cluster_sequences) {
-                if ($title =~ /^(\S+):(\d+)-(\d+)/) {
-                    my $chromosome = $1;
-                    my $b1 = $2;
-                    my $b2 = $3;
-                    my $orientation = "+";
-                    if ($b1 > $b2) {
-                        $orientation = "-";
-                        my $temp = $b2;
-                        $b2 = $b1;
-                        $b1 = $temp;
-                    }
-                    print BED "$chromosome\t$b1\t$b2\t$orientation\t$title\n"; # all the information about overlaps
+                elsif ($orientation eq "-") {
+                    $b1 = $line_elements[3] - length ($line_elements[4]) - 1;
+                    $b2 = $line_elements[3];
                 }
                 else {
-                    die "ERROR: Cannot parse title $title\n";
+                    die "Error: Could not parse bowtie line\n$line";
+                }
+                # if ($line_elements[8] < $line_elements[9]) {
+                #     $b1 = $line_elements[8];
+                #     $b2 = $line_elements[9];
+                #     $orientation = "+";
+                # }
+                # else {
+                #     $b1 = $line_elements[9];
+                #     $b2 = $line_elements[8];
+                #     $orientation = "-";
+                # }
+exit;
+                if ($line_elements[0] eq "TIR1") {
+                    print TIR1_BED "$line_elements[1]\t$b1\t$b2\tTIR1\t$line_elements[2]\t$orientation\n";
+                }
+                elsif ($line_elements[0] eq "TIR2") {
+                    print TIR2_BED "$line_elements[1]\t$b1\t$b2\tTIR2\t$line_elements[2]\t$orientation\n";
+                }
+                else {
+                    die "ERROR: Expect all the lines in file $BOWTIE_output_file_name to start with TIR1 or TIR2, but got\n$line";
                 }
             }
-            close BED;
-
-            # Identify overlapping pairs of sequences using bedtools
-            `bedtools sort -i $temp_bed_file > $temp_bed_sorted_file`;
-            if ($?) { die "ERROR running bedtools sort: error code $?\n"}
-            `bedtools intersect -a $temp_bed_sorted_file -b $temp_bed_sorted_file -wo > $temp_overlap_file`; # has all the overlapping including the sequence to itself
-            if ($?) { die "ERROR running bedtools intersect: error code $?\n"}
-            
-            # Put the names of the overlapping pairs of sequences into a graph, so that groups of overalpping sequences
-            # can be identified.
-            my $graph = Graph->new(undirected => 1); # this is a graph to join all the pairs of overlapping sequences
-            open (OVERLAP, $temp_overlap_file) or die "ERROR: Cannot open temporary overlap file $temp_overlap_file\n";
-            while (my $line = <OVERLAP>) {           
-                my @data = split " ", $line;
-                # adding sequences to the graph but only if they are not the the same sequence
-                if ($data[4] ne $data[9]) {  
-                    $graph->add_edge($data[4], $data[9]);                                               
+            close INPUT;
+            close TIR1_BED;
+            close TIR2_BED;
+`cp $TIR1_bed_file /home/peter/Desktop/T1.bed`;
+`cp $TIR2_bed_file /home/peter/Desktop/T2.bed`;
+            # identify TIRs facing each other and remove reverse-complemented duplicate entries
+            my $TIR_locations = File::Temp->new(UNLINK => 1); # has the bounds of the elements
+            `bedtools window -a $TIR1_bed_file -b $TIR2_bed_file -l 0 -r $MAX_ELEMENT_SIZE -sw -sm > $TIR_locations`;
+            if ($?) { die "ERROR running bedtools window, error code $?\n"}
+            open (INPUT, $TIR_locations) or die "ERROR: Cannot open file $TIR_locations $!\n";
+            while (my $line = <INPUT>) {
+print "$cluster_number\n";
+                my $b1;
+                my $b2;
+                my @parsed_line = split " ", $line;
+                if (($parsed_line[5] eq "+") and ($parsed_line[11] eq "+")) {
+                    $b1 = $parsed_line[1];
+                    $b2 = $parsed_line[8];
                 }
-            }
-            my @groups = $graph->connected_components(); # @groups is an array of arrays with the overlapping sequences in one group 
-            
-            # if any overlaps have been found, report them to the REAMDE and ANALYSIS files and remove them from further analysis
-            foreach my $g (@groups) {
-                my $datestring = localtime();
-                print CLREADME "\tThe sequences below overlap and have been removed from the analysis:\n";
-                foreach my $s (@$g) {
-                    print CLREADME "\t>$s\n$cluster_sequences{$s}\n";
-                    delete $cluster_sequences{$s};
+                elsif (($parsed_line[5] eq "-") and ($parsed_line[11] eq "-")) {
+                    $b1 = $parsed_line[7];
+                    $b2 = $parsed_line[2];
                 }
-            }
-            if (@groups) { # overlapping sequences were found
-                print ANALYSIS "\tOverlapping files were found and removed in cluster $cluster_number\n";
-            }
-            
-            if (keys %cluster_sequences) { # this will be true if not all sequences were removed due to overlaps
-                # Align the cluster sequences. Use mafft and --adjustdirection option, this will get the sequences to all be in the same orientation
-                my $temp_input_alignment_file = File::Temp->new(UNLINK => 1); # input to mafft alignment
-                open (MAFFTINPUT, ">", $temp_input_alignment_file) or die "ERROR: Cannot create temporay mafft input alignment file\n";
-                my $temp_output_alignment_file = File::Temp->new(UNLINK => 1); # output of mafft alignment
-                foreach my $title (keys %cluster_sequences) {
-                    print MAFFTINPUT ">$title\n";
-                    print MAFFTINPUT "$cluster_sequences{$title}\n";
-                }
-                close MAFFTINPUT;
-                `mafft --adjustdirection --quiet $temp_input_alignment_file > $temp_output_alignment_file`;
-                if ($?) { die "ERROR running MAFFT with --adjustdirection option: error code $?\n"}
-
-                # print the alignment to the cluster directory and update the README
-                my $alignment_file_name = "cluster$cluster_number-aligned_nucleotides.fa";
-                my $cluster_sequence_file = "$cluster_directory/$alignment_file_name";
-                open (CLSEQ, ">", $cluster_sequence_file) or die "ERROR: Cannot create sequence file $cluster_sequence_file, $!\n";
-                my %alignment_output = fastatohash($temp_output_alignment_file); # load the output of the mafft alignment above
-                foreach my $seq_title (keys %alignment_output) {
-                    my $sequence = $alignment_output{$seq_title}; # get the sequence first, before $seq_title could be changed
-                    if ($seq_title =~ /_R_(\S+):(\d+)-(\d+)/) { # if the title is reversed correct the order
-                        $seq_title = "$1:$3-$2"; 
+                if ($b1 and $b2) { # only record if the two TIRs were found facing each other on the same strand
+print "got in\n";
+                    if ($b1 < $b2) {
+                        $element_bounds{"$parsed_line[0]:$b1-$b2"} = $parsed_line[0] . "\t" . $b1 . "\t". $b2 . "\t" . $cluster_number . "\t" . 0 . "\t" . "+"; 
                     }
-                    print CLSEQ ">$seq_title", "_$cluster_number", "_$TSD_length", "_$TIR_length\n";
-                    print CLSEQ "$sequence\n";
-                }
-                print CLREADME "\tFile $alignment_file_name contains the aligned genomic sequences. The sequences are oriented and any overlapping sequences have been removed\n";
-                close CLSEQ;
-            }
-            else { # this will be true if all sequences were removed due to overlaps
-                print CLREADME "\tAll the sequences overlap each other, analysis stopped.\n";
-                print ANALYSIS "\tAll the sequences in cluster $cluster_number overlap each other, analysis stopped.\n";
-                my $datestring = localtime();
-                print REJECT "$datestring\t$clustering_info{$cluster_number}[0]\tSTEP 4\tAll the sequences overlap each other, the analysis was halted.\n";
-                # move the elments into the rejected folder
-                my @data = split " ", $clustering_info{$cluster_number}[0];
-                foreach my $element_name (@data) {
-                    `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
-                    if ($?) { die "ERROR moving folder $ELEMENT_FOLDER/$element_name to $reject_folder_path $?\n"}
+                    else {
+                        $element_bounds{"$parsed_line[0]:$b1-$b2"} = $parsed_line[0] . "\t" . $b2 . "\t". $b1 . "\t" . $cluster_number . "\t" . 0 . "\t" . "-"; 
+                    }
                 }
             }
-            close CLREADME;
+            close INPUT;
+
+            # remove any sequences that partially overlap each other, unlikely to be full length elements
+            if (keys %element_bounds) { #only continue if elements have been identified
+                my $element_bounds_bed = File::Temp->new(UNLINK => 1); # bed file with element bounds
+                open (OUTPUT, ">", $element_bounds_bed) or die "ERROR: Cannot open file $element_bounds_bed $!\n";
+                foreach my $locus (keys %element_bounds) {
+                    print OUTPUT "$element_bounds{$locus}\n"; 
+                }
+                close OUTPUT;
+                my $sorted_bed = File::Temp->new(UNLINK => 1); # sorted bed file
+                `bedtools sort -i $element_bounds_bed > $sorted_bed`;
+                if ($?) { die "ERROR running bedtools sort: error code $?\n"}
+                my $overlap_bed = File::Temp->new(UNLINK => 1); # overalping bed file, includes elements overalping themselves
+                `bedtools intersect -a $sorted_bed -b $sorted_bed -c > $overlap_bed`; # will report the number of overlap, expect 1 for itself
+                if ($?) { die "ERROR running bedtools intersect: error code $?\n"}
+                open (OVERLAP, $overlap_bed) or die "ERROR: Cannot open temporary overlap file $overlap_bed\n";
+                while (my $line = <OVERLAP>) {           
+                    my @data = split " ", $line;
+                    if ($data[6] > 1) { 
+                        my $name = "$data[0]:$data[1]-$data[2]";
+                        print CLREADME "\tIgnoring BLASTn output sequence because it overlaps with at least one other: $name\n";
+                        delete $element_bounds{$name};                  
+                    }
+                }
+                if (keys %element_bounds) { #only continue if there are still elements left after duplicates have been removed
+                    # create a file the element sequences, the sequences will be oriented next
+                    my $sequence_file_not_oriented = File::Temp->new(UNLINK => 1); # fasta file with element sequences but not oriented
+                    open (ELEMENT, ">", $sequence_file_not_oriented) or die "ERROR: Cannot create file $sequence_file_not_oriented\n";
+                    foreach my $locus_name (keys %element_bounds) {
+                        my @locus_parsed = split " ", $element_bounds{$locus_name};
+                        my $tsd_b1 = $locus_parsed[1]-1-$TSD_length; # left bound of the element including TSD
+                        my $tsd_b2 = $locus_parsed[2]+$TSD_length; # right bound of the element including TSD
+                        # check if the TSD bounds are near the edge of the genome file
+                        if ($tsd_b1 < 1) {
+                            $tsd_b1 = 1;
+                        }
+                        if ($tsd_b2 > (length $genome{$locus_parsed[0]})) {
+                            $tsd_b2 = length $genome{$locus_parsed[0]};
+                        }
+                        my $sequence = substr $genome{$locus_parsed[0]}, $tsd_b1, $tsd_b2-$tsd_b1; 
+                        print ELEMENT ">$locus_parsed[0]:$tsd_b1-$tsd_b2\n$sequence\n";
+
+                    }
+                    close ELEMENT;
+
+                    # orient the sequences
+                    # my $alignment_output_file_name = "$cluster_directory/cluster$cluster_number-aligned_nucleotides.fa";
+                    my $sequence_file_oriented = File::Temp->new(UNLINK => 1); # fasta file with element sequences oriented
+                    `mafft --adjustdirection --quiet $sequence_file_not_oriented > $sequence_file_oriented`;
+                    if ($?) { die "ERROR running MAFFT with --adjustdirection option: error code $?\n"}
+
+                    # remove duplications by examining the sequences surrounding each element, the "genomic context"
+                    my %oriented_sequences = fastatohash($sequence_file_oriented); 
+                    my $adjacent_sequences = File::Temp->new(UNLINK => 1); # fasta file with adjacent sequence to each element as value, and element locus as key
+                    open (ADJACENT, ">", $adjacent_sequences) or die "ERROR: Cannot create file $adjacent_sequences\n";
+                    # get and adjust the bounds of sequences adjacent to each element sequence
+                    foreach my $locus_name (keys %oriented_sequences) {
+                        $locus_name =~ /^(_R_)?(\S+):(\d+)-(\d+)/
+                            or die "ERROR: Cannot parse locus name: $locus_name\n";
+
+                        my $rc = defined $1 ? 1 : 0;   # 1 if the sequence should be reverse complemented
+                        my $scaffold = $2;
+                        my ($start, $end) = ($3, $4);
+
+                        my $len = length $genome{$scaffold};
+
+                        # bounds of the two adjacent sequences, clamped to the scaffold edges
+                        my $b1 = max(1,    $start - $GENOMIC_CONTEXT_LENGTH - 1);
+                        my $b2 = max(1,    $start - 1);
+                        my $b3 = min($len, $end + 1);
+                        my $b4 = min($len, $end + $GENOMIC_CONTEXT_LENGTH + 1);
+
+                        my $adjacent_sequence = (substr $genome{$scaffold}, $b1, $b2 - $b1) . (substr $genome{$scaffold}, $b3, $b4 - $b3);
+                        if ($rc) {
+                            $adjacent_sequence = rc($adjacent_sequence);
+                        }
+                        print ADJACENT ">$locus_name\n$adjacent_sequence\n";
+                    }
+                    close ADJACENT;
+
+                    # cluster the adjacent sequences, remove duplicates, and print aligned file without duplicates
+                    my $clustering_out_file = File::Temp->new(UNLINK => 1); # output of cd-hit
+                    `cd-hit -i $adjacent_sequences -o  $clustering_out_file -T 0`;
+                    if ($?) { die "ERROR running cd-hit: error code $?\n"}
+                    my %representative_sequences = fastatohash($clustering_out_file); # this will have one representative sequence for each cluster
+                    my $aligned_file_name = "$cluster_directory/cluster$cluster_number-aligned_nucleotides.fa";
+                    open (OUTPUT, ">", $aligned_file_name) or die "ERROR: Cannot create file $aligned_file_name\n";
+                    foreach my $sequence_name (keys %oriented_sequences) {
+                        if (exists $representative_sequences{$sequence_name}) { 
+                            print OUTPUT ">$sequence_name\n";
+                            print OUTPUT "$oriented_sequences{$sequence_name}\n";
+                        }
+                        else {
+                            print CLREADME "\tIgnoring BLASTn output sequence because it is duplicated in the genome: $sequence_name\n";
+                        }
+                    }
+                    print CLREADME "\tFile $aligned_file_name contains aligned, oriented, and non-duplicated sequences of this cluster\n";
+                    close OUTPUT;
+                }
+                else {
+                    $all_loci_overlap = 1; # all the sequences overlap
+                }
+            }
         }
-        else { # this means that no genomic sequences were found for this cluster
+        unless (keys %element_bounds) { # No sequences were found, move the elements into the rejected folder and remove the cluster folder
             my $datestring = localtime();
-            print REJECT "$datestring\t$clustering_info{$cluster_number}[0]\tSTEP 4\tNo genomic location were found for this (these) element(s) where the identified TIRs are properly positioned.\n";
-            # move the elments into the rejected folder
+            if ($all_loci_overlap) {
+                print REJECT "$datestring\t$clustering_info{$cluster_number}[0]\tSTEP 4\tAll identified genomic locations overlap each other.\n";
+    
+            }
+            else {
+                print REJECT "$datestring\t$clustering_info{$cluster_number}[0]\tSTEP 4\tNo genomic location were found for this (these) element(s).\n";
+            }
+            `rm -rf $cluster_directory`; # remove the cluster directory
+            if ($?) { die "ERROR removing folder $cluster_directory $?\n"}
             my @data = split " ", $clustering_info{$cluster_number}[0];
             foreach my $element_name (@data) {
                 `mv $ELEMENT_FOLDER/$element_name $reject_folder_path`;
                 if ($?) { die "ERROR moving folder $ELEMENT_FOLDER/$element_name to $reject_folder_path $?\n"}
             }
         }
+        close CLREADME;
     }
 
-    # Clean up folders, move the -element and -further_review folders into the -analysis folder and make a record of this
-    `mv $ELEMENT_FOLDER $ANALYSIS_FOLDER`;
-    if ($?) { die "ERROR moving folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER $?\n"}
-    print ANALYSIS "\tMoving the folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER\n";
+    # #Clean up folders, move the -element folders into the -analysis folder and make a record of this
+    # `mv $ELEMENT_FOLDER $ANALYSIS_FOLDER`;
+    # if ($?) { die "ERROR moving folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER $?\n"}
+    # print ANALYSIS "\tMoving the folder $ELEMENT_FOLDER to $ANALYSIS_FOLDER\n";
 }
 
 ### PIPELINE STEP 5 
 ### Identify the most likely representative sequence for each cluster, and create final report
-### CONSTANTS applicable only for STEP 6
+### CONSTANTS applicable only for STEP 5
 my $CONSENSUS_LEVEL = 0.6; # minimum proportion of non-gap positions that must agree to call a position
 my $MIN_FOR_POSITION = 2; # minumum number of nucleotides or amino acids to call a position (not ignore it)
 my $RVCMP; # optional, reverse complement the fasta file input
 my $KNOWN_TNP_DATABASE = "/home/peter/TE-discovery/known_transposases/tnps_sequences.fa"; # location of known transpoase sequences, fomated with makeblastdb
+my $MIN_AUTONOMOUS_SIZE = 1000; # size in bp below which the sequences is likely a MITE rather than an autonomous element
 
 if ($STEP == 5) { # check if this step should be performed or not
     ## update the analysis file with what is going on
     my $datestring = localtime();
-    print ANALYSIS "Running STEP 6 on $datestring\n";
+    print ANALYSIS "Running STEP 5 on $datestring\n";
     
     ## check that all the inputs are ok
     opendir(my $dh, $CLUSTER_FOLDER) or die "ERROR: Cannot open cluster folder $CLUSTER_FOLDER, $!";
@@ -1623,610 +1715,41 @@ if ($STEP == 5) { # check if this step should be performed or not
         die "ERROR: Cannot find the database of known transposases $KNOWN_TNP_DATABASE . This database must formatted with NCBI's makeblastdb.\n";
     }
 
-   # my %seen_tirs; # hash of arrays that has the unique tsd-tir1-tir2 string as key, and array of with data on this combination
-    while (readdir $dh) {
-        my $cluster_name = $_;
-        #my $cluster_name = "cluster24";
-        unless (($cluster_name =~ /^\./) or ($cluster_name =~ /.fa$/)) { # prevents reading invisible files . and .. as well as fasta files in that directory 
-            # Setup cluster specific variables
-            my $CONSENSUS_LEVEL; # minimum proportion of non-gap positions that must agree to call a position
-            my $MIN_FOR_POSITION; # minumum number of nucleotides or amino acids to call a position (not ignore it)
-            my $RVCMP=0; # boolean, set 1 if the nucleotide sequences should be reverse-complemented
-            my $current_cluster_folder = $CLUSTER_FOLDER . "/" . $cluster_name ; # folder with specific element of interest   
-            my $cluster_report_path = $current_cluster_folder . "/" . $cluster_name . "_report.md"; # if it exists this would be the full path to the report for this cluster
-            my $consensus_sequence; # latest consensus sequence, these variable are declared here so they can be used at different parts of the menu
-            my $current_protein_sequence; 
-            my $current_nucleotide_sequence; 
-            my $current_protein_accession;
-            my $current_sequence_name;
-            my $tsd_length;  
-            my $tir_length;
-            my $next_step = 2; # a guess from the script for the next step the user might want to do 
-            unless (-e $cluster_report_path) { # only continue if this cluster does not have a report yet
-                print ANALYSIS "\tStarting review of cluster $cluster_name\n"; # update the analysis log
-
-                # update the user on how many folders are left to review
-                my ($total_folders, $folders_with_report) = count_report_folders($CLUSTER_FOLDER);
-                my $folders_left = $total_folders - $folders_with_report;
-
-                # Variables used accross menu items
-                my $blastx_negative_strand; # used when writting the report 
-                
-                # Load the nucleotide sequences for this cluster
-                my $nuc_alignment_file_name = $current_cluster_folder . "/" . $cluster_name . "-aligned_nucleotides.fa";
-                my %alignment_sequences = fastatohash($nuc_alignment_file_name); # load the existing alignments
-
-                # Set the consensus parameters depending on the size of the alignment
-                if (keys %alignment_sequences == 2) {
-                    $MIN_FOR_POSITION = 1;
-                    $CONSENSUS_LEVEL = 0.6
-                }
-                else {
-                    $MIN_FOR_POSITION = 2;
-                    $CONSENSUS_LEVEL = 0.6
-                }
-
-                `pkill java`; # kill a previous aliview window, this could be dangerous in the long run otherwise
-
-                # Setup and display menu 1
-                my @menu1_items; # holds the text of menu 1 choices
-                push @menu1_items, "Quit the program"; # item 0
-                push @menu1_items, "Move to the next cluster"; # item 1
-                push @menu1_items, "View the nucleotide alignment file"; # item 2
-                push @menu1_items, "Calculate consensus sequence based on all sequences"; # item 3                                   
-                push @menu1_items, "Do NCBI BLASTx search on the nr database"; # item 4
-                push @menu1_items, "Find nucleotide alignment sequence(s) with most intact transposase"; # item 5
-                push @menu1_items, "Find transposase in nucleotide sequence"; # item 6
-                push @menu1_items, "Create report"; # item 7
-                push @menu1_items, "Open report in text editor"; # item 8
-                push @menu1_items, "Calculate consensus sequence based on selected sequences"; # item 8
-                push @menu1_items, "Change consensus sequence parameters"; # item 10
-                push @menu1_items, "Extract query sequence from BLASTx output"; # item 11
-                my $menu1 = 1; # boolean, set to one until the user is done with menu 1
-                while ($menu1) {
-                    my $menu1_choice = prompt('m', {
-                        title => colored("Reviewing $cluster_name, there are $folders_left clusters left to review of a total of $total_folders", "bold green"),
-                        prompt => 'What would you like to do?',
-                        display_base => 0,
-                        return_base => 0,
-                        accept_multiple_selections => 0,
-                        items  => [@menu1_items],
-                        separator => '[,/\s]',
-                    },'', $next_step);
-
-                    # process answer to menu 1
-                    if ($menu1_choice == 0) {
-                        `pkill java`; # kill a previous aliview window, this could be dangerous in the long run
-                        close ANALYSIS;
-                        exit;
-                    }
-                    if ($menu1_choice == 1) { # the user is done with this cluster
-                        $menu1 = 0;
-                    }
-                    if ($menu1_choice == 2) { # the user wants to see the nucleotide alignment
-                        `aliview $nuc_alignment_file_name `;
-                        if ($?) { die "ERROR: Could not open program aliview: error code $?\n"}
-                        $menu1 = 1; # stay in menu 1
-                        $next_step = 3;
-                    }
-                    
-                    if ($menu1_choice == 3) { # the user wants make a consensus based on all the sequences in the alignment                            
-                        # Turn this fasta file into a single text file, this is so that it's consistent with the clipboard entry of fasta files.
-                        my $fasta_text; 
-                        foreach my $sequence_name (keys %alignment_sequences){ 
-                            if ($sequence_name =~ /\d_(\d+)_\d+$/) { # only add sequences that have DNA and record the TSD length
-                                $fasta_text .= ">$sequence_name\n" . "$alignment_sequences{$sequence_name}\n";
-                            }
-                        }
-                        if (defined $fasta_text && length $fasta_text) { 
-                            ($current_nucleotide_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
-                            print colored ("\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$current_nucleotide_sequence\n\n", "bold");
-                        }
-                        else {
-                            warn "File $nuc_alignment_file_name does not contain fasta formated sequences.\n"; 
-                        }
-                        $menu1 = 1; # stay in menu 1
-                        $next_step = 4;
-                    }
-
-                    if ($menu1_choice == 4) { # user wants to search with BLASTx
-                        $current_nucleotide_sequence = uc(prompt('a', "Enter the nucleotide sequence", "", "$current_nucleotide_sequence"));
-                        my $program  = "blastx";
-                        # try the matching to the known transposase database first
-                        my $MIN_ID_PERCENTAGE = 80; # smallest percentage of match to known transpoase to report it
-                        my $MIN_COVERAGE = 80; # smallest percentage of coverage known transpoase to report it
-                        my $nucleotide_input_file = fasta_tempfile($current_nucleotide_sequence);
-                        my $blastx_output = `blastx -db $KNOWN_TNP_DATABASE -query $nucleotide_input_file -outfmt "6 sseqid stitle pident length slen qframe"`;
-                        my @blastx_array = split "\n", $blastx_output;
-                        my $found_match = 0; # boolean
-                        my $i=1; # used to only record the first match
-                        foreach my $line (@blastx_array) {
-                            my @line_elements = split "\t", $line;
-                            my $coverage = 100 * ($line_elements[3]/$line_elements[4]);
-                            if (($line_elements[2] >= $MIN_ID_PERCENTAGE) and ($coverage >= $MIN_COVERAGE)){
-                                if ($i == 1) { # only the first match will become the later default match
-                                    $current_protein_accession = $line_elements[0]; # make the first match the default
-                                    # copy the nucleotide input to the clipboard in case they want to blast it
-                                    open(my $clip, "|-", "xclip -selection clipboard") or die "Can't open xclip: $!";
-                                    print $clip $current_nucleotide_sequence;
-                                    close($clip);
-                                    print colored ("Copied nucleotide sequence to clipboard to use with BLASTx if wanted\n", "blue");
-                                }
-                                $i++; 
-                                print "The known transposase below is $line_elements[4] amino acids long, $line_elements[2]% identical, and covers $coverage% to the nucleotide input\n$line_elements[1]\n";   
-                                $found_match = 1;
-                            }
-                        }
-                        print "\n";
-                        unless ($found_match) {
-                            print colored ("No matches to known transposases were found, do a BLASTX search on NCBI\n", "yellow");
-                            print colored ("\nLaunching NCBI BLAST on web browser (copied nucleotide sequence to clipboard)\n\n", "blue");
-                            open(my $clip, "|-", "xclip -selection clipboard") or die "Can't open xclip: $!";
-                            print $clip $current_nucleotide_sequence;
-                            close($clip);
-                            my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastx&PAGE_TYPE=BlastSearch&LINK_LOC=blasthome";
-                            system("firefox \"$url\" 2>/dev/null");
-                        }  
-                        $menu1 = 1; # stay in menu 1
-                        $next_step = 5;
-                    }
-
-                    if ($menu1_choice == 5) { # user wants blast protein sequence to alignment
-                        # Get the amino acid sequence
-                        $current_protein_accession = prompt('x', "Enter either an NCBI protein identifier or input 0 to enter a protein sequence instead:", "", "$current_protein_accession");                         
-                        if ($current_protein_accession) {
-                            $current_protein_sequence = fetch_protein_fasta($current_protein_accession);
-                        }
-                        else {
-                            $current_protein_sequence = prompt('x', "Enter protein sequence as a single line:", "", "$current_protein_sequence");
-                        }
-
-                        if ($current_protein_sequence =~ /Error\:/) {
-                            warn "Error: Did not get a protein sequence\n";
-                            $current_protein_sequence = 0;
-                        }
-                        else {
-                            my $protein_inputfile_name = fasta_tempfile($current_protein_sequence);
-
-                            # Copy alignment file to temporary file and remove gaps
-                            my $nucleotide_inputfile_name = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); 
-                            open (OUTPUT, '>', $nucleotide_inputfile_name) or die "ERROR: Cannot create tempoary file $nucleotide_inputfile_name\n";
-                            foreach my $header (keys %alignment_sequences) {
-                                print OUTPUT ">" . $header . "\n";
-                                $alignment_sequences{$header} =~ s/-//g; # remove gaps from the sequence
-                                print OUTPUT $alignment_sequences{$header} . "\n";
-                            }
-                            close OUTPUT;
-
-                            # Run the blastx 
-                            my $blast_output_file_name = $current_cluster_folder . "/" . "blastx-" . strftime("%m%d%y-%H%M", localtime) . ".asn";
-                            `blastx -subject $protein_inputfile_name -query $nucleotide_inputfile_name -outfmt 11 > $blast_output_file_name`;
-                            if ($?) { warn "WARNING running blastx locally did not work$?\n"}
-                            print colored ("\nBLASTx output written to file $blast_output_file_name\n", "blue");
-                            #print colored ("HINT: Display this search in using\n", "blue");
-                            #print colored ("blast_formatter -archive $blast_output_file_name -outfmt 0 -html > temp.html && firefox temp.html\n\n", "bold");
-
-                            # Identify the hits with the best matches and sort it by coverage
-                            my $reformat_blastx_text = `blast_formatter -archive $blast_output_file_name -outfmt "6 qseqid pident length qframe"`;
-                            if ($?) { die "ERROR running reformating blastx $?\n"}
-                            my @reformat_blastx_array = split "\n", $reformat_blastx_text;
-                            my %seen; # there will be duplicate lines, this is to remove duplicates
-                            my @unique = grep { !$seen{$_}++ } @reformat_blastx_array; # there will be duplicate lines, this is to remove duplicates
-                            my @sorted_blastx_array = sort { (split /\t/, $b)[2] <=> (split /\t/, $a)[2] } @unique;
-
-                            # display top results
-                            my $maximum_number_of_results_to_display = 10;
-                            my $protein_length = length ($current_protein_sequence);
-                            print colored ("Top results, sorted by match length. Protein length is $protein_length\n", "bold");
-                            print colored ("Sequence name\t%identity\taa. covered\tframe\n", "bold");
-                            for (my $i=0; $i<$maximum_number_of_results_to_display; $i++) {
-                                if (exists $sorted_blastx_array[$i]) {
-                                    print "$sorted_blastx_array[$i]\n";
-                                    if ($i==0) { # get the alignment name of the top hit for future use
-                                        my @line_elements = split " ", $sorted_blastx_array[$i];
-                                        $current_sequence_name = $line_elements[0];
-                                    }
-                                }
-                            }
-                            $menu1 = 1; # stay in menu 1
-                            $next_step = 6;
-                        } 
-                    }
-
-                    if ($menu1_choice == 6) { # user wants to find transposase in nucleotide sequence 
-
-                        # Get the nucleotide sequence
-                        $current_sequence_name = prompt('x', "Enter either an alignment sequence name or input 0 to enter a nucleotide sequence instead:", "", "$current_sequence_name");
-                        if ($current_sequence_name) {
-                            if (exists $alignment_sequences{$current_sequence_name}) {
-                                $current_nucleotide_sequence = uc($alignment_sequences{$current_sequence_name});
-                                $current_nucleotide_sequence =~ s/-//g; # remove any gaps from the sequence
-                                # Remove the TSD sequences from the nucleotide sequence
-                                if ($current_sequence_name =~ /\d+_(\d+)_\d+$/) {
-                                    $tsd_length = $1;
-                                    $current_nucleotide_sequence = substr $current_nucleotide_sequence, $tsd_length, (length $current_nucleotide_sequence) - (2*$tsd_length);
-                                } 
-                                else {
-                                    warn "WARNING: TSD length could not be determined from the title below, TSD sequences not removed\n$current_sequence_name\n";
-                                }
-                            }
-                            else {
-                                warn "Error: Did not get a nucleotide sequence\n";
-                                $current_nucleotide_sequence = 0;
-                            }
-                        }
-                        else {
-                            $current_nucleotide_sequence = uc(prompt('a', "Enter nucleotide sequence as a single line:", "", "$current_nucleotide_sequence"));
-                        }
-
-                        # Get the amino acid sequence but only if a nucleotide sequence was successfully obtained
-                        if ($current_nucleotide_sequence) {
-                            $current_protein_accession = prompt('x', "Enter either an NCBI protein identifier or input 0 to enter a protein sequence instead:", "", "$current_protein_accession");                         
-                            if ($current_protein_accession) {
-                                $current_protein_sequence = fetch_protein_fasta($current_protein_accession);
-                                if ($current_protein_sequence =~ /Error\:/) { # if failed to fetch, then report to the user
-                                    warn "Error: Did not get a protein sequence\n";
-                                    $current_protein_sequence = 0;
-                                }
-                                else { # if did fetch the protein then remove the header sequence and spaces
-                                    my @protein_array = split "\n", $current_protein_sequence;
-                                    shift(@protein_array); # remove the header
-                                    $current_protein_sequence = join '', @protein_array; # join back togther without white spaces
-                                }
-                            }
-                            else {
-                                $current_protein_sequence = prompt('x', "Enter protein sequence as a single line:", "", "$current_protein_sequence");
-                            }
-                        }
-                        if ($current_nucleotide_sequence and $current_protein_sequence) {
-                            # Run the blastx 
-                            my $protein_input_file = fasta_tempfile($current_protein_sequence);
-                            my $nucleotide_input_file = fasta_tempfile($current_nucleotide_sequence);
-                            my $blastx_output = `blastx -subject $protein_input_file -query $nucleotide_input_file -outfmt "6 length qframe qstart qend"`;                                 
-                            # Identify the longest match
-                            my @blastx_array = split "\n", $blastx_output;
-                            my @sorted_blastx_array = sort { (split /\t/, $b)[0] <=> (split /\t/, $a)[0] } @blastx_array;
-                            my @best_blastx_parameters = split " ", $sorted_blastx_array[0]; # parameter as 0-->length, 1-->frame, 2--> start, 3-->end;
-
-                            # translate the sequence and identify where the blast query start and ends in the protein
-                            my $translasted_protein_start = nt_to_protein_position($current_nucleotide_sequence, $best_blastx_parameters[1], $best_blastx_parameters[2]);
-                            my $translasted_protein_end = nt_to_protein_position($current_nucleotide_sequence, $best_blastx_parameters[1], $best_blastx_parameters[3]);                               
-                            my $translated_sequence = translate_frame($current_nucleotide_sequence, $best_blastx_parameters[1]);
-                            
-                            # identify all the methionine positions upstream of the end of the blastx match
-                            my @M_positions; # positions of all the methonines upstream of the blastx match
-                            while ($translated_sequence =~ /M/g) {
-                                my $position = pos($translated_sequence) - 1;
-                                if ($position < $translasted_protein_end) {
-                                    push @M_positions, $position;
-                                }
-                            }
-                            
-                            # identify the stop codon closest to the end of the translated sequence
-                            my $stop_codon_position=-1; # positon of the best stop codon
-                            while ($translated_sequence =~ /\*/g) { # look for stop codons
-                                my $current_position = pos($translated_sequence) - 1; 
-                                # only update the best stop position if it's the first iteration (negative position) or a better postion was found
-                                if (($current_position >= $translasted_protein_end) and (($stop_codon_position > $current_position) or ($stop_codon_position < 0))){
-                                    $stop_codon_position = $current_position;
-                                }
-                            }
-
-                            # identify all the ORFs
-                            my @orfs; # the possible orf sequences
-                            foreach my $met_pos (@M_positions) { 
-                                if ($stop_codon_position > 0) { # a stop was found
-                                    push @orfs, substr $translated_sequence, $met_pos, $stop_codon_position - $met_pos + 1;
-                                }
-                                else { # no stop was found go to then of the translated sequence
-                                    push @orfs, substr $translated_sequence, $met_pos, (length $translated_sequence) - $met_pos + 1;
-                                }
-                            }
-
-                            # Print the ORFs starting with a header
-                            print colored ("\nPossible ORFs, fasta titles are <sequence name>-<peptide length>-<number of stop codons>:\n", "blue");
-                            if ($best_blastx_parameters[1] > 0) {
-                                print colored ("Translation is on the POSITIVE strand\n", "bold");
-                                $blastx_negative_strand = 0; # update the strand of the blastx for use later
-                            }
-                            else {
-                                print colored ("Translation is on the NEGATIVE strand\n", "bold"); # update the strand of the blastx for use later
-                                $blastx_negative_strand = 1; 
-                            }
-                            my @sorted = sort { length($b) <=> length($a) } @orfs;
-                            my $MAXIUM_NUMBER_OF_SEQUENCES_TO_DISPLAY = 10;
-                            for (my $i=0; $i < scalar @sorted; $i++) {
-                                my $len = length $sorted[$i];
-                                my $stop_count = ($sorted[$i] =~ tr/\*/\*/); 
-                                if ($i <= $MAXIUM_NUMBER_OF_SEQUENCES_TO_DISPLAY) {
-                                    print ">Seq$i-$len-$stop_count\n$sorted[$i]\n";
-                                }
-                            }
-                            if ($stop_codon_position) { # print from start of translation to stop
-                                my $seq = substr $translated_sequence, 0, $stop_codon_position + 1;
-                                my $len = length $seq;
-                                my $stop_count = ($seq =~ tr/\*/\*/);
-                                print ">To_first_stop-$len-$stop_count\n$seq\n";
-                            }
-
-                            my $len = length $translated_sequence;
-                            my $stop_count = ($translated_sequence =~ tr/\*/\*/);
-                            print ">Whole_sequence-$len-$stop_count\n$translated_sequence\n\n"; # print the whole thing
-                        }
-                        $menu1 = 1; # stay in menu 1
-                        $next_step = 7;
-                    }
-
-                    if ($menu1_choice == 7) { # print report
-                        my $notes; # text to add to the Notes section of the report   
-                        my $continue_report = 1; # boolean used to abort the report if problems arrise
-
-                        # Get the nucleotide sequence the user wants to use 
-                        $current_sequence_name = uc(prompt('x', "Enter full name of the alignment sequence to use, enter 0 to enter a different kind of sequence, of -1 to abort this step:", "", "$current_sequence_name"));
-                        my $TIR1seq; # TIR sequences to use in the report
-                        my $TIR2seq;
-                        if ($current_sequence_name eq "0") { # user want to enter a sequence manually
-                            $current_nucleotide_sequence = prompt('x', "Enter the nucleotide sequence without TSDs:", "", "$current_nucleotide_sequence");
-                            $current_nucleotide_sequence = uc($current_nucleotide_sequence);
-                            $tir_length = prompt('n', "Enter the length of the TIRs at the end of the sequence:", "", "$tir_length");
-                            $notes .= "Reference nucleotide sequence is not one of the alignment sequences\n";
-                        }
-                        elsif ($current_sequence_name eq "-1") { # user wants to abort
-                            $continue_report = 0;
-                        }
-                        else {
-                            if (exists $alignment_sequences{$current_sequence_name}) {
-                                if ($current_sequence_name =~ /\S+_\d+_(\d+)_(\d+)/) {
-                                    $tsd_length  = $1;
-                                    $tir_length = $2;
-                                    $current_nucleotide_sequence = uc($alignment_sequences{$current_sequence_name});
-                                    $current_nucleotide_sequence =~ s/-//g; # remove any gaps from the sequence
-                                    $current_nucleotide_sequence = substr $current_nucleotide_sequence, $tsd_length, (length $current_nucleotide_sequence) - (2*$tsd_length); # remove the TSDs
-                                    $notes .= "Reference nucleotide sequence is $current_sequence_name\n";
-                                }
-                                else {
-                                    die "ERROR: Could not parse the TSD and TIR lengths from name $current_sequence_name\n";
-                                }
-                            }
-                            else {
-                                print colored ("WARNING: The current alignment does not have a sequence called $current_sequence_name. The report will not be printed\n", "yellow");
-                                $continue_report = 0;
-                            }
-                        }
-                        # Get the TIR sequences
-                        if ($continue_report) {
-                            $TIR1seq = substr $current_nucleotide_sequence, 0, $tir_length;
-                            $TIR2seq = substr $current_nucleotide_sequence, -$tir_length, $tir_length;
-                            my $rc; # boolean, set to 1 if the sequence should be reverse-complemented
-                            if ($blastx_negative_strand) {
-                                $rc = prompt('y', "Should this sequence be written in the opposite orientation? (last BLASTx was on the negative strand)", "", "y");
-                            }
-                            else {
-                                $rc = prompt('y', "Should this sequence be written in the opposite orientation?", "", "n");
-                            }
-                            if ($rc) {
-                                $current_nucleotide_sequence = rc($current_nucleotide_sequence);
-                                $notes .= "Nucleotide sequence has been reverse-complemented\n";
-                            }
-                        }
-
-                        # Get the transposase information
-                        my $transposase;
-                        if ($continue_report) {
-                            $transposase = prompt('x', "Enter the transposase sequence:", "", "none");
-                            unless ($transposase eq "none") {
-
-                                # Check that the transposase and the nucleotide sequences are in the same orientation and align well
-                                my $protein_input_file = fasta_tempfile($transposase);
-                                my $nucleotide_input_file = fasta_tempfile($current_nucleotide_sequence);
-                                my $blastx_output = `blastx -subject $protein_input_file -query $nucleotide_input_file -outfmt "6 length qframe"`;
-                                my @blastx_array = split "\n", $blastx_output;
-                                my @topline_data = split " ", $blastx_array[0];
-                                my $match_proportion = $topline_data[0]/(length $transposase);
-                                if (($topline_data[1] < 0) or ($match_proportion < 0.75)) {
-                                    print colored ("WARNING: The nucleotide sequence and transposase don't seem to match:\n", "yellow");
-                                    print colored ("Transpoase orientation: $topline_data[1]\n", "bold");
-                                    print colored ("Proportion of transpoase mapping to nucleotide: $match_proportion\n", "bold");
-                                    $continue_report = prompt('y', 'Should printing this report be continued?', '', 'n');
-                                }
-
-                                if ($continue_report) {
-                                    my $default_transposase_full = 'n'; # guessing if the transposase is full length
-                                    my $default_transposase_intact = 'n'; # guessing if the transposase is intact
-                                    my $trimmed = substr($transposase, 0, -1); # remove the last character
-                                    my $count_stops = () = $trimmed =~ /\*/g; # count the number of * characters
-                                    if ($transposase =~ /^M.+\*$/) { # check that the transposes starts with M and ends with *
-                                        $default_transposase_full = 'y';
-                                    }
-                                    if ($count_stops == 0) { # check if there are stop codons other than at the end of the transpoase
-                                        $default_transposase_intact = 'y';
-                                    }
-                                    my $full_length_protein = prompt('y', 'Is this likely a full length transposase?', '', $default_transposase_full);
-                                    if ($full_length_protein) {
-                                        $notes .= "Full length transposase\n";
-                                    }
-                                    else {
-                                        $notes .= "Partial transposase\n";
-                                    }
-                                    my $intact_protein = prompt('y', 'Is the transpoase sequence likely intact?', '', $default_transposase_intact);
-                                    if ($intact_protein) {
-                                        $notes .= "Transposase sequence is intact\n";
-                                    }
-                                    else {
-                                        $notes .= "Transposase sequence is not intact\n";
-                                    }
-                                }
-                            }
-                        }
-
-                        if ($continue_report) { # only continue if not fatal errors have been generated
-                            # Get the TSD type
-                            my $default_tsd = 1; # trying to guess what the TSD will be
-                            my $default_taxonomy = 1; # trying to guess what the taxonomy will be
-                            if ($tsd_length == 8) {
-                                $default_tsd = 8;
-                                $default_taxonomy = 4;
-                            }
-                            elsif ($tsd_length == 2) {
-                                $default_tsd = 1;
-                                $default_taxonomy = 1;
-                            }
-                            my @TSD_items = qw(TA 2 3 4 5 6 7 8 9 10 blank);
-                            my $TSD_idx = prompt('m',
-                                {
-                                    title        => '',
-                                    prompt       => 'Enter the TSD type:',
-                                    items        => \@TSD_items,
-                                    display_base => 1,
-                                    return_base  => 1,
-                                },
-                                'Choose TA or a number between 2 and 10',
-                                $default_tsd);
-
-                            my $TSD_type = $TSD_items[$TSD_idx - 1];  # subtract return_base to get 0-indexed
-                            if ($TSD_type == 8) {
-                                my $TA_TSD = prompt('y', 'Do the TSDs have TA at positions 4 and 5?', '', 'n');
-                                if ($TA_TSD) {
-                                    $notes .= "TSDs have TA at positions 4 and 5\n";
-                                }
-                            }
-
-                            # Get the taxonomy
-                            
-
-                            my @taxonomy_items = qw(Tc tigger mariner hAT other unknown blank);
-                            my $taxonomy_idx = prompt('m',
-                                {
-                                    title        => '',
-                                    prompt       => 'Enter the taxonomy of this element:',
-                                    items        => \@taxonomy_items,
-                                    display_base => 1,
-                                    return_base  => 1,
-                                },
-                                '',
-                                $default_taxonomy);
-
-                            my $taxonomy = $taxonomy_items[$taxonomy_idx - 1];
-                            if ($taxonomy eq "other") {
-                                my $taxonomy_note = prompt('x', "taxonomy note:", "", "");
-                                $notes .= "Taxonomy note: $taxonomy_note\n";
-                            }
-
-                            # Create the report
-                            open (OUTPUT, '>', $cluster_report_path) or die "ERROR: Cannot create report at $cluster_report_path\n";
-                            print OUTPUT "# Report $cluster_name\n";
-                            print OUTPUT "## Nucleotide sequence:\n";
-                            print OUTPUT "$current_nucleotide_sequence\n";
-                            print OUTPUT "## TSD Type\n";
-                            if ($TSD_type eq "blank") {
-                                print OUTPUT "\n";
-                            }
-                            else {
-                                print OUTPUT "$TSD_type\n";
-                            }
-                            print OUTPUT "## TIR sequences\n";
-                            print OUTPUT "- 5' TIR: $TIR1seq\n";
-                            print OUTPUT "- 3' TIR: $TIR2seq\n";
-                            print OUTPUT "## Protein sequence\n";
-                            print OUTPUT "$transposase\n";
-                            print OUTPUT "## Element taxonomy:\n";
-                            if ($taxonomy eq "blank") {
-                                print OUTPUT "\n";
-                            }
-                            else {
-                                print OUTPUT "$taxonomy\n";
-                            }
-                            print OUTPUT "## Notes:\n";
-                            print OUTPUT $notes;
-                            close (OUTPUT);
-
-                            # Update the user and the analysis log
-                            print "Report written to $cluster_report_path\n";
-                            print ANALYSIS "\tReport written to $cluster_report_path\n"; # update the analysis log
-                        }
-
-                        $menu1 = 1; # stay in menu 1
-                        if ($continue_report) {
-                            $next_step = 8;
-                        }
-                        else {
-                            $next_step = 7;
-                        }
-                    }
-
-                    if ($menu1_choice == 8) { # user want to edit the report
-                        if (-e $cluster_report_path) { # check that a report has been generated
-                            if (system("which code > /dev/null 2>&1") == 0) { # check that the text editor is available
-                                `code $cluster_report_path`;
-                            } else {
-                                print colored ("ERROR: Could open the text editor appliction \"code\", make sure it is installed.\n", "red");
-                            }
-                        }
-                        else {
-                            print colored ("WARNING: No report has yet been generated for this cluster.\n", "yellow");
-                        }
-                        $menu1 = 1; # stay in menu 1
-                        $next_step = 1;
-                    }
-
-                    if ($menu1_choice == 9) { # user want to select lines for the consensus
-                        my $fasta_text = `xclip -selection clipboard -o 2>/dev/null`;
-                        if (!defined $fasta_text || $fasta_text eq '') {
-                            print colored ("Could not read clipboard. Make sure 'xclip' is installed.\n", "yellow");
-                        }
-                        else { 
-                            ($current_nucleotide_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
-                            # print the consensus for the user, minus the TSD sequences
-                            if ($current_nucleotide_sequence) {
-                                print colored ("\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$current_nucleotide_sequence\n\n", "bold");
-                            }
-                            else {
-                                print colored ("WARNING: No consensus was created.\n", "yellow");
-                            }
-                        }
-                        $menu1 = 1; # stay in menu 1
-                        $next_step = 4;
-                    }
-
-                    if ($menu1_choice == 10) { # the user wants to change the consensus sequence parameter
-                        $RVCMP = prompt('y', "Should the nucletides be reverse complemented:", '', $RVCMP); 
-                        $CONSENSUS_LEVEL = prompt('f', "Consensus level:", '', $CONSENSUS_LEVEL);
-                        $MIN_FOR_POSITION = prompt('f', "Minumum number for position:", '', $MIN_FOR_POSITION);
-                        $menu1 = 1; # stay in menu 1
-                        $next_step = 3;
-                    }
-
-                    if ($menu1_choice == 11) { # the user wants extract the query sequence from BLASTx output
-                        # read the data from the clipboard and check that it's ok
-                        my $clipboard_text = `xclip -selection clipboard -o 2>/dev/null`; 
-                        my $query_sequence;
-                        if (!defined $clipboard_text) { # check that xclip is installed
-                            print colored ("Could not read clipboard. Make sure 'xclip' is installed.\n", "yellow");
-                        }
-                        else { # data is ok
-                            my @lines = split "\n", $clipboard_text;
-                            for (my $i = 0; $i < @lines; $i++) {
-                                my $line = $lines[$i];
-                                if ($line =~ /^Query\s+\d+\s+(\S+)\s+\d+\s*$/) {
-                                    $query_sequence .= $1;
-                                }
-                            }
-                        }
-                        $query_sequence =~ s/-//g; # remove gaps
-                        # print results
-                        if ($query_sequence) {
-                            print ">Query_sequence\n$query_sequence\n";
-                        }
-                        else {
-                            print colored ("No query sequence was found in the clipboard\n", "yellow");
-                            print "$clipboard_text\n";
-                        }
-                    }
+    ## figure out the elements to be examined
+    my @cluster_names; # holds the names of all the clusters left to be examined
+    if ($ITEM_NAME) { # user has specified a cluster to examine
+        push @cluster_names, $ITEM_NAME;
+    }
+    else { # examine all the clusters that don't have a report
+        while (readdir $dh) {
+            unless (($_ =~ /^\./) or ($_ =~ /.fa$/)) { # prevents reading invisible files . and .. as well as fasta files in that directory 
+                my $cluster_report_path = $CLUSTER_FOLDER . "/" . $_ . "/" . $_ . "_report.md"; # if it exists this would be the full path to the report for this cluster
+                if (!-e $cluster_report_path) { # only add name if a report does not exist
+                    push @cluster_names, $_;
                 }
             }
         }
-    }  
+    }
+    unless (@cluster_names) { # check that there's anything to do
+        print colored ("WARNING: There are no clusters to be examined (perhaps they all have reports already?), stoping\n", "yellow");
+        exit;
+    }
+
+    ## cycle through all the names to be examined, or terminate if the user chooses to 
+    my $total_clusters = scalar @cluster_names; # number of elements the user wants to review to begin with
+    while (@cluster_names) {
+        my $clusters_left = scalar @cluster_names;
+        my $next = process_cluster($cluster_names[-1], $clusters_left, $total_clusters); # process the last element of the array return what to do next, 0-->quit, 1-->process next element
+        if ($next) {
+            pop(@cluster_names); # remove the last element of the array that was just processed
+        }
+        else {
+            @cluster_names = ();
+        }
+    }
+    print "Done with STEP 5\n";
 }
+
 close ANALYSIS;
 close REJECT;
 
@@ -2248,7 +1771,7 @@ sub fastatohash {
         $current_header = $1;
     }
     else {
-        die "ERROR: file $filename does not appear to be a properly formatted FASTA file, this in the fastatohash subroutine\n";
+        die "ERROR: file $filename does not appear to be a properly formatted FASTA file, this in the fastatohash subroutine\n"; 
     }
 
     while ($line = <INPUT>) {
@@ -2594,7 +2117,7 @@ sub adjust_alignment {
 # Take a fasta file as a single text file as input and returns a consensus sequence
 sub consensus {
 
-    my ($text, $consensus_level, $min_for_position, $reverse_complement, $type) = @_; # text with fasta file and parameters
+    my ($text, $consensus_level, $min_for_position, $reverse_complement, $type, $tsd_length, $tir_length) = @_; # text with fasta file and parameters
         
     ### Parse the fasta text
     my %sequences;
@@ -2681,17 +2204,17 @@ sub consensus {
     }
 
     # Determine the lengths of the TSD and TIR sequences from the header
-    my $tir_length;
-    my $tsd_length;
-    ($header) = keys %sequences; # random header with the TSD and TIR information  
-    if ($header =~ /\d+_(\d+)_(\d+)$/) {
-        $tsd_length = $1;
-        $tir_length = $2;
-    } 
-    else {
-        warn "WARNING: could not determine the TSD and TIR length from the header below\n$header\n";
-        $tsd_length = 0;
-        $tir_length = 0;
+    unless ($tir_length and $tsd_length) { # determine the TSD and TIR length from header unless it's been specified
+        ($header) = keys %sequences; # random header with the TSD and TIR information  
+        if ($header =~ /\d+_(\d+)_(\d+)$/) {
+            $tsd_length = $1;
+            $tir_length = $2;
+        } 
+        else {
+           warn "WARNING: could not determine the TSD and TIR length from the header below\n$header\n";
+            $tsd_length = 0;
+            $tir_length = 0;
+        }
     }
 
     # Remove the TSD sequences from the consensus
@@ -2829,4 +2352,710 @@ sub count_report_folders {
     }
 
     return ($total_folders, $folders_with_report);
+}
+
+sub process_cluster {
+    my ($cluster_name, $clusters_left, $total_clusters) = @_; # name of the current cluster, number of clusters left to examine, original total number of clusters
+
+    # Setup cluster specific variables
+    my $CONSENSUS_LEVEL; # minimum proportion of non-gap positions that must agree to call a position
+    my $MIN_FOR_POSITION; # minumum number of nucleotides or amino acids to call a position (not ignore it)
+    my $RVCMP=0; # boolean, set 1 if the nucleotide sequences should be reverse-complemented
+    my $current_cluster_folder = $CLUSTER_FOLDER . "/" . $cluster_name ; # folder with specific element of interest   
+    my $cluster_report_path = $current_cluster_folder . "/" . $cluster_name . "_report.md"; # if it exists this would be the full path to the report for this cluster
+    my $consensus_sequence; # latest consensus sequence, these variable are declared here so they can be used at different parts of the menu
+    my $current_protein_sequence; 
+    my $current_nucleotide_sequence; 
+    my $current_protein_accession;
+    my $current_sequence_name;
+    my $tsd_length;  
+    my $tir_length;
+    my $TSD_type;
+    my $next_step = 3; # a guess from the script for the next step the user might want to do 
+
+    print ANALYSIS "\tStarting review of cluster $cluster_name\n"; # update the analysis log
+
+    # read the README file to get the TSD and TIR information
+    my $README_FILE = $CLUSTER_FOLDER . "/$cluster_name" . "/README.txt";  # full path to README file
+    my $info_line = `grep "TSD type" $README_FILE`;
+    if ($info_line =~ /TSD\stype\s(\S+),\sTSD\slength\s(\d+),\sTIR\ssequences\s(\S+)\s\S+/) {
+        $TSD_type = $1;
+        $tsd_length = $2;
+        $tir_length = length ($3);
+    }
+    else {
+        print colored ("WARNING: Could not find TSD and TIR information line in README file\n", "yellow");
+    }
+
+    # Variables used accross menu items
+    my $blastx_negative_strand; # used when writting the report             
+    my $nuc_alignment_file_name = $current_cluster_folder . "/" . $cluster_name . "-aligned_nucleotides.fa";
+    my %alignment_sequences = fastatohash($nuc_alignment_file_name); # this variable will hold hold all the selected sequences
+    my %selected_sequences = %alignment_sequences; # sequences selected for analysis, starts off with all the sequences
+    
+    # remove any open windows from previous runs
+    `pkill java`; # kill a previous aliview window, this could be dangerous in the long run otherwise
+    `pkill feh`; # kill all previous instances of feh
+    
+    # create histogram
+    my %label_value_pairs; # holds length of the sequence (label) as key and frequency as value
+    my %length_to_name; # holds the sequence length as key and an array with the names of the sequences as values
+    my %all_aligned_sequences = fastatohash($nuc_alignment_file_name); # load all the sequences, historgrams always are of all sequences
+    foreach my $sequence_name (keys %all_aligned_sequences) {
+        my $no_gap_sequence = $all_aligned_sequences{$sequence_name} =~ s/-//gr;
+        $label_value_pairs{length $no_gap_sequence} += 1;
+        push @{ $length_to_name{length $no_gap_sequence}}, $sequence_name;
+    }
+    my @labels = sort { $a <=> $b } keys %label_value_pairs; # lables are the lengths of the sequences
+    my @counts = map { $label_value_pairs{$_} } @labels;
+    my $max_count = (sort { $b <=> $a } @counts)[0];
+    my $min_count = (sort { $a <=> $b } @counts)[0];
+    my $graph = GD::Graph::bars->new(800, 500);
+    $graph->set(
+        y_min_value       => $min_count,
+        y_max_value       => $max_count + 1,
+        y_tick_number     => ($max_count + 1 > 10 ? 10 : $max_count + 1),
+        y_plot_values     => 0,    # 1) hide the Y axis numbers
+        show_values       => 1,    # 2) frequency above each bar
+        x_labels_vertical => 1,    # 3) vertical X axis labels
+        bar_spacing       => 2,
+        transparent       => 0,
+    ) or die $graph->error;
+    my $gd = $graph->plot([ \@labels, \@counts ]) or die $graph->error;
+    my $histogram_outfile = $current_cluster_folder . "/histogram.png"; # cannot be a temporary file
+    open my $fh, '>', $histogram_outfile or die "ERROR: Cannot write $histogram_outfile: $!\n";
+    binmode $fh;
+    print $fh $gd->png;
+    close $fh;
+    system("feh --geometry 800x500-0-0 '$histogram_outfile' &"); # October 2026, I cannot find a way to capture an error here that still works wit the "prompt" menus
+    
+    # Setup and display menu 1
+    my @menu1_items; # holds the text of menu 1 choices
+    push @menu1_items, "Quit the program"; # item 0
+    push @menu1_items, "Move to the next cluster"; # item 1
+    push @menu1_items, "View the nucleotide alignment file of selected sequences"; # item 2
+    push @menu1_items, "Create consensus based on selected sequences"; # item 3                                   
+    push @menu1_items, "Do NCBI BLASTx search on the nr database"; # item 4
+    push @menu1_items, "Find nucleotide alignment sequence(s) with most intact transposase"; # item 5
+    push @menu1_items, "Find transposase in nucleotide sequence"; # item 6
+    push @menu1_items, "Create report"; # item 7
+    push @menu1_items, "Open report in text editor"; # item 8
+    push @menu1_items, "Calculate consensus sequence based on selected sequences"; # item 9
+    push @menu1_items, "Extract query sequence from BLASTx output"; # item 10
+    my $menu1 = 1; # boolean, set to one until the user is done with menu 1
+    while ($menu1) {
+        my $currently_selected_sequence_number = keys (%selected_sequences);
+        my $total_alignment_size = keys(%alignment_sequences); # size of all the sequences in the alignment
+        my $menu1_choice = prompt('m', {
+            title => colored("Reviewing $cluster_name, $currently_selected_sequence_number of $total_alignment_size sequences selected, $clusters_left of $total_clusters clusters left to review", "bold green"),
+            prompt => 'What would you like to do?',
+            display_base => 0,
+            return_base => 0,
+            accept_multiple_selections => 0,
+            items  => [@menu1_items],
+            separator => '[,/\s]',
+        },'', $next_step);
+
+        # process answer to menu 1
+        if ($menu1_choice == 0) {
+            `pkill java`; # kill a previous aliview window
+            `pkill feh`; # kill all previous instances of feh
+            close ANALYSIS;
+            return (0);
+        }
+        if ($menu1_choice == 1) { # the user is done with this cluster
+            `pkill java`; # kill a previous aliview window
+            `pkill feh`; # kill all previous instances of feh
+            return (1);
+        }
+        if ($menu1_choice == 2) { # the user wants to see the nucleotide alignment and histogram
+            my $selected_sequences_file = "/tmp/aliview.fa"; # file name to display
+            my $trimmed_sequence_file = "/tmp/trimmed.fa";
+            open (OUTPUT, ">", $selected_sequences_file) or die "ERROR: cannot create temparary file $selected_sequences_file\n";
+            foreach my $sequence_name (keys %selected_sequences) {
+                print OUTPUT ">$sequence_name\n";
+                print OUTPUT "$selected_sequences{$sequence_name}\n";
+            }
+            close OUTPUT;
+            `trimal -in $selected_sequences_file -out $trimmed_sequence_file -noallgaps -keepheader`;
+            if ($?) { 
+                print colored ("WARNING: Could not find program trimal, alignment not trimmed\n", "yellow");
+                $trimmed_sequence_file = $selected_sequences_file;
+            }
+            `aliview $trimmed_sequence_file`;
+            if ($?) { die "ERROR: Could not open program aliview: error code $?\n"}
+
+            $menu1 = 1; # stay in menu 1
+            $next_step = 3;
+        }
+        
+        if ($menu1_choice == 3) { # the user wants make a consensus based on all or certain sequences
+            # read and parse the size ranges to include in the consensus
+            my $selected_sequence_sizes = prompt('x', "Enter sequence size or range, separated by commas", "", "all");
+            my @sequence_lengths; # holds the nucleotides sizes to include
+            if ($selected_sequence_sizes =~ /all/) { # add all the sizes
+                @sequence_lengths = @labels; # this is from the histogram, getting all the sizes
+            }
+            else { # add only selected sizes
+                for my $part (split /\s*,\s*/, $selected_sequence_sizes) {
+                    $part =~ s/^\s+|\s+$//g;    # trim whitespace
+                    next if $part eq '';
+                    if ($part =~ /^(\d+)\s*-\s*(\d+)$/) {
+                        my ($start, $end) = ($1, $2);
+                        ($start, $end) = ($end, $start) if $start > $end;
+                        push @sequence_lengths, $start .. $end;
+                    }
+                    elsif ($part =~ /^\d+$/) {
+                        push @sequence_lengths, $part;
+                    }
+                    else {
+                        warn "Skipping unrecognized range: '$part'\n";
+                    }
+                }
+            }
+
+            # add selected sequences to %selected_sequences
+            %selected_sequences = ();
+            for my $length (@sequence_lengths) {
+                if (exists $length_to_name{$length}) {
+                    foreach my $sequence_name (@{ $length_to_name{$length} }) {
+                        $selected_sequences{$sequence_name} = $alignment_sequences{$sequence_name};
+                    }
+                }
+                else {
+                    print colored ("WARNING: sequence size $length does not exist for this cluster, ignoring it\n", "yellow");
+                }
+            }                         
+                
+            # Set the consensus parameters depending on the size of the alignment
+            if (keys %selected_sequences == 2) {
+                $MIN_FOR_POSITION = 1;
+                $CONSENSUS_LEVEL = 0.6
+            }
+            else {
+                $MIN_FOR_POSITION = 2;
+                $CONSENSUS_LEVEL = 0.6
+            }
+            
+            # Turn this fasta file into a single text file, this is so that it's consistent with the clipboard entry of fasta files.
+            my $fasta_text; 
+            foreach my $sequence_name (keys %selected_sequences){ 
+                $fasta_text .= ">$sequence_name\n" . "$selected_sequences{$sequence_name}\n";
+            }
+            if (defined $fasta_text && length $fasta_text) { 
+                ($current_nucleotide_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n', $tsd_length, $tir_length); # get the consensus
+                print colored ("\n>consensus-$selected_sequence_sizes\n$current_nucleotide_sequence\n\n", "bold");
+            }
+            else { # no sequences were selected
+                %selected_sequences = %alignment_sequences;
+                print colored "WARNING: No sequences were selected, defaulting back to selecting all sequences\n"; 
+            }
+
+            $menu1 = 1; # stay in menu 1
+            # if it's a MITE go straight to report
+            if ((length $current_nucleotide_sequence) < $MIN_AUTONOMOUS_SIZE){ 
+                $next_step = 7;
+            }
+            else {
+                $next_step = 4;
+            }
+        }
+
+        if ($menu1_choice == 4) { # user wants to search with BLASTx
+            $current_nucleotide_sequence = uc(prompt('a', "Enter the nucleotide sequence", "", "$current_nucleotide_sequence"));
+            my $program  = "blastx";
+            # try the matching to the known transposase database first
+            my $MIN_ID_PERCENTAGE = 80; # smallest percentage of match to known transpoase to report it
+            my $MIN_COVERAGE = 80; # smallest percentage of coverage known transpoase to report it
+            my $nucleotide_input_file = fasta_tempfile($current_nucleotide_sequence);
+            my $blastx_output = `blastx -db $KNOWN_TNP_DATABASE -query $nucleotide_input_file -outfmt "6 sseqid stitle pident length slen qframe"`;
+            my @blastx_array = split "\n", $blastx_output;
+            my $found_match = 0; # boolean
+            my $i=1; # used to only record the first match
+            foreach my $line (@blastx_array) {
+                my @line_elements = split "\t", $line;
+                my $coverage = 100 * ($line_elements[3]/$line_elements[4]);
+                if (($line_elements[2] >= $MIN_ID_PERCENTAGE) and ($coverage >= $MIN_COVERAGE)){
+                    if ($i == 1) { # only the first match will become the later default match
+                        $current_protein_accession = $line_elements[0]; # make the first match the default
+                        # copy the nucleotide input to the clipboard in case they want to blast it
+                        open(my $clip, "|-", "xclip -selection clipboard") or die "Can't open xclip: $!";
+                        print $clip $current_nucleotide_sequence;
+                        close($clip);
+                        print colored ("Copied nucleotide sequence to clipboard to use with BLASTx if wanted\n", "blue");
+                    }
+                    $i++; 
+                    print "The known transposase below is $line_elements[4] amino acids long, $line_elements[2]% identical, and covers $coverage% to the nucleotide input\n$line_elements[1]\n";   
+                    $found_match = 1;
+                }
+            }
+            print "\n";
+            unless ($found_match) {
+                print colored ("No matches to known transposases were found, do a BLASTX search on NCBI\n", "yellow");
+                print colored ("\nLaunching NCBI BLAST on web browser (copied nucleotide sequence to clipboard)\n\n", "blue");
+                open(my $clip, "|-", "xclip -selection clipboard") or die "Can't open xclip: $!";
+                print $clip $current_nucleotide_sequence;
+                close($clip);
+                my $url = "https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastx&PAGE_TYPE=BlastSearch&LINK_LOC=blasthome";
+                system("firefox \"$url\" 2>/dev/null &");
+            }  
+            $menu1 = 1; # stay in menu 1
+            $next_step = 5;
+        }
+
+        if ($menu1_choice == 5) { # user wants blast protein sequence to alignment
+            # Get the amino acid sequence
+            $current_protein_accession = prompt('x', "Enter either an NCBI protein identifier or input 0 to enter a protein sequence instead:", "", "$current_protein_accession");                         
+            if ($current_protein_accession) {
+                $current_protein_sequence = fetch_protein_fasta($current_protein_accession);
+            }
+            else {
+                $current_protein_sequence = prompt('x', "Enter protein sequence as a single line:", "", "$current_protein_sequence");
+            }
+
+            if ($current_protein_sequence =~ /Error\:/) {
+                warn "Error: Did not get a protein sequence\n";
+                $current_protein_sequence = 0;
+            }
+            else {
+                my $protein_inputfile_name = fasta_tempfile($current_protein_sequence);
+
+                # Copy alignment file to temporary file and remove gaps
+                my $nucleotide_inputfile_name = File::Temp->new(UNLINK => 1, SUFFIX => '.fa' ); 
+                open (OUTPUT, '>', $nucleotide_inputfile_name) or die "ERROR: Cannot create tempoary file $nucleotide_inputfile_name\n";
+                foreach my $header (keys %selected_sequences) {
+                    print OUTPUT ">" . $header . "\n";
+                    my $no_gap_sequence = $selected_sequences{$header}; # copy the relevant sequence over before changing it
+                    $no_gap_sequence =~ s/-//g; # remove gaps 
+                    print OUTPUT "$no_gap_sequence\n";
+                }
+                close OUTPUT;
+
+                # Run the blastx 
+                my $blast_output_file_name = $current_cluster_folder . "/" . "blastx-" . strftime("%m%d%y-%H%M", localtime) . ".asn";
+                `blastx -subject $protein_inputfile_name -query $nucleotide_inputfile_name -outfmt 11 > $blast_output_file_name`;
+                if ($?) { warn "WARNING running blastx locally did not work$?\n"}
+                print colored ("\nBLASTx output written to file $blast_output_file_name\n", "blue");
+                #print colored ("HINT: Display this search in using\n", "blue");
+                #print colored ("blast_formatter -archive $blast_output_file_name -outfmt 0 -html > temp.html && firefox temp.html\n\n", "bold");
+
+                # Identify the hits with the best matches and sort it by coverage
+                my $reformat_blastx_text = `blast_formatter -archive $blast_output_file_name -outfmt "6 qseqid pident length qframe"`;
+                if ($?) { die "ERROR running reformating blastx $?\n"}
+                my @reformat_blastx_array = split "\n", $reformat_blastx_text;
+                my %seen; # there will be duplicate lines, this is to remove duplicates
+                my @unique = grep { !$seen{$_}++ } @reformat_blastx_array; # there will be duplicate lines, this is to remove duplicates
+                my @sorted_blastx_array = sort { (split /\t/, $b)[2] <=> (split /\t/, $a)[2] } @unique;
+
+                # display top results
+                my $maximum_number_of_results_to_display = 10;
+                my $protein_length = length ($current_protein_sequence);
+                print colored ("Top results, sorted by match length. Protein length is $protein_length\n", "bold");
+                print colored ("Sequence name\t%identity\taa. covered\tframe\n", "bold");
+                for (my $i=0; $i<$maximum_number_of_results_to_display; $i++) {
+                    if (exists $sorted_blastx_array[$i]) {
+                        print "$sorted_blastx_array[$i]\n";
+                        if ($i==0) { # get the alignment name of the top hit for future use
+                            my @line_elements = split " ", $sorted_blastx_array[$i];
+                            $current_sequence_name = $line_elements[0];
+                        }
+                    }
+                }
+                $menu1 = 1; # stay in menu 1
+                $next_step = 6;
+            } 
+        }
+
+        if ($menu1_choice == 6) { # user wants to find transposase in nucleotide sequence 
+
+            # Get the nucleotide sequence
+            $current_sequence_name = prompt('x', "Enter either an alignment sequence name or input 0 to enter a nucleotide sequence instead:", "", "$current_sequence_name");
+            if ($current_sequence_name) {
+                if (exists $alignment_sequences{$current_sequence_name}) {
+                    # clean up the sequence
+                    $current_nucleotide_sequence = uc($alignment_sequences{$current_sequence_name});
+                    $current_nucleotide_sequence =~ s/-//g; # remove any gaps from the sequence
+                    # Remove the TSD sequences from the nucleotide sequence
+                    $current_nucleotide_sequence = substr $current_nucleotide_sequence, $tsd_length, (length $current_nucleotide_sequence) - (2*$tsd_length);
+                }
+                else {
+                    warn "Error: Did not get a nucleotide sequence\n";
+                    $current_nucleotide_sequence = 0;
+                }
+            }
+            else {
+                $current_nucleotide_sequence = uc(prompt('a', "Enter nucleotide sequence as a single line:", "", "$current_nucleotide_sequence"));
+            }
+
+            # Get the amino acid sequence but only if a nucleotide sequence was successfully obtained
+            if ($current_nucleotide_sequence) {
+                $current_protein_accession = prompt('x', "Enter either an NCBI protein identifier or input 0 to enter a protein sequence instead:", "", "$current_protein_accession");                         
+                if ($current_protein_accession) {
+                    $current_protein_sequence = fetch_protein_fasta($current_protein_accession);
+                    if ($current_protein_sequence =~ /Error\:/) { # if failed to fetch, then report to the user
+                        warn "Error: Did not get a protein sequence\n";
+                        $current_protein_sequence = 0;
+                    }
+                    else { # if did fetch the protein then remove the header sequence and spaces
+                        my @protein_array = split "\n", $current_protein_sequence;
+                        shift(@protein_array); # remove the header
+                        $current_protein_sequence = join '', @protein_array; # join back togther without white spaces
+                    }
+                }
+                else {
+                    $current_protein_sequence = prompt('x', "Enter protein sequence as a single line:", "", "$current_protein_sequence");
+                }
+            }
+            if ($current_nucleotide_sequence and $current_protein_sequence) {
+                # Run the blastx 
+                my $protein_input_file = fasta_tempfile($current_protein_sequence);
+                my $nucleotide_input_file = fasta_tempfile($current_nucleotide_sequence);
+                my $blastx_output = `blastx -subject $protein_input_file -query $nucleotide_input_file -outfmt "6 length qframe qstart qend"`;                                 
+                # Identify the longest match
+                my @blastx_array = split "\n", $blastx_output;
+                my @sorted_blastx_array = sort { (split /\t/, $b)[0] <=> (split /\t/, $a)[0] } @blastx_array;
+                my @best_blastx_parameters = split " ", $sorted_blastx_array[0]; # parameter as 0-->length, 1-->frame, 2--> start, 3-->end;
+
+                # translate the sequence and identify where the blast query start and ends in the protein
+                my $translasted_protein_start = nt_to_protein_position($current_nucleotide_sequence, $best_blastx_parameters[1], $best_blastx_parameters[2]);
+                my $translasted_protein_end = nt_to_protein_position($current_nucleotide_sequence, $best_blastx_parameters[1], $best_blastx_parameters[3]);                               
+                my $translated_sequence = translate_frame($current_nucleotide_sequence, $best_blastx_parameters[1]);
+                
+                # identify all the methionine positions upstream of the end of the blastx match
+                my @M_positions; # positions of all the methonines upstream of the blastx match
+                while ($translated_sequence =~ /M/g) {
+                    my $position = pos($translated_sequence) - 1;
+                    if ($position < $translasted_protein_end) {
+                        push @M_positions, $position;
+                    }
+                }
+                
+                # identify the stop codon closest to the end of the translated sequence
+                my $stop_codon_position=-1; # positon of the best stop codon
+                while ($translated_sequence =~ /\*/g) { # look for stop codons
+                    my $current_position = pos($translated_sequence) - 1; 
+                    # only update the best stop position if it's the first iteration (negative position) or a better postion was found
+                    if (($current_position >= $translasted_protein_end) and (($stop_codon_position > $current_position) or ($stop_codon_position < 0))){
+                        $stop_codon_position = $current_position;
+                    }
+                }
+
+                # identify all the ORFs
+                my @orfs; # the possible orf sequences
+                foreach my $met_pos (@M_positions) { 
+                    if ($stop_codon_position > 0) { # a stop was found
+                        push @orfs, substr $translated_sequence, $met_pos, $stop_codon_position - $met_pos + 1;
+                    }
+                    else { # no stop was found go to then of the translated sequence
+                        push @orfs, substr $translated_sequence, $met_pos, (length $translated_sequence) - $met_pos + 1;
+                    }
+                }
+
+                # Print the ORFs starting with a header
+                print colored ("\nPossible ORFs, fasta titles are <sequence name>-<peptide length>-<number of stop codons>:\n", "blue");
+                if ($best_blastx_parameters[1] > 0) {
+                    print colored ("Translation is on the POSITIVE strand\n", "bold");
+                    $blastx_negative_strand = 0; # update the strand of the blastx for use later
+                }
+                else {
+                    print colored ("Translation is on the NEGATIVE strand\n", "bold"); # update the strand of the blastx for use later
+                    $blastx_negative_strand = 1; 
+                }
+                my @sorted = sort { length($b) <=> length($a) } @orfs;
+                my $MAXIUM_NUMBER_OF_SEQUENCES_TO_DISPLAY = 10;
+                for (my $i=0; $i < scalar @sorted; $i++) {
+                    my $len = length $sorted[$i];
+                    my $stop_count = ($sorted[$i] =~ tr/\*/\*/); 
+                    if ($i <= $MAXIUM_NUMBER_OF_SEQUENCES_TO_DISPLAY) {
+                        print ">Seq$i-$len-$stop_count\n$sorted[$i]\n";
+                    }
+                }
+                if ($stop_codon_position) { # print from start of translation to stop
+                    my $seq = substr $translated_sequence, 0, $stop_codon_position + 1;
+                    my $len = length $seq;
+                    my $stop_count = ($seq =~ tr/\*/\*/);
+                    print ">To_first_stop-$len-$stop_count\n$seq\n";
+                }
+
+                my $len = length $translated_sequence;
+                my $stop_count = ($translated_sequence =~ tr/\*/\*/);
+                print ">Whole_sequence-$len-$stop_count\n$translated_sequence\n\n"; # print the whole thing
+            }
+            $menu1 = 1; # stay in menu 1
+            $next_step = 7;
+        }
+
+        if ($menu1_choice == 7) { # print report
+            my $notes; # text to add to the Notes section of the report   
+            my $continue_report = 1; # boolean used to abort the report if problems arrise
+            my $autonomous_element; # boolean set to 0 if it's a MITE set to 1 if it's an autonomous element 
+
+            # Figure out if this an autonomous element or a MITE
+            my $default_answer = 'y'; # default answer to the MITE vs autonomous
+            if ((length $current_nucleotide_sequence) < $MIN_AUTONOMOUS_SIZE) {
+                $default_answer = 'n';
+            }
+            $autonomous_element = prompt('y', 'Is this an autonomous element sequence?', '', $default_answer);
+            # Get the reference nucleotide sequence the user wants to use 
+            $current_sequence_name = uc(prompt('x', "Reference nucleotide sequence. Either input the name of an alignment sequence or 0 for another type of sequence: ", "", "$current_sequence_name"));
+            my $TIR1seq; # TIR sequences to use in the report
+            my $TIR2seq;
+            if ($current_sequence_name eq "0") { # user want to enter a sequence manually
+                $current_nucleotide_sequence = prompt('x', "Enter the nucleotide sequence without TSDs (-1 to abort):", "", "$current_nucleotide_sequence");
+                $current_nucleotide_sequence = uc($current_nucleotide_sequence);
+                # $tir_length = prompt('n', "Enter the length of the TIRs at the end of the sequence:", "", "$tir_length");
+                $notes .= "- Reference nucleotide sequence is not one of the alignment sequences\n";
+            }
+            elsif ($current_sequence_name eq "-1") { # user wants to abort
+                $continue_report = 0;
+            }
+            else {
+                if (exists $alignment_sequences{$current_sequence_name}) {
+                        $current_nucleotide_sequence = uc($alignment_sequences{$current_sequence_name});
+                        $current_nucleotide_sequence =~ s/-//g; # remove any gaps from the sequence
+                        $current_nucleotide_sequence = substr $current_nucleotide_sequence, $tsd_length, (length $current_nucleotide_sequence) - (2*$tsd_length); # remove the TSDs
+                        $notes .= "- Reference nucleotide sequence is $current_sequence_name\n";
+                }
+                else {
+                    print colored ("WARNING: The current alignment does not have a sequence called $current_sequence_name. This report will not be printed\n", "yellow");
+                    $continue_report = 0;
+                }
+            }
+            # Get the TIR sequences
+            if ($continue_report) {
+                $TIR1seq = substr $current_nucleotide_sequence, 0, $tir_length;
+                $TIR2seq = substr $current_nucleotide_sequence, -$tir_length, $tir_length;
+                my $rc; # boolean, set to 1 if the sequence should be reverse-complemented
+                if ($blastx_negative_strand) {
+                    $rc = prompt('y', "Should this sequence be written in the opposite orientation? (last BLASTx was on the negative strand)", "", "y");
+                }
+                else {
+                    $rc = prompt('y', "Should this sequence be written in the opposite orientation?", "", "n");
+                }
+                if ($rc) {
+                    $current_nucleotide_sequence = rc($current_nucleotide_sequence);
+                    $notes .= "- Nucleotide sequence has been reverse-complemented\n";
+                }
+            }
+
+            # Get the transposase information if it's an autonomous element
+            my $transposase;
+            if ($autonomous_element) { # only continue if it's an autonomous element 
+                if ($continue_report) {
+                    $transposase = prompt('x', "Enter the transposase sequence:", "", "none");
+                    unless ($transposase eq "none") {
+
+                        # Check that the transposase and the nucleotide sequences are in the same orientation and align well
+                        my $protein_input_file = fasta_tempfile($transposase);
+                        my $nucleotide_input_file = fasta_tempfile($current_nucleotide_sequence);
+                        my $blastx_output = `blastx -subject $protein_input_file -query $nucleotide_input_file -outfmt "6 length qframe"`;
+                        my @blastx_array = split "\n", $blastx_output;
+                        my @topline_data = split " ", $blastx_array[0];
+                        my $match_proportion = $topline_data[0]/(length $transposase);
+                        if (($topline_data[1] < 0) or ($match_proportion < 0.75)) {
+                            print colored ("WARNING: The nucleotide sequence and transposase don't seem to match:\n", "yellow");
+                            print colored ("Transpoase orientation: $topline_data[1]\n", "bold");
+                            print colored ("Proportion of transpoase mapping to nucleotide: $match_proportion\n", "bold");
+                            $continue_report = prompt('y', 'Should printing this report be continued?', '', 'n');
+                        }
+
+                        if ($continue_report) {
+                            my $default_transposase_full = 'n'; # guessing if the transposase is full length
+                            my $default_transposase_intact = 'n'; # guessing if the transposase is intact
+                            my $trimmed = substr($transposase, 0, -1); # remove the last character
+                            my $count_stops = () = $trimmed =~ /\*/g; # count the number of * characters
+                            if ($transposase =~ /^M.+\*$/) { # check that the transposes starts with M and ends with *
+                                $default_transposase_full = 'y';
+                            }
+                            if ($count_stops == 0) { # check if there are stop codons other than at the end of the transpoase
+                                $default_transposase_intact = 'y';
+                            }
+                            my $full_length_protein = prompt('y', 'Is this likely a full length transposase?', '', $default_transposase_full);
+                            if ($full_length_protein) {
+                                $notes .= "- Full length transposase\n";
+                            }
+                            else {
+                                $notes .= "- Partial transposase\n";
+                            }
+                            my $intact_protein = prompt('y', 'Is the transpoase sequence likely intact?', '', $default_transposase_intact);
+                            if ($intact_protein) {
+                                $notes .= "- Transposase sequence is intact\n";
+                            }
+                            else {
+                                $notes .= "- Transposase sequence is not intact\n";
+                            }
+                        }
+                    }
+                }
+            }
+
+            if ($continue_report) { # only continue if no fatal errors have been generated
+
+                ## Get the taxonomy
+                my @taxonomy_items = qw(Tc tigger mariner hAT other unknown blank);
+                my $taxonomy_idx = prompt('m',
+                    {
+                        title        => '',
+                        prompt       => 'Enter the taxonomy of this element:',
+                        items        => \@taxonomy_items,
+                        display_base => 1,
+                        return_base  => 1,
+                    },
+                    '',
+                    '');
+
+                my $taxonomy = $taxonomy_items[$taxonomy_idx - 1];
+                if ($taxonomy eq "other") {
+                    my $taxonomy_note = prompt('x', "taxonomy note:", "", "");
+                    $notes .= "- Taxonomy note: $taxonomy_note\n";
+                }
+
+                ## ask for notes
+                if ($notes) {
+                    print colored ("Notes for the current sequence\n", "blue");
+                    print colored ("$notes\n", "bold");
+                    print "Any additional notes? (press ENTER for none): ";
+                }
+                else {
+                    print colored ("There are no notes for this sequence", "blue");
+                    print "Add a note? (press ENTER for none): ";
+                }
+                my $input = <STDIN>;
+                chomp $input if defined $input;
+                $notes .= "- $input" if defined $input && length $input;
+
+                ## Print the report
+                # Open and read any existing report, add a title and get highest element number from existing report
+                my $write_report_title = 1;   # assume a title is needed until one is found
+                my $element_name_number = 0;
+                open(my $fh, '+>>', $cluster_report_path) or die "ERROR: Cannot open report at $cluster_report_path: $!\n";
+                seek($fh, 0, 0);   # rewind to read from the beginning
+                while (my $line = <$fh>) {
+                    $write_report_title = 0 if $line =~ /^#\sReport/;
+                    if ($line =~ /^##\sName:\s\S+-(\d+)/) {
+                        $element_name_number = $1 if $1 > $element_name_number;
+                    }
+                }
+                if ($write_report_title) {
+                    print $fh "# Report $cluster_name\n";
+                }
+
+                # element name
+                $element_name_number++;
+                print $fh "## Name: $cluster_name-$element_name_number\n";
+
+                # print the type of element
+                if ($autonomous_element) {
+                    print $fh "## Type: autonomous element\n";
+                }
+                else {
+                    print $fh "## Type: non-autonomous element\n";
+                }
+
+                print $fh "## Nucleotide sequence:\n";
+                print $fh "$current_nucleotide_sequence\n";
+                print $fh "## TSD Type: ";
+                if ($TSD_type eq "blank") {
+                    print $fh "\n";
+                }
+                else {
+                    print $fh "$TSD_type\n";
+                }
+                print $fh "## TIR sequences:\n";
+                print $fh "- 5'TIR: $TIR1seq\n";
+                print $fh "- 3'TIR: $TIR2seq\n";
+
+                if ($autonomous_element) {
+                    print $fh "## Transposase sequence:\n";
+                    print $fh "$transposase\n";
+                }
+                print $fh "## Element taxonomy: ";
+                if ($taxonomy eq "blank") {
+                    print $fh "\n";
+                }
+                else {
+                    print $fh "$taxonomy\n";
+                }
+                print $fh "## Notes:\n";
+                print $fh $notes;
+                $notes=""; # reset the notes so they don't carry to the next element 
+
+                print $fh "\n---\n"; # divider at the end of the current seqeuence
+                close ($fh);
+
+                # Update the user and the analysis log
+                print "Report for element $cluster_name-$element_name_number written/updated to file $cluster_report_path\n";
+                print ANALYSIS "\tReport written/updated to $cluster_report_path\n"; # update the analysis log
+            }
+
+            $menu1 = 1; # stay in menu 1
+            if ($continue_report) {
+                $next_step = 8;
+            }
+            else {
+                $next_step = 7;
+            }
+        }
+
+        if ($menu1_choice == 8) { # user want to edit the report
+            if (-e $cluster_report_path) { # check that a report has been generated
+                if (system("which code > /dev/null 2>&1") == 0) { # check that the text editor is available
+                    `code $cluster_report_path`;
+                } else {
+                    print colored ("ERROR: Could open the text editor appliction \"code\", make sure it is installed.\n", "red");
+                }
+            }
+            else {
+                print colored ("WARNING: No report has yet been generated for this cluster.\n", "yellow");
+            }
+            $menu1 = 1; # stay in menu 1
+            $next_step = 1;
+        }
+
+        if ($menu1_choice == 9) { # user want to select lines for the consensus
+            my $fasta_text = `xclip -selection clipboard -o 2>/dev/null`;
+            if (!defined $fasta_text || $fasta_text eq '') {
+                print colored ("Could not read clipboard. Make sure 'xclip' is installed.\n", "yellow");
+            }
+            else { 
+                ($current_nucleotide_sequence, $tsd_length, $tir_length) = consensus($fasta_text, $CONSENSUS_LEVEL, $MIN_FOR_POSITION, $RVCMP, 'n'); # get the consensus
+                # print the consensus for the user, minus the TSD sequences
+                if ($current_nucleotide_sequence) {
+                    print colored ("\n>consensus-$cluster_name-$RVCMP-$CONSENSUS_LEVEL-$MIN_FOR_POSITION\n$current_nucleotide_sequence\n\n", "bold");
+                }
+                else {
+                    print colored ("WARNING: No consensus was created.\n", "yellow");
+                }
+            }
+            $menu1 = 1; # stay in menu 1
+            $next_step = 4;
+        }
+
+        if ($menu1_choice == 10) { # the user wants extract the query sequence from BLASTx output
+            # read the data from the clipboard and check that it's ok
+            my $clipboard_text = `xclip -selection clipboard -o 2>/dev/null`; 
+            my $query_sequence;
+            if (!defined $clipboard_text) { # check that xclip is installed
+                print colored ("Could not read clipboard. Make sure 'xclip' is installed.\n", "yellow");
+            }
+            else { # data is ok
+                my @lines = split "\n", $clipboard_text;
+                for (my $i = 0; $i < @lines; $i++) {
+                    my $line = $lines[$i];
+                    if ($line =~ /^Query\s+\d+\s+(\S+)\s+\d+\s*$/) {
+                        $query_sequence .= $1;
+                    }
+                }
+            }
+            $query_sequence =~ s/-//g; # remove gaps
+            # print results
+            if ($query_sequence) {
+                print ">Query_sequence\n$query_sequence\n";
+            }
+            else {
+                print colored ("No query sequence was found in the clipboard\n", "yellow");
+                print "$clipboard_text\n";
+            }
+        }
+    }
 }
