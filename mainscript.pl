@@ -1088,7 +1088,8 @@ if ($STEP == 3) { # check if this step should be performed or not
                         close OUTPUT;
 
                         # MENU 2 display the alignement to the user and ask for evaluation
-                        `aliview $temp_alignment_file`;
+#                        `aliview $temp_alignment_file`;
+                        system("aliview \"$temp_alignment_file\" >/dev/null 2>&1 &"); 
                         if ($?) { die "Error executing: aliview $temp_alignment_file, error code $?\n"}
                         my $menu2 = 1; # boolean, set to 1 until the user is done with menu 2
 
