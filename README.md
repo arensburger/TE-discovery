@@ -8,37 +8,30 @@ The innovation of these scripts compared to alternative methods (e.g. RepeatMode
 What this script does is to start with a set of translated sequences that could potentially be transposase proteins. This set need not be too specific, for example all the identified proteins sequence from a genome sequencing project could be a starting set. The script then maps each of these proteins to the genome. Since a transposase protein would be expected to match to more than one locus in the genome, the script will focus on those proteins that map to multiple locations. Finally, the script does extensive searching in the nucleotide genome surrounding selected mapped loci, looking for the signature structures of a transposon (see figure above). The advantage of this method over purely homology based methods is that transposons with no homology to known sequences could potentially be discovered this way. Furthermore, the incorporation of human reviews maximizes the probability of high quality results at the end of the script producing a detailed and likely accurate picture of existing transposable elements. However, a downside of this methodology is that it is unlikely to discover *all* the transposable elements present in the genome. Therefore, this script should be treated as a complement, rather than a replacement, for other methods.
 
 
-The script is run as a series of steps. Every step assumes that the previous step has been successfully executed first, but the steps do not all have to be executed on the same machine. The output of each step is written to files the next step can use. This allows the script to have individual steps run on diffrent machine, giving the user some flexibility in optimizing the resources of the available machines to the computation requirements of individual steps.
+The script is run as a series of steps and the output of each step is written to files the next step can use. Every step assumes that the previous step has been successfully executed firs. This allows the script to have individual steps run on diffrent machine, giving the user some flexibility in optimizing the resources of the available machines to the computation requirements of individual steps. In particular the first step is a tBLASTn search that may be best suited to be executed on cluster with large numbers of CPUs.
 
 ### Script Overview
-The script inputs are: 1) a genome DNA sequence, 2) a list of protein sequences from that genome that could potentially be transposases.
+The starting inputs are: 1) a genome DNA sequence, 2) a list of protein sequences from that genome that could potentially be transposases (e.g. all annotated proteins).
 
 ***STEP 1 Map proteins to the genome***
 
 All the input proteins are mapped to the genome using [BLAST+ tblastn](https://pubmed.ncbi.nlm.nih.gov/20003500/). The resulting output is filtered to remove input amino acid sequences that have one or more the following features: 1) map to too few loci (transposons are expected to occur at multiple loci), 2) don't map with sufficient length and identity, 3) map exclusively to the genomic neighborhood of a single locus in the genome (a transposon is expected be found in dispersed loci). These steps are inspired from the transposable element discovery protocol described by [Goubert et al. 2022](https://mobilednajournal.biomedcentral.com/articles/10.1186/s13100-021-00259-7).
 
-***STEP 2 Scan around the proteins matches for TSD-TIR patterns***
+***STEP 2 Scan around the proteins for matches for TSD-TIR patterns***
 The genome region surrounding each of the tblastn hits (after filtering by STEP 1) is scanned for the signature structure of TSDs and TIRs. Input sequences sequences that don't show the signatures of TSD-TIR structures in engough of their genomic copies are filtered away from further analysis.
 
 ***STEP 3 Manual review of TSD-TIR structure for potential transposable elements***
 Grouped by the input protein sequences, the TSD-TIR structure of the remaining sequences is reviewed by the human user. The user determines: 1) if the TSD-TIR junctions appear to be those of a genuine transposable element, 2) what the most likely length of TSDs and TIRs appears to be for each potential transposon. 
 
-***STEP 4 Clustering and preparing for transposase analysis***
-Up to this point the script has treated each input protein sequence as a different transposon, but of course this is often wrong since the same transposase may be found at multiple loci. In this step the output of STEP 3 is clustered by TIR sequences, rather than by transposase sequence. Clustering by TIR minimizes the chances that a single transposon will end up in two different clusters. After clustering, the genomic sequences of all potential transposons are written to a single file as a FASTA formatted file.
+***STEP 4 Clustering by TIRs***
+Up to this point the script has treated each input protein sequence as a different transposon, but of course this is often wrong since the same transposase may be found at multiple loci. In this step the output of STEP 3 is clustered by TIR sequences, rather than by input protein sequence. Clustering by TIRs minimizes the chances that a single transposon will end up in two different clusters.
 
-***Evaluating transposase sequences***
-This step is not performed by the script, but rather by another specialized software suite. The genomic sequences from STEP 4 are examined using EMBL's [Interproscan](https://interproscan-docs.readthedocs.io). This will will identify possible ORFs and possible transposase motifs, such as [DDE](https://pmc.ncbi.nlm.nih.gov/articles/PMC2991504/). 
-
-***STEP 5 Combining all evidence in human readable form***
-The data from the clusters in STEP 4 is combined with evidence from Interproscan, aligned and presented in a human readable from for the user to evaluate. 
-
-***Human review of the script data***
-Based on the output of STEP 5, the user makes the final call of the most likely sequence of the original transposable element sequences that gave rise to all the partial sequences observed in the genome.
+***STEP 5 Manual evaluation of clusters and transposase description***
+The clusters from the previous step can be one of three things: 1) an autonomous TE, 2) a non-autonomous TE, 3) not a TE at all. A human user evaluates the sequences between the TIRs to clasify the cluster into one of these the categories in addition to descbiding the most likely transposase sequence using BLAST to the NCBI database
 
 ## Running the script 
 **Prerequisites**
-The scripts are written in Perl, and require a number of libraries to be installed (using CPAN for example), details of the required libraries can be found at the head of the file *mainscript.pl*. 
-In addition to this, the script will call on a number of external programs that should be installed and put into the path of the directory where the Perl script is executed. These external programs in include:
+The scripts are written in Perl, and require a number of libraries to be installed (using CPAN for example), details of the required libraries can be found at the head of the file *mainscript.pl*. In addition, the script will call on a number of external programs that should be installed and put into the path of the directory where the Perl script is executed. These external programs in include:
 - [cd-hit](https://github.com/weizhongli/cdhit/blob/master/doc/cdhit-user-guide.wiki)
 - [NCBI-BLAST+](https://blast.ncbi.nlm.nih.gov/doc/blast-help/downloadblastdata.html)
 - [bedtools](https://github.com/arq5x/bedtools2)
@@ -58,7 +51,7 @@ Where:
 	-n is the name of the current analysis 
 	-s is one of the steps to execute (step 12 can be used to execute both steps 1 and 2 consecutively)
 
-This name specified by the -n parameter can be any non-whitespace string, and will be used to identify s particular run of the script. A number of folders will be created by the script during the execution at various stages. These include:
+The name specified by the -n parameter can be any non-whitespace string, and will be used to identify a particular run of the script. A number of folders will be created by the script during the execution at various stages. These include:
 
 1. a folder called <analysis name>-element: this will contain sub-folders for each input protein sequence that makes it through filters in STEPS 1 and 2.
 2. a folder called  <analysis name>-analysis: this contain files and subfolders with information about the analysis such as parameters, detailed script output, and rejected elements (i.e. analysis of input proteins that did not pass the filters in STEPS 1 and 2), as well as intermediary sequences no longer used by the script.
@@ -95,18 +88,6 @@ When running this step the `-g` parameter (described in STEP 1) must be specifie
 ***STEP 4 parameter and file requirement*** 
 
 	-g fasta formatted file genome file; this file must have been formatted with NCBI's makeblastdb ahead of time
-
-***running Evaluating transposes sequences***
-
-This step is run using EMBL-EBI's [Interproscan](https://www.ebi.ac.uk/interpro/about/interproscan/) software from the command line. Once installed locally the program is run using the following command line:
-
-	interproscan.sh -i ./<analysis name>-clusters/<analysis name>-combined-clusters-nucleotide-sequences.fa -appl Pfam,Panther -t n -f GFF3 -o <analysis name>-Interpro.gff3 
-
-In STEP 4 a file called <analysis name>-combined-clusters-nucleotide-sequences.fa will be created in the folder <analysis name>-clusters. This file contains all the nucleotide sequences that should be evaluated for the presence of open reading frames. A single file is created for all the clusters to speed up this analysis. The output of the interproscan.sh run will be a single gff3 formatted file that contains identified ORFs, as well as protein domains matching the Pfam and PANTHER databases. 
-
-***STEP 5 parameter and file requirement*** 
-
-	-in interproscan output in GFF format; the output of the interproscan run, the file should be in the GFF format 
 
 ## Understanding analysis output folders files
 
