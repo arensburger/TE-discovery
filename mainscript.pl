@@ -1309,6 +1309,7 @@ if ($STEP == 4) { # check if this step should be performed or not
     ## Constant for this step
     my $MAX_ELEMENT_SIZE = 5000; # maximum element size
     my $GENOMIC_CONTEXT_LENGTH = 20; # number of bp. on each side of the element to use to determine if elements are duplications
+    my $BOWTIE_NUM_MISMATCHES = 2; # number of mismatches bowtie will allow
 
     # making sure all the required information has been provided
     unless ($BOWTIE_GENOME){
@@ -1321,6 +1322,7 @@ if ($STEP == 4) { # check if this step should be performed or not
     print ANALYSIS "\tBowtie index: $BOWTIE_GENOME\n";
     print ANALYSIS "\tMAX_ELEMENT_SIZE = $MAX_ELEMENT_SIZE\n";
     print ANALYSIS "\tGENOMIC_CONTEXT_LENGTH = $GENOMIC_CONTEXT_LENGTH\n";
+    print ANALYSIS "\tBOWTIE_NUM_MISMATCHES = $BOWTIE_NUM_MISMATCHES\n";
 
     ## Read the README files and identify TIRs sequences and TSD  
     # load the element information from the README files
@@ -1482,19 +1484,19 @@ if ($STEP == 4) { # check if this step should be performed or not
             print TIRSEQ ">TIR1\n$tir1_seq\n";
             print TIRSEQ ">TIR2\n$tir2_seq\n";
             close (TIRSEQ);
-            my $BOWTIE_output_file_name = File::Temp->new(UNLINK => 1); # file with output of blast
-#            `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 1e-5 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
-`cp $TIR_input_file_name /home/peter/Desktop/blast.in`;
-#            `blastn -task blastn-short -query $TIR_input_file_name -db $INPUT_GENOME -evalue 2 -dust no -soft_masking false -outfmt 6 -out $BLAST_output_file_name`;
-            `bowtie -f -v 1 -a -p $NUM_THREADS $BOWTIE_GENOME > $BOWTIE_output_file_name`;
+            my $BOWTIE_output_file_name = File::Temp->new(UNLINK => 1); # file with alignment output of bowtie
+            my $BOWTIE_run_stats = File::Temp->new(UNLINK => 1); # with the stats of the bowtie run
+            `bowtie -p $NUM_THREADS -v $BOWTIE_NUM_MISMATCHES -a -f -x $BOWTIE_GENOME $TIR_input_file_name $BOWTIE_output_file_name 2> $BOWTIE_run_stats`;
             if ($?) { die "ERROR running bowtie, error code $?\n"}
-`cp $BOWTIE_output_file_name /home/peter/Desktop/bowtie.tsv`; exit;
-            # identify sequences bound by the two TIRs
+            
+            # convert bowtie output to BED formatted files 
             my $TIR1_bed_file = File::Temp->new(UNLINK => 1); # bed file with locations of TIR1
             my $TIR2_bed_file = File::Temp->new(UNLINK => 1); # bed file with locations of TIR2
             open (TIR1_BED, ">", $TIR1_bed_file ) or die "ERROR: Cannot created file $TIR1_bed_file\n";
             open (TIR2_BED, ">", $TIR2_bed_file ) or die "ERROR: Cannot created file $TIR2_bed_file\n";
             open (INPUT, $BOWTIE_output_file_name) or die "ERROR: Cannot open file $BOWTIE_output_file_name $!\n";
+            my $T1_lines; # number of lines in the bed file, used to check that something was recorded
+            my $T2_lines; # number of lines in the bed file, used to check that something was recorded
             while (my $line = <INPUT>) {
                 my @line_elements = split "\t", $line;
                 my $b1; 
@@ -1502,31 +1504,22 @@ if ($STEP == 4) { # check if this step should be performed or not
                 my $orientation = $line_elements[1];
                 if ($orientation eq "+") {
                     $b1 = $line_elements[3];
-                    $b2 = $line_elements[3] + length ($line_elements[4]) + 1;
+                    $b2 = $line_elements[3] + length ($line_elements[4]) - 1;
                 }
                 elsif ($orientation eq "-") {
-                    $b1 = $line_elements[3] - length ($line_elements[4]) - 1;
+                    $b1 = $line_elements[3] - length ($line_elements[4]) + 1;
                     $b2 = $line_elements[3];
                 }
                 else {
                     die "Error: Could not parse bowtie line\n$line";
                 }
-                # if ($line_elements[8] < $line_elements[9]) {
-                #     $b1 = $line_elements[8];
-                #     $b2 = $line_elements[9];
-                #     $orientation = "+";
-                # }
-                # else {
-                #     $b1 = $line_elements[9];
-                #     $b2 = $line_elements[8];
-                #     $orientation = "-";
-                # }
-exit;
                 if ($line_elements[0] eq "TIR1") {
-                    print TIR1_BED "$line_elements[1]\t$b1\t$b2\tTIR1\t$line_elements[2]\t$orientation\n";
+                    print TIR1_BED "$line_elements[2]\t$b1\t$b2\tTIR1\t0\t$orientation\n";
+                    $T1_lines++;
                 }
                 elsif ($line_elements[0] eq "TIR2") {
-                    print TIR2_BED "$line_elements[1]\t$b1\t$b2\tTIR2\t$line_elements[2]\t$orientation\n";
+                    print TIR2_BED "$line_elements[2]\t$b1\t$b2\tTIR2\t0\t$orientation\n";
+                    $T2_lines++;
                 }
                 else {
                     die "ERROR: Expect all the lines in file $BOWTIE_output_file_name to start with TIR1 or TIR2, but got\n$line";
@@ -1535,8 +1528,12 @@ exit;
             close INPUT;
             close TIR1_BED;
             close TIR2_BED;
-`cp $TIR1_bed_file /home/peter/Desktop/T1.bed`;
-`cp $TIR2_bed_file /home/peter/Desktop/T2.bed`;
+
+# `cp $TIR1_bed_file /home/peter/Desktop/T1.bed`;
+# `cp $TIR2_bed_file /home/peter/Desktop/T2.bed`;
+
+            # only continue if both TIR1 and TIR2 mapped at least once to the genome each
+exit;
             # identify TIRs facing each other and remove reverse-complemented duplicate entries
             my $TIR_locations = File::Temp->new(UNLINK => 1); # has the bounds of the elements
             `bedtools window -a $TIR1_bed_file -b $TIR2_bed_file -l 0 -r $MAX_ELEMENT_SIZE -sw -sm > $TIR_locations`;
